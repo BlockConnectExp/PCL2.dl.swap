@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>PclDlSwap.Patcher</AssemblyName>
+    <RootNamespace>PclDlSwap.Patcher</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Version>26.0.1</Version>
+    <Product>PCL2 DLL-Swap patcher</Product>
+    <Company>BlockConnectExp</Company>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="dnlib" Version="4.4.0" />
+  </ItemGroup>
+</Project>

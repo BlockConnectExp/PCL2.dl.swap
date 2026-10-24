@@ -1,0 +1,4 @@
+LIBRARY PclDlSwap.Profiler
+EXPORTS
+    DllGetClassObject   PRIVATE
+    DllCanUnloadNow     PRIVATE

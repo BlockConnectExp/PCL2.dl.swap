@@ -1,0 +1,128 @@
+{
+  "schema": 1,
+  "generatedFrom": "REA static + decompiled IL of official PCL builds (no runtime observation)",
+  "patches": {
+    "ota.silent.block": {
+      "purpose": "Intercept OTA entry; when it was triggered silently (Silent=true) show an explicit, cancellable prompt instead of continuing automatically.",
+      "method": "PCL.ModSecret.UpdateStart",
+      "signature": "Void(Boolean Silent, IEnumerable<String> UrlsOverride)",
+      "note": "Private static. x86 detour installed after the host assembly is loaded; trampoline forwards non-silent calls to the original body."
+    },
+    "ota.source.gate": {
+      "purpose": "Single choke point for every PCL cloud (non-game) download: sandbox staging -> multi-engine AV scan -> only then publish to the real destination.",
+      "method": "PCL.ModNet.NetDownloadByLoader",
+      "signature": "Void(List<String> Urls, String LocalPath, LoaderBase Loader, FileChecker Checker)",
+      "note": "Static. Alternative entry: PCL.ModNet.NetDownloadByClient."
+    },
+    "permission.gate": {
+      "purpose": "Hard-deny auto-update permission checks so no silent path can slip past the block.",
+      "method": "PCL.ModSecret.get_HasUpdatePermission",
+      "signature": "Boolean()"
+    },
+    "download.gate.restore": {
+      "purpose": "2.99.0 replaced the download page loader with a stub that throws; restore the real loader so the download module (already present in the assembly) becomes usable again.",
+      "method": "PCL.PageDownloadInstall.LoaderInit",
+      "signature": "Void()",
+      "note": "2.14.0 passes ModDownload.DlClientListLoader as the 5th argument of PageLoaderInit; 2.99.0 passes a '关闭下载' LoaderTask<string, DlClientListResult> whose body throws. The page, module and DlClientListLoader all still exist in 2.99.0."
+    },
+    "download.gameflow.stub": {
+      "purpose": "Same stub family as download.gate.restore, emitted by the closure used inside LoaderInit.",
+      "method": "PCL.PageDownloadInstall/_Closure$__._Lambda$__R3-3",
+      "signature": "Void(LoaderTask<string, DlClientListResult>)"
+    }
+  },
+  "targets": [
+    {
+      "id": "v2128-snap401",
+      "role": "historical-reference-only (LoaderInit private, different token layout)",
+      "buildType": "Snapshot",
+      "version": "2.12.8.1",
+      "versionCode": 401,
+      "file": "Plain Craft Launcher 2.exe",
+      "sha256": "d4f3e8f789cfd449ae9902ccadbadf5f35f3ac1b88793db37db5744cfd158fac",
+      "mvid": "8558c9c3-b0f8-4e5c-8944-969432ccfb74",
+      "evidence": "data/methods-v2128-snap401.tsv",
+      "tokens": {
+        "PCL.ModSecret.UpdateStart": "0x06000419",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x06000420",
+        "PCL.ModSecret.UpdateRestart": "0x0600041A",
+        "PCL.ModSecret.UpdateReplace": "0x0600041B",
+        "PCL.PageDownloadInstall.LoaderInit": "0x0600050C"
+      },
+      "rva": {
+        "PCL.ModSecret.UpdateStart": "0x268f4",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x280ed",
+        "PCL.PageDownloadInstall.LoaderInit": "0x308ac"
+      }
+    },
+    {
+      "id": "v2140-rel411",
+      "role": "extraction-baseline",
+      "buildType": "Release",
+      "version": "2.14.0.0",
+      "versionCode": 411,
+      "file": "Plain Craft Launcher.exe",
+      "sha256": "5582952ded3b443503f66c23b810802bd20f1a3e847b54d9e09653a825859a36",
+      "mvid": "e6e9028d-8366-47b6-a8b0-1ce46a3e5278",
+      "evidence": "data/methods-v2140-rel411.tsv",
+      "tokens": {
+        "PCL.ModSecret.UpdateStart": "0x0600041F",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x06000426",
+        "PCL.ModSecret.UpdateCheckByButton": "0x0600041E",
+        "PCL.ModSecret.UpdateRestart": "0x06000420",
+        "PCL.ModSecret.UpdateReplace": "0x06000421",
+        "PCL.PageDownloadInstall.LoaderInit": "0x06000513"
+      },
+      "rva": {
+        "PCL.ModSecret.UpdateStart": "0x24b50",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x26294",
+        "PCL.PageDownloadInstall.LoaderInit": "0x2e010"
+      }
+    },
+    {
+      "id": "v2140-snap412",
+      "role": "extraction-alternate",
+      "buildType": "Snapshot",
+      "version": "2.14.0.0",
+      "versionCode": 412,
+      "file": "快照版 2.14.0.0.exe",
+      "sha256": "77fbc26a13abf725dbd26038cba023224c2ce5518f3ee9c4608acb2274d753f0",
+      "mvid": "2a08e6c9-87e4-41c0-b237-17bd168c67fe",
+      "evidence": "data/methods-v2140-snap412.tsv",
+      "tokens": {
+        "PCL.ModSecret.UpdateStart": "0x0600041F",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x06000426",
+        "PCL.PageDownloadInstall.LoaderInit": "0x06000513"
+      },
+      "rva": {
+        "PCL.ModSecret.UpdateStart": "0x24f38",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x2660d",
+        "PCL.PageDownloadInstall.LoaderInit": "0x2e6d4"
+      }
+    },
+    {
+      "id": "v299-rel413",
+      "role": "primary-injection-target",
+      "buildType": "Release",
+      "version": "2.99.0.0",
+      "versionCode": 413,
+      "file": "Plain Craft Launcher 2.exe",
+      "sha256": "6b6e1260cb5a1d6a303855f1c60cab3d0bc1aebba7e40a964180188b271e7386",
+      "mvid": "926d447e-daff-4169-8c64-adc3d37d5f78",
+      "evidence": "data/methods-v299-rel413.tsv",
+      "tokens": {
+        "PCL.ModSecret.UpdateStart": "0x0600041F",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x06000426",
+        "PCL.ModSecret.UpdateCheckByButton": "0x0600041E",
+        "PCL.ModSecret.UpdateRestart": "0x06000420",
+        "PCL.ModSecret.UpdateReplace": "0x06000421",
+        "PCL.PageDownloadInstall.LoaderInit": "0x06000513"
+      },
+      "rva": {
+        "PCL.ModSecret.UpdateStart": "0x249f4",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x26138",
+        "PCL.PageDownloadInstall.LoaderInit": "0x2deb4"
+      }
+    }
+  ]
+}

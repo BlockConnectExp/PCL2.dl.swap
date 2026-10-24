@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>PclDlSwap.Loader</AssemblyName>
+    <RootNamespace>PclDlSwap.Loader</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Version>26.0.1</Version>
+    <Product>PCL2 DLL-Swap loader</Product>
+    <Company>BlockConnectExp</Company>
+    <NoWarn>CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PclDlSwap.Patcher\PclDlSwap.Patcher.csproj" />
+    <ProjectReference Include="..\PclDlSwap.Payload\PclDlSwap.Payload.csproj" />
+  </ItemGroup>
+</Project>

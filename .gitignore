@@ -1,0 +1,22 @@
+# build output
+bin/
+obj/
+dist/
+*.pdb
+*.lib
+*.exp
+*.user
+.vs/
+
+# native profiler intermediate
+src/PclDlSwap.Profiler/obj/
+src/PclDlSwap.Profiler/*.obj
+
+# local runtime artefacts
+logs/
+config/swap.config.json
+
+# reverse-engineering working material (kept in the research workspace, not shipped)
+samples/
+_scratch/
+*.bundle

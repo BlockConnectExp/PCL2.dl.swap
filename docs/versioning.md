@@ -47,7 +47,9 @@ pcl2swap-2.99.0-v26.0-Alpha1.dll
 The tag and the displayed release name keep the canonical spaced form:
 
 ```
-v26.0-Alpha 1
+display name : v26.0-Alpha 1
+git tag      : v26.0-Alpha1     (git refnames cannot contain a space)
+release file : PCL2.dl.swap-v26.0-Alpha1.zip
 ```
 
 ## 3 Branches and Releases

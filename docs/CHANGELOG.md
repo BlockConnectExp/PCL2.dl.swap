@@ -8,7 +8,7 @@
 ---
 ## 2026.10.25-00:30:00 Repository rebuild and first Pre-Release
 
-GitCommitHash: (this commit)
+GitCommitHash: 9c66ae7
 
 ChangedFiles:
 ```
@@ -41,7 +41,7 @@ version: v26.0-Alpha 1
 
 ## 2026.10.24-23:00:00 Initial implementation
 
-GitCommitHash: (superseded by the rebuild)
+GitCommitHash: (pre-rebuild history, not retained)
 
 ChangLog:
 Num|File Name|Change Description|Change Time|Changer
@@ -58,3 +58,4 @@ License: MIT
 GitHub@BlockConnectExp
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+

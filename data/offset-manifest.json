@@ -53,6 +53,9 @@
       "rva": {
         "PCL.ModSecret.UpdateStart": "0x24b50",
         "PCL.ModSecret.get_HasUpdatePermission": "0x26294",
+        "PCL.ModSecret.UpdateCheckByButton": "0x24a7c",
+        "PCL.ModSecret.UpdateRestart": "0x24cd4",
+        "PCL.ModSecret.UpdateReplace": "0x24e10",
         "PCL.PageDownloadInstall.LoaderInit": "0x2e010"
       }
     },
@@ -74,6 +77,9 @@
       "rva": {
         "PCL.ModSecret.UpdateStart": "0x24f38",
         "PCL.ModSecret.get_HasUpdatePermission": "0x2660d",
+        "PCL.ModSecret.UpdateCheckByButton": "0x24e64",
+        "PCL.ModSecret.UpdateRestart": "0x250bc",
+        "PCL.ModSecret.UpdateReplace": "0x251f8",
         "PCL.PageDownloadInstall.LoaderInit": "0x2e6d4"
       }
     },
@@ -98,6 +104,9 @@
       "rva": {
         "PCL.ModSecret.UpdateStart": "0x249f4",
         "PCL.ModSecret.get_HasUpdatePermission": "0x26138",
+        "PCL.ModSecret.UpdateCheckByButton": "0x24920",
+        "PCL.ModSecret.UpdateRestart": "0x24b78",
+        "PCL.ModSecret.UpdateReplace": "0x24cb4",
         "PCL.PageDownloadInstall.LoaderInit": "0x2deb4"
       }
     },

@@ -33,12 +33,21 @@
 | `data/offset-manifest.json` | per-build tokens and RVAs (6 methods × 4 builds) |
 | `PclDlSwap.Profiler.dll` | optional native CLR profiler (experimental, see limitations) |
 
+### Follow-up bundle: `pcl2swap-2.99.0.1-v26.0-Alpha1.zip`
+
+Same loader, payload and patch engine, with the offset manifest extended to build 415. Upstream
+2.99.0.1 is a positional rebuild: the three patched methods are byte-identical to 2.99.0.0, every
+tracked token is unchanged and the RVAs moved 42-244 bytes, so per this repository's policy the
+bundle is attached here instead of opening a new release. A single loader bundle covers both
+2.99.0.0 and 2.99.0.1 because the manifest ships all retained builds.
+
 ## Build Information
 
 | Item | Value |
 |---|---|
 | Tool version | `v26.0-Alpha 1` |
 | Validated target | PCL 2.99.0.0 Release, VersionCode 413 |
+| Also validated | PCL 2.99.0.1 Release, VersionCode 415 (`pcl2swap-2.99.0.1-v26.0-Alpha1.zip`) |
 | Validated baseline | PCL 2.14.0.0 Release, VersionCode 411 |
 | Target SHA-256 | `6b6e1260cb5a1d6a303855f1c60cab3d0bc1aebba7e40a964180188b271e7386` |
 | Target MVID | `926d447e-daff-4169-8c64-adc3d37d5f78` |
@@ -81,3 +90,4 @@ License: MIT
 GitHub@BlockConnectExp
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+

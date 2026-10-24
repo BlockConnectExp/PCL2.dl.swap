@@ -79,4 +79,4 @@ Get-ChildItem $dist -Recurse -File | ForEach-Object {
 
 Write-Host '[build] done'
 
-<!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+# GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

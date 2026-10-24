@@ -59,6 +59,20 @@
 2. The in-process CLR profiler does not initialise on .NET Framework 4.8 x86.
 3. No third-party engine (ClamAV / VirusTotal / MetaDefender Cloud) was configured during validation.
 
+## 6 Follow-up Artifacts
+
+This release is kept open for offset-only adaptations of new official builds (repository policy:
+attach an extra bundle instead of opening a new release).
+
+| Artifact | Target build | Date | Notes |
+|---|---|---|---|
+| `PCL2.dl.swap-v26.0-Alpha1.zip` | PCL 2.99.0.0 (413) | 2026-10-25 | initial bundle |
+| `source-v26.0-Alpha1.zip` | same commit | 2026-10-25 | source archive |
+| `pcl2swap-2.99.0.1-v26.0-Alpha1.zip` | PCL 2.99.0.1 (415) | 2026-10-25 | offset-only adaptation: loader bundle with the updated `data/offset-manifest.json` |
+
+The 2.99.0.1 bundle reuses the same loader, payload and patch engine: no code changed, only the
+offset manifest gained the new build's coordinates. Evidence is in `docs/REA-analysis.md` §14.
+
 ---
 
 License: MIT

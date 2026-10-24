@@ -40,4 +40,4 @@ $watermark = if ($isOrganization) { "GitHub@$owner | $display@$login" } else { "
 
 if ($Canonical) { $watermark } else { "<!-- $watermark -->" }
 
-<!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+# GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

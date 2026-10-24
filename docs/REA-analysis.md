@@ -14,12 +14,13 @@
 
 | Ref | Version | Build type | VersionCode | File | SHA-256 | MVID |
 |---|---|---|---|---|---|---|
-| S1 | 2.12.8.1 | Snapshot | 401 | `Plain Craft Launcher 2.exe` | `d4f3e8f789cfd449ae9902ccadbadf5f35f3ac1b88793db37db5744cfd158fac` | `8558c9c3-b0f8-4e5c-8944-969432ccfb74` |
-| S2 | 2.14.0.0 | **Release (extraction baseline)** | 411 | `Plain Craft Launcher.exe` | `5582952ded3b443503f66c23b810802bd20f1a3e847b54d9e09653a825859a36` | `e6e9028d-8366-47b6-a8b0-1ce46a3e5278` |
-| S3 | 2.14.0.0 | Snapshot | 412 | `快照版 2.14.0.0.exe` | `77fbc26a13abf725dbd26038cba023224c2ce5518f3ee9c4608acb2274d753f0` | `2a08e6c9-87e4-41c0-b237-17bd168c67fe` |
-| S4 | 2.99.0.0 | **Release (injection target)** | 413 | `Plain Craft Launcher 2.exe` | `6b6e1260cb5a1d6a303855f1c60cab3d0bc1aebba7e40a964180188b271e7386` | `926d447e-daff-4169-8c64-adc3d37d5f78` |
+| S1 | 2.14.0.0 | **Release (extraction baseline)** | 411 | `Plain Craft Launcher.exe` | `5582952ded3b443503f66c23b810802bd20f1a3e847b54d9e09653a825859a36` | `e6e9028d-8366-47b6-a8b0-1ce46a3e5278` |
+| S2 | 2.14.0.0 | Snapshot | 412 | `快照版 2.14.0.0.exe` | `77fbc26a13abf725dbd26038cba023224c2ce5518f3ee9c4608acb2274d753f0` | `2a08e6c9-87e4-41c0-b237-17bd168c67fe` |
+| S3 | 2.99.0.0 | Release | 413 | `Plain Craft Launcher 2.exe` | `6b6e1260cb5a1d6a303855f1c60cab3d0bc1aebba7e40a964180188b271e7386` | `926d447e-daff-4169-8c64-adc3d37d5f78` |
+| S4 | 2.99.0.1 | **Release (latest, primary target)** | 415 | `Plain Craft Launcher 2.exe` | `0db34e19d9eeb6d496d20fabe786ec16bbd36ba6b0ccdc8d29cb7e909c114397` | `5613aa62-1c0b-400f-9223-ece05dc28bef` |
 
-All four are PE32 / x86 / .NET Framework 4.8 managed assemblies (72-byte CLI header, `il-only`),
+The repository keeps the latest five official builds; older entries are retired when a new one lands
+(2.12.8.1 build 401 was the first to be retired). All entries are PE32 / x86 / .NET Framework 4.8 managed assemblies (72-byte CLI header, `il-only`),
 so both module extraction and patching happen at the managed layer.
 
 ## 2 Assembly and Resource Shape
@@ -228,4 +229,41 @@ dotnet run -c Release -- data\offset-manifest.json <sample.exe>...
 dotnet run -c Release -- <sample.exe> tmp --il <Type> <Method>
 ```
 
+## 14 Build 2.99.0.1 — Offset-Only Adaptation (2026-10-25)
+
+Upstream published `2.99.0.1 正式版` (VersionCode **415**, commit `93ede5d`, upstream file date
+2026-10-24). Assessment against 2.99.0.0:
+
+| Evidence | Result |
+|---|---|
+| `PageDownloadInstall.LoaderInit` IL | 31 lines, **0 differences** |
+| `ModSecret.UpdateStart` IL | 119 lines, **0 differences** |
+| `ModSecret.get_HasUpdatePermission` IL | 3 lines, **0 differences** |
+| Tracked method tokens | identical (`0x0600041F`, `0x06000513`, …) |
+| Tracked RVAs | shifted 42–244 bytes |
+| Whole method-name set | 6342 vs 6340 rows; the delta is `LabResource` accessors and renamed lambdas, unrelated to downloading |
+
+Conclusion: **no substantive change** — this is a positional rebuild, so per this repository's
+policy the new build is served by attaching an extra artifact bundle to the existing release
+instead of opening a new one.
+
+Fresh coordinates for build 415:
+
+| Method | Token | RVA |
+|---|---|---|
+| `PCL.ModSecret.UpdateStart` | `0x0600041F` | `0x249F4` |
+| `PCL.ModSecret.get_HasUpdatePermission` | `0x06000426` | `0x261CC` |
+| `PCL.ModSecret.UpdateCheckByButton` | `0x0600041E` | `0x24920` |
+| `PCL.ModSecret.UpdateRestart` | `0x06000420` | `0x24B78` |
+| `PCL.ModSecret.UpdateReplace` | `0x06000421` | `0x24CB4` |
+| `PCL.PageDownloadInstall.LoaderInit` | `0x06000513` | `0x2DF48` |
+
+End-to-end: patched 2.99.0.1 launches and reports `正式版 2.99.0.1 (415)` from the patched path.
+
+### Retention
+
+The manifest keeps **at most the latest five** official builds. Adding build 415 retired
+2.12.8.1 build 401 (the oldest entry, previously kept only as a historical reference).
+
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+

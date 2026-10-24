@@ -33,29 +33,6 @@
   },
   "targets": [
     {
-      "id": "v2128-snap401",
-      "role": "historical-reference-only (LoaderInit private, different token layout)",
-      "buildType": "Snapshot",
-      "version": "2.12.8.1",
-      "versionCode": 401,
-      "file": "Plain Craft Launcher 2.exe",
-      "sha256": "d4f3e8f789cfd449ae9902ccadbadf5f35f3ac1b88793db37db5744cfd158fac",
-      "mvid": "8558c9c3-b0f8-4e5c-8944-969432ccfb74",
-      "evidence": "data/methods-v2128-snap401.tsv",
-      "tokens": {
-        "PCL.ModSecret.UpdateStart": "0x06000419",
-        "PCL.ModSecret.get_HasUpdatePermission": "0x06000420",
-        "PCL.ModSecret.UpdateRestart": "0x0600041A",
-        "PCL.ModSecret.UpdateReplace": "0x0600041B",
-        "PCL.PageDownloadInstall.LoaderInit": "0x0600050C"
-      },
-      "rva": {
-        "PCL.ModSecret.UpdateStart": "0x268f4",
-        "PCL.ModSecret.get_HasUpdatePermission": "0x280ed",
-        "PCL.PageDownloadInstall.LoaderInit": "0x308ac"
-      }
-    },
-    {
       "id": "v2140-rel411",
       "role": "extraction-baseline",
       "buildType": "Release",
@@ -122,6 +99,33 @@
         "PCL.ModSecret.UpdateStart": "0x249f4",
         "PCL.ModSecret.get_HasUpdatePermission": "0x26138",
         "PCL.PageDownloadInstall.LoaderInit": "0x2deb4"
+      }
+    },
+    {
+      "id": "v2990_1-rel415",
+      "role": "primary-injection-target",
+      "buildType": "Release",
+      "version": "2.99.0.1",
+      "versionCode": 415,
+      "file": "Plain Craft Launcher 2.exe",
+      "sha256": "0db34e19d9eeb6d496d20fabe786ec16bbd36ba6b0ccdc8d29cb7e909c114397",
+      "mvid": "5613aa62-1c0b-400f-9223-ece05dc28bef",
+      "evidence": "data/methods-v2990-1-rel414.tsv",
+      "tokens": {
+        "PCL.ModSecret.UpdateStart": "0x0600041f",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x06000426",
+        "PCL.ModSecret.UpdateCheckByButton": "0x0600041e",
+        "PCL.ModSecret.UpdateRestart": "0x06000420",
+        "PCL.ModSecret.UpdateReplace": "0x06000421",
+        "PCL.PageDownloadInstall.LoaderInit": "0x06000513"
+      },
+      "rva": {
+        "PCL.ModSecret.UpdateStart": "0x249f4",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x261cc",
+        "PCL.ModSecret.UpdateCheckByButton": "0x24920",
+        "PCL.ModSecret.UpdateRestart": "0x24b78",
+        "PCL.ModSecret.UpdateReplace": "0x24cb4",
+        "PCL.PageDownloadInstall.LoaderInit": "0x2df48"
       }
     }
   ]

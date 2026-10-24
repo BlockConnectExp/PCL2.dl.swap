@@ -17,4 +17,4 @@ struct PlanEntry
 std::vector<PlanEntry> LoadRewritePlan();
 
 
-<!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+// GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

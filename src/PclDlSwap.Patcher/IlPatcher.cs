@@ -276,4 +276,4 @@ namespace PclDlSwap.Patcher
 }
 
 
-<!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+// GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

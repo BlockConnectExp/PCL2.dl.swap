@@ -36,4 +36,4 @@ namespace PclDlSwap.ScannerSmoke
 }
 
 
-<!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+// GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

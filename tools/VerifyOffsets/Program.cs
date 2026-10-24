@@ -116,4 +116,4 @@ static string Sha256(string path)
 }
 
 
-<!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+// GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

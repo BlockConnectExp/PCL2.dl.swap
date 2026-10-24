@@ -43,4 +43,4 @@ dir "%OUT%\PclDlSwap.Profiler.dll" | findstr /C:"PclDlSwap.Profiler.dll"
 popd
 endlocal
 
-<!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+# GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

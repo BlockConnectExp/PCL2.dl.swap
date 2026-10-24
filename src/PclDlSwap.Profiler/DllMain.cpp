@@ -101,4 +101,4 @@ extern "C" HRESULT __stdcall DllGetClassObjectWrapper(REFCLSID clsid, REFIID rii
 }
 
 
-<!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
+// GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

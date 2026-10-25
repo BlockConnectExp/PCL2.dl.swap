@@ -237,24 +237,54 @@ namespace PclDlSwap.ExLoaderHarness
             checks.Add(("feedback routing asks the host dialog first", feedbackRouted,
                 "msgBoxCalls=" + PCL.ModMain.MsgBoxCalls + " originalCalls=" + Probes.FeedbackCalls));
 
-            int liBefore = Probes.LoaderInitCalls;
+            // -- LoaderInit: the real download loader must be re-driven with live page controls --
+            Console.WriteLine("[step] LoaderInit re-drive ...");
+            PCL.MyPageRight.LoaderInitCalls = 0;
+            PCL.PageDownloadInstall.ControlInitCalls = 0;
+            PCL.PageDownloadInstall.OnFinishCalls = 0;
             var installer = new PCL.PageDownloadInstall();
             installer.LoaderInit();
-            checks.Add(("LoaderInit hook falls back to the original",
-                Probes.LoaderInitCalls == liBefore + 1,
-                "calls=" + Probes.LoaderInitCalls));
+            var loaderOk = PCL.MyPageRight.LoaderInitCalls == 1 &&
+                           PCL.MyPageRight.LastLoaderUi != null &&
+                           PCL.MyPageRight.LastPanLoader != null &&
+                           PCL.MyPageRight.LastPanContent != null &&
+                           PCL.PageDownloadInstall.OnFinishCalls == 1;
+            Console.WriteLine("[step] LoaderInit returned; PageLoaderInit calls=" +
+                              PCL.MyPageRight.LoaderInitCalls + ", onFinish=" +
+                              PCL.PageDownloadInstall.OnFinishCalls + ", controls resolved=" +
+                              (PCL.MyPageRight.LastLoaderUi != null) + "/" +
+                              (PCL.MyPageRight.LastPanLoader != null) + "/" +
+                              (PCL.MyPageRight.LastPanContent != null));
+            checks.Add(("LoaderInit re-drives the real loader with live controls", loaderOk,
+                "pageLoaderInit=" + PCL.MyPageRight.LoaderInitCalls +
+                " onFinish=" + PCL.PageDownloadInstall.OnFinishCalls));
 
-            int sbBefore = Probes.SidebarCtorCalls;
+            // -- poll-based UI repairs: give both watchers a page to find --
+            Console.WriteLine("[step] poll-based sidebar/About repairs ...");
             var sidebar = new PCL.PageDownloadLeft();
-            checks.Add(("sidebar constructor trampoline runs the original",
-                Probes.SidebarCtorCalls == sbBefore + 1,
-                "calls=" + Probes.SidebarCtorCalls));
-
-            int aboutBefore = Probes.AboutCtorCalls;
             var about = new PCL.PageOtherAbout();
-            checks.Add(("About constructor trampoline runs the original",
-                Probes.AboutCtorCalls == aboutBefore + 1,
-                "calls=" + Probes.AboutCtorCalls));
+            PCL.ModMain.FrmDownloadLeft = sidebar;
+            PCL.ModMain.FrmOtherAbout = about;
+            var pollDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTime.UtcNow < pollDeadline)
+            {
+                if (sidebar.ItemInstall.Visibility == PCL.StubVisibility.Visible &&
+                    sidebar.PageID == PCL.FormMain.PageSubType.Default &&
+                    about.PanMain.Children.Count == 2)
+                    break;
+                Thread.Sleep(100);
+            }
+            checks.Add(("sidebar poller restores the collapsed entry",
+                sidebar.ItemInstall.Visibility == PCL.StubVisibility.Visible &&
+                sidebar.PageID == PCL.FormMain.PageSubType.Default &&
+                sidebar.ItemMod.Checked == false,
+                "visibility=" + sidebar.ItemInstall.Visibility + " pageId=" + sidebar.PageID +
+                " modChecked=" + sidebar.ItemMod.Checked));
+            checks.Add(("About poller inserts the brand row",
+                about.PanMain.Children.Count == 2 &&
+                about.PanMain.Children[1] is PCL.MyListItem &&
+                ((PCL.MyListItem)about.PanMain.Children[1]).Title == "PCL2 Swap By BlockConnect",
+                "children=" + about.PanMain.Children.Count));
 
             // keep the instances alive past the checks (the JIT must not see them as dead stores)
             GC.KeepAlive(sidebar);
@@ -636,36 +666,149 @@ namespace PCL
         }
     }
 
-    /// <summary>Stand-in for PCL.PageDownloadInstall.</summary>
-    public class PageDownloadInstall
+    /// <summary>Stand-in for PCL.LoaderTask&lt;TIn, TOut&gt; (the download list loader's shape).</summary>
+    public class LoaderTask<TIn, TOut>
     {
+    }
+
+    /// <summary>Stand-in for PCL.MyPageRight, carrying the real PageLoaderInit&lt;,&gt; generic shape.</summary>
+    public class MyPageRight
+    {
+        public static int LoaderInitCalls;
+        public static object LastLoaderUi;
+        public static object LastPanLoader;
+        public static object LastPanContent;
+        public static object LastRealLoader;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void PageLoaderInit<TIn, TOut>(object loaderUi, object panLoader, object panContent, object panAlways,
+            LoaderTask<TIn, TOut> realLoader, Action<LoaderTask<TIn, TOut>> finished, Func<TIn> input, bool autoRun)
+        {
+            LoaderInitCalls++;
+            LastLoaderUi = loaderUi;
+            LastPanLoader = panLoader;
+            LastPanContent = panContent;
+            LastRealLoader = realLoader;
+            var pad = "harness.pageloaderinit." + autoRun;
+            if (pad.Length > 0 && finished != null) finished(realLoader);
+        }
+    }
+
+    /// <summary>Stand-in for PCL.ModDownload (the built-in download module that must stay reachable).</summary>
+    public static class ModDownload
+    {
+        public static object DlClientListLoader = new LoaderTask<string, object>();
+        public static int DlClientListMainCalls;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static void DlClientListMain(object context)
+        {
+            var pad = "harness.dlclientlist." + (context == null ? 0 : 1);
+            DlClientListMainCalls += pad.Length > 0 ? 1 : 0;
+        }
+    }
+
+    /// <summary>Stand-in for PCL.PageDownloadInstall.</summary>
+    public class PageDownloadInstall : MyPageRight
+    {
+        // The real members are VB.NET properties; deliver the same shape so the member reader is tested.
+        public object LoadMinecraft { get; } = new object();
+        public object PanLoad { get; } = new object();
+        public object PanAllBack { get; } = new object();
+        public static int ControlInitCalls;
+        public static int OnFinishCalls;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void ControlInit()
+        {
+            var pad = "harness.controlinit." + GetHashCode();
+            ControlInitCalls += pad.Length > 0 ? 1 : 0;
+        }
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         public void LoaderInit()
         {
-            var pad = "pcl2swap.harness.loaderinit." + GetHashCode();
+            // Carry the 2.99 gate marker so the install-time stub probe accepts this build.
+            var marker = "关闭下载";
+            var pad = "pcl2swap.harness.loaderinit." + marker.Length + GetHashCode();
             PclDlSwap.ExLoaderHarness.Probes.LoaderInitCalls += pad.Length > 0 ? 1 : 0;
         }
-    }
 
-    /// <summary>Stand-in for PCL.PageDownloadLeft.</summary>
-    public class PageDownloadLeft
-    {
         [MethodImpl(MethodImplOptions.NoInlining)]
-        public PageDownloadLeft()
+        public void LoadMinecraft_OnFinish()
         {
-            var pad = "pcl2swap.harness.sidebar." + GetHashCode();
-            PclDlSwap.ExLoaderHarness.Probes.SidebarCtorCalls += pad.Length > 0 ? 1 : 0;
+            var pad = "harness.onfinish";
+            OnFinishCalls += pad.Length > 0 ? 1 : 0;
         }
     }
 
-    /// <summary>Stand-in for PCL.PageOtherAbout.</summary>
+    /// <summary>WPF-free visibility enum for the sidebar stub.</summary>
+    public enum StubVisibility
+    {
+        Visible,
+        Collapsed,
+        Hidden
+    }
+
+    /// <summary>Stand-in for PCL.MyListItem with the members the branding row sets.</summary>
+    public class MyListItem
+    {
+        public string Title { get; set; }
+        public string Info { get; set; }
+        public string Logo { get; set; }
+    }
+
+    /// <summary>Stand-in for PCL.FormMain carrying the PageSubType enum.</summary>
+    public class FormMain
+    {
+        public enum PageSubType
+        {
+            Default,
+            Mod,
+            Pack
+        }
+    }
+
+    /// <summary>Minimal children collection mirroring UIElementCollection's IndexOf/Insert surface.</summary>
+    public class FakeChildren
+    {
+        private readonly List<object> _items = new List<object>();
+        public int Count => _items.Count;
+        public object this[int index] => _items[index];
+        public int IndexOf(object item) => _items.IndexOf(item);
+        public void Insert(int index, object item) => _items.Insert(index, item);
+    }
+
+    /// <summary>Stand-in for the StackPanel that hosts the About page rows.</summary>
+    public class FakePanel
+    {
+        public FakeChildren Children { get; } = new FakeChildren();
+    }
+
+    /// <summary>Row stub for the sidebar entries.</summary>
+    public class StubItem
+    {
+        public StubVisibility Visibility { get; set; } = StubVisibility.Collapsed;
+        public bool Checked { get; set; } = true;
+    }
+
+    /// <summary>Stand-in for PCL.PageDownloadLeft (members are VB.NET properties on the real class).</summary>
+    public class PageDownloadLeft
+    {
+        public StubItem ItemInstall { get; } = new StubItem { Visibility = StubVisibility.Collapsed };
+        public StubItem ItemMod { get; } = new StubItem { Checked = true };
+        public FormMain.PageSubType PageID = FormMain.PageSubType.Mod;
+    }
+
+    /// <summary>Stand-in for PCL.PageOtherAbout with the properties the branding insert reads.</summary>
     public class PageOtherAbout
     {
-        [MethodImpl(MethodImplOptions.NoInlining)]
+        public FakePanel PanMain { get; } = new FakePanel();
+        public MyListItem ItemAboutPcl { get; } = new MyListItem();
+
         public PageOtherAbout()
         {
-            var pad = "pcl2swap.harness.about." + GetHashCode();
-            PclDlSwap.ExLoaderHarness.Probes.AboutCtorCalls += pad.Length > 0 ? 1 : 0;
+            PanMain.Children.Insert(0, ItemAboutPcl);
         }
     }
 
@@ -686,6 +829,10 @@ namespace PCL
     /// </summary>
     public static class ModMain
     {
+        // Lazy page references the pollers watch (the real launcher news these up on first visit).
+        public static PageDownloadLeft FrmDownloadLeft;
+        public static PageOtherAbout FrmOtherAbout;
+
         public static int MsgBoxCalls;
         public static int NextResult;
         public static string LastCaption;

@@ -51,6 +51,7 @@ namespace PclDlSwap.Patcher
             using (var module = ModuleDefMD.Load(sourcePath))
             {
                 RewriteDownloadGate(module, result);
+                RewriteDownloadSidebar(module, result);
                 RewriteSilentOta(module, result);
                 RewriteUpdatePermission(module, result);
 
@@ -164,6 +165,144 @@ namespace PclDlSwap.Patcher
             result.Rewrites++;
             result.Notes.Add("PageDownloadInstall.LoaderInit -> 恢复 ModDownload.DlClientListLoader");
             _log(result.Notes[result.Notes.Count - 1]);
+        }
+
+        // ------------------------------------------------------------------ 1b. download sidebar
+
+        /// <summary>
+        /// 2.99.0.1 hides the "原版游戏" (vanilla) entry at runtime: its PageDownloadLeft constructor
+        /// collapses <c>ItemInstall</c> right after InitializeComponent, switches the default sub-page
+        /// to DownloadMod and checks the Mod entry. Those default-page statements are removed so the
+        /// sidebar matches 2.99.0.0 again; the loader rewrite above then makes the entry functional.
+        ///
+        /// <c>LabResource.Visibility = Collapsed</c> (also new in 2.99.0.1) is left untouched: it is an
+        /// official element of the new layout, not part of the download gate.
+        /// </summary>
+        private void RewriteDownloadSidebar(ModuleDefMD module, PatchResult result)
+        {
+            var type = FindType(module, "PCL.PageDownloadLeft");
+            // Note: dnlib reports the hidden 'this' slot among MethodDef.Parameters, so the instance
+            // constructor must not be filtered by parameter count (it would show as 1, not 0).
+            var ctor = type?.Methods.FirstOrDefault(m => m.Name == ".ctor");
+            if (ctor?.Body == null)
+            {
+                result.Notes.Add("未找到 PageDownloadLeft 构造函数，下载侧栏重写跳过。");
+                _log(result.Notes[result.Notes.Count - 1]);
+                return;
+            }
+
+            var instructions = ctor.Body.Instructions;
+            int initIndex = -1;
+            for (int i = 0; i < instructions.Count; i++)
+            {
+                if ((instructions[i].OpCode == OpCodes.Call || instructions[i].OpCode == OpCodes.Callvirt) &&
+                    instructions[i].Operand is IMethod method && method.Name == "InitializeComponent")
+                {
+                    initIndex = i;
+                    break;
+                }
+            }
+
+            if (initIndex < 0)
+            {
+                result.Notes.Add("PageDownloadLeft 构造函数中未找到 InitializeComponent 调用，下载侧栏重写跳过。");
+                _log(result.Notes[result.Notes.Count - 1]);
+                return;
+            }
+
+            var remove = new SortedSet<int>();
+
+            for (int i = initIndex + 1; i + 3 < instructions.Count; i++)
+            {
+                // ldarg.0; call get_ItemInstall; ldc.i4.2 (Collapsed); callvirt set_Visibility
+                if (instructions[i].OpCode == OpCodes.Ldarg_0 &&
+                    IsCallNamed(instructions[i + 1], "get_ItemInstall") &&
+                    IsLoadInt32(instructions[i + 2], 2) &&
+                    IsCallNamed(instructions[i + 3], "set_Visibility"))
+                {
+                    for (int k = 0; k < 4; k++) remove.Add(i + k);
+                    i += 3;
+                    continue;
+                }
+
+                // ldarg.0; call get_ItemMod; ldc.i4.1 (true); callvirt set_Checked
+                if (instructions[i].OpCode == OpCodes.Ldarg_0 &&
+                    IsCallNamed(instructions[i + 1], "get_ItemMod") &&
+                    IsLoadInt32(instructions[i + 2], 1) &&
+                    IsCallNamed(instructions[i + 3], "set_Checked"))
+                {
+                    for (int k = 0; k < 4; k++) remove.Add(i + k);
+                    i += 3;
+                    continue;
+                }
+
+                // ldarg.0; ldc.i4 <sub-page>; stfld PageID   (only after InitializeComponent: the
+                // 2.99.0.1 default-page override; the 2.99.0.0 assignment happens before the call)
+                if (instructions[i].OpCode == OpCodes.Ldarg_0 &&
+                    TryGetLoadedInt32(instructions[i + 1], out _) &&
+                    instructions[i + 2].OpCode == OpCodes.Stfld &&
+                    instructions[i + 2].Operand is IField field && field.Name == "PageID")
+                {
+                    for (int k = 0; k < 3; k++) remove.Add(i + k);
+                    i += 2;
+                }
+            }
+
+            if (remove.Count == 0)
+            {
+                result.Notes.Add("PageDownloadLeft 构造函数与 2.99.0.0 一致，无需移除侧栏隐藏语句。");
+                _log(result.Notes[result.Notes.Count - 1]);
+                return;
+            }
+
+            var removed = new HashSet<Instruction>();
+            foreach (var index in remove) removed.Add(instructions[index]);
+            foreach (var instruction in instructions)
+            {
+                if (instruction.Operand is Instruction target && removed.Contains(target))
+                {
+                    result.Notes.Add("待移除的侧栏语句被分支引用，下载侧栏重写跳过。");
+                    _log(result.Notes[result.Notes.Count - 1]);
+                    return;
+                }
+            }
+
+            var ordered = remove.ToList();
+            for (int i = ordered.Count - 1; i >= 0; i--) instructions.RemoveAt(ordered[i]);
+
+            ctor.Body.KeepOldMaxStack = true;
+            result.Rewrites++;
+            result.Notes.Add($"PageDownloadLeft..ctor -> 恢复“原版游戏”侧栏项（移除 {ordered.Count} 条隐藏/改默认语句）");
+            _log(result.Notes[result.Notes.Count - 1]);
+        }
+
+        private static bool IsCallNamed(Instruction instruction, string name) =>
+            (instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt) &&
+            instruction.Operand is IMethod method && method.Name == name;
+
+        private static bool IsLoadInt32(Instruction instruction, int value) =>
+            TryGetLoadedInt32(instruction, out var observed) && observed == value;
+
+        private static bool TryGetLoadedInt32(Instruction instruction, out int observed)
+        {
+            observed = 0;
+            switch (instruction.OpCode.Code)
+            {
+                case Code.Ldc_I4_M1: observed = -1; break;
+                case Code.Ldc_I4_0: observed = 0; break;
+                case Code.Ldc_I4_1: observed = 1; break;
+                case Code.Ldc_I4_2: observed = 2; break;
+                case Code.Ldc_I4_3: observed = 3; break;
+                case Code.Ldc_I4_4: observed = 4; break;
+                case Code.Ldc_I4_5: observed = 5; break;
+                case Code.Ldc_I4_6: observed = 6; break;
+                case Code.Ldc_I4_7: observed = 7; break;
+                case Code.Ldc_I4_8: observed = 8; break;
+                case Code.Ldc_I4_S: observed = instruction.Operand is sbyte sb ? sb : 0; break;
+                case Code.Ldc_I4: observed = instruction.Operand is int i ? i : 0; break;
+                default: return false;
+            }
+            return true;
         }
 
         // ------------------------------------------------------------------ 2. silent OTA

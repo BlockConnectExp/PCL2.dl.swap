@@ -260,6 +260,29 @@ Fresh coordinates for build 415:
 
 End-to-end: patched 2.99.0.1 launches and reports `正式版 2.99.0.1 (415)` from the patched path.
 
+### The 2.99.0.1 sidebar gate (added 2026-10-25, after the offset-only assessment)
+
+The offset-only assessment above covered the three patched methods, but 2.99.0.1 also changed UI
+code outside them:
+
+| Evidence | Result |
+|---|---|
+| `PCL.PageDownloadLeft..ctor` IL | 2.99.0.1 appends four statements after `InitializeComponent()`: `ItemInstall.Visibility = Collapsed`, `LabResource.Visibility = Collapsed`, `PageID = DownloadMod`, `ItemMod.Checked = true` |
+| 2.99.0.0 `PageDownloadLeft..ctor` | only `PageID = Default; InitializeComponent();` |
+| Effect | the "原版游戏" entry disappears from the download sidebar even after the loader rewrite — exactly the failure reported against the 2.99.0.1 build |
+
+The patch removes the three download-related statements (11 IL instructions) and leaves
+`LabResource.Visibility = Collapsed` untouched, because that element belongs to the new official
+layout rather than the download gate. Two rewrites therefore work together on 2.99.0.1:
+
+1. `PageDownloadInstall.LoaderInit` -> the real `ModDownload.DlClientListLoader`;
+2. `PageDownloadLeft..ctor` -> the "原版游戏" entry is visible again and the default sub-page is restored.
+
+Runtime evidence (2026-10-25 14:05, patched 2.99.0.1): the patched build opens, the download page
+lists 原版游戏 in the sidebar and the version list loads (26.3 正式版 / 26.4-snapshot-5). On
+2.99.0.0 the sidebar rewrite is correctly skipped (the constructor matches, nothing to remove) and
+the other three rewrites still apply.
+
 ### Retention
 
 The manifest keeps **at most the latest five** official builds. Adding build 415 retired

@@ -58,8 +58,7 @@ foreach (var sample in samples)
         {
             var key = token.Name;                       // e.g. PCL.ModSecret.UpdateStart
             var expectedToken = token.Value.GetString();
-            var methodName = key[(key.LastIndexOf('.') + 1)..];
-            var typeName = key[..key.LastIndexOf('.')];
+            SplitManifestKey(key, out var typeName, out var methodName);
 
             var numeric = Convert.ToInt32(expectedToken, 16);
             MethodDef resolved = null;
@@ -79,14 +78,13 @@ foreach (var sample in samples)
         }
     }
 
-    if (target.TryGetProperty("bodyFileOffset", out var rvas))
+    if (target.TryGetProperty("rva", out var rvas))
     {
         foreach (var rva in rvas.EnumerateObject())
         {
             var key = rva.Name;
             var expectedRva = rva.Value.GetString();
-            var typeName = key[..key.LastIndexOf('.')];
-            var methodName = key[(key.LastIndexOf('.') + 1)..];
+            SplitManifestKey(key, out var typeName, out var methodName);
             var method = module.GetTypes().FirstOrDefault(t => t.FullName == typeName)?
                 .Methods.FirstOrDefault(m => m.Name == methodName);
             if (method == null)
@@ -113,6 +111,17 @@ static string Sha256(string path)
     using var sha = SHA256.Create();
     using var stream = File.OpenRead(path);
     return Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
+}
+
+// Manifest keys are "<Type.FullName>.<MethodName>", including constructors written as
+// "<Type.FullName>..ctor"; split on the dot before the method name, not the last dot.
+static void SplitManifestKey(string key, out string typeName, out string methodName)
+{
+    int separator = key.LastIndexOf('.');
+    if (key.EndsWith("..ctor", StringComparison.Ordinal) || key.EndsWith("..cctor", StringComparison.Ordinal))
+        separator = key.LastIndexOf("..", StringComparison.Ordinal);
+    typeName = key[..separator];
+    methodName = key[(separator + 1)..];
 }
 
 

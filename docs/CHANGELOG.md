@@ -6,6 +6,31 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.25-14:10:00 Restore the vanilla download entry hidden by 2.99.0.1
+
+GitCommitHash: 438ecbe (base)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Patcher\IlPatcher.cs             +135 -0
+.\data\offset-manifest.json                      +53 -29
+.\tools\AddTarget\Program.cs                     +1 -0
+.\tools\VerifyOffsets\Program.cs                 +15 -6
+.\docs\REA-analysis.md                           +24 -0
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|src/PclDlSwap.Patcher/IlPatcher.cs|New rewrite: remove the 2.99.0.1-only PageDownloadLeft constructor statements that collapse the "原版游戏" entry, switch the default sub-page to DownloadMod and check the Mod entry|2026.10.25-14:10:00|PCL2.dl.swap
+2|data/offset-manifest.json|Every retained build now tracks PCL.PageDownloadLeft..ctor (token + RVA), derived from the samples by tools/AddTarget|2026.10.25-14:10:00|PCL2.dl.swap
+3|tools/VerifyOffsets|Constructor manifest keys (Type..ctor) split correctly, and the RVA comparison now reads the real `rva` field instead of the never-present `bodyFileOffset`|2026.10.25-14:10:00|PCL2.dl.swap
+4|docs/REA-analysis.md|Recorded the 2.99.0.1 sidebar gate, the verified four rewrites and the runtime evidence|2026.10.25-14:10:00|PCL2.dl.swap
+
+version: v26.0-Alpha 2 (in development)
+
+---
+
 ## 2026.10.25-01:50:00 Support PCL 2.99.0.1 (offset-only adaptation)
 
 GitCommitHash: 60d6819 (base)

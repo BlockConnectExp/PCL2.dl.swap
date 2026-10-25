@@ -38,6 +38,7 @@ var tracked = new (string Key, string Type, string Name)[]
     ("PCL.ModSecret.UpdateRestart",                     "PCL.ModSecret", "UpdateRestart"),
     ("PCL.ModSecret.UpdateReplace",                     "PCL.ModSecret", "UpdateReplace"),
     ("PCL.PageDownloadInstall.LoaderInit",              "PCL.PageDownloadInstall", "LoaderInit"),
+    ("PCL.PageDownloadLeft..ctor",                      "PCL.PageDownloadLeft", ".ctor"),
 };
 
 using var module = ModuleDefMD.Load(samplePath);

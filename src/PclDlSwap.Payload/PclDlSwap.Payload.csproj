@@ -1,8 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <PlatformTarget>x86</PlatformTarget>
-    <Platforms>x86</Platforms>
+    <!--
+      AnyCPU on purpose: PCL ships as an ILONLY/AnyCPU executable, so it runs as a 64-bit process on
+      every modern Windows install while the disk-patch loader stays x86. The same payload assembly
+      must therefore load into both bitnesses.
+    -->
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Platforms>AnyCPU;x86</Platforms>
+    <Prefer32Bit>false</Prefer32Bit>
     <LangVersion>latest</LangVersion>
     <AssemblyName>PclDlSwap.Payload</AssemblyName>
     <RootNamespace>PclDlSwap.Payload</RootNamespace>
@@ -16,6 +22,12 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Gee.External.Capstone" Version="2.3.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\pcl2swap-org-icon.png" />
+    <!-- The ExLoader shape ships the payload alone, so the token manifest travels with it. -->
+    <EmbeddedResource Include="..\..\data\offset-manifest.json"
+                      LogicalName="PclDlSwap.Payload.data.offset-manifest.json" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Web.Extensions" />

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using PclDlSwap.Payload.Hook;
+using PclDlSwap.Payload.Features;
 using PclDlSwap.Payload.Sandbox;
 
 namespace PclDlSwap.Payload.Host
@@ -38,16 +39,19 @@ namespace PclDlSwap.Payload.Host
         private static bool _otaDecisionRemembered;
         private static bool _allowNextUpdate;
 
+        // Detour thunks must stay byte-for-byte transparent: every reference-typed parameter is
+        // declared as IntPtr so the reverse P/Invoke stub never marshals it. ObjectPointer converts
+        // the raw value back into a GC-tracked reference inside the hook.
         [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
-        private delegate void UpdateStartDelegate(bool silent, IEnumerable<string> urlsOverride);
+        private delegate void UpdateStartDelegate(byte silent, IntPtr urlsOverride);
         [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
         private delegate bool PermissionDelegate();
         [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
-        private delegate void DownloadListDelegate(IEnumerable<string> urls, string localPath, object loader, object checker, bool simulateBrowserHeaders);
+        private delegate void DownloadListDelegate(IntPtr urls, IntPtr localPath, IntPtr loader, IntPtr checker, byte simulateBrowserHeaders);
         [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
-        private delegate void DownloadSingleDelegate(string url, string localPath, object loader, object checker, bool simulateBrowserHeaders);
+        private delegate void DownloadSingleDelegate(IntPtr url, IntPtr localPath, IntPtr loader, IntPtr checker, byte simulateBrowserHeaders);
         [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
-        private delegate void DownloadByClientDelegate(string url, string localPath, bool simulateBrowserHeaders);
+        private delegate void DownloadByClientDelegate(IntPtr url, IntPtr localPath, byte simulateBrowserHeaders);
 
         /// <summary>Entry point invoked by the native shim through ICLRRuntimeHost::ExecuteInDefaultAppDomain.</summary>
         public static int Activate(string argument)
@@ -77,6 +81,64 @@ namespace PclDlSwap.Payload.Host
         public static void Initialize()
         {
             Activate(string.Empty);
+        }
+
+        /// <summary>
+        /// Entry point for the injected (ExLoader) form: the host assembly is already resolved and
+        /// the payload is running inside PCL's own AppDomain, so it wires the full feature set -
+        /// the download gates plus the four UI features that only exist in the injected shape.
+        /// </summary>
+        public static void ActivateFromInjection(Assembly host, string argument)
+        {
+            try
+            {
+                lock (Gate)
+                {
+                    if (_installed)
+                    {
+                        SwapLog.Info("ActivateFromInjection 忽略重复调用（已安装）。");
+                        return;
+                    }
+
+                    _config = SwapConfig.Load();
+                    _sandbox = new DownloadSandbox(_config);
+                    SwapLog.Info($"注入式装配开始（参数：{argument}，进程：{System.Diagnostics.Process.GetCurrentProcess().Id}，" +
+                                 $"{(Environment.Is64BitProcess ? "x64" : "x86")}）。");
+                    _target = OffsetManifest.Match;
+                    SwapLog.Info(_target == null
+                        ? "宿主不在偏移清单中，钩子将按名称解析。"
+                        : $"宿主匹配：{_target.Id}（{_target.BuildType} {_target.Version}，{_target.Role}）。");
+
+                    InstallOtaBlock(host, PclProfile);
+                    InstallPermissionBlock(host, PclProfile);
+                    InstallDownloadGate(host, PclProfile);
+                    InstallUiFeatures(host);
+                    _installed = true;
+                    SwapLog.Info("注入式装配完成。");
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Error("注入式装配失败：" + ex);
+            }
+        }
+
+        /// <summary>
+        /// The Alpha 2 in-process feature set: cancellable forced-update notice, restored download
+        /// page/sidebar, feedback routing and the About-page branding row.
+        /// </summary>
+        private static void InstallUiFeatures(Assembly host)
+        {
+            if (host == null)
+            {
+                SwapLog.Error("InstallUiFeatures：宿主程序集为空，UI 功能未装配。");
+                return;
+            }
+
+            if (_config.RestoreDownloadPage) DownloadPageRestore.Install(host);
+            if (_config.AddAnnouncementCancel) AnnouncementGuard.Install(host);
+            if (_config.RouteFeedback) FeedbackRouter.Install(host);
+            if (_config.BrandAboutPage) AboutBranding.Install(host);
         }
 
         /// <summary>Environment switch used by the fixtures so they can install against stand-in types.</summary>
@@ -132,6 +194,7 @@ namespace PclDlSwap.Payload.Host
             InstallOtaBlock(host, PclProfile);
             InstallPermissionBlock(host, PclProfile);
             InstallDownloadGate(host, PclProfile);
+            InstallUiFeatures(host);
             SwapLog.Info("装配完成。");
         }
 
@@ -210,7 +273,10 @@ namespace PclDlSwap.Payload.Host
         {
             if (!_config.DenyUpdatePermission)
             {
-                SwapLog.Info("更新权限门按配置跳过。");
+                // Vanilla PCL 2.99.x reports HasUpdatePermission = true; keeping that value lets the
+                // user's own "更新 PCL" clicks work, while silent updates stay gated by OnUpdateStart.
+                // Forcing it to false used to push explicit updates into the 土豆码 prompt instead.
+                SwapLog.Info("更新权限门按配置跳过（保持宿主原值，静默更新由 UpdateStart 钩子拦截）。");
                 return;
             }
             var method = Resolve(host, profile, profile.SecretType + ".get_HasUpdatePermission", profile.PermissionProperty, true);
@@ -281,15 +347,23 @@ namespace PclDlSwap.Payload.Host
             }
         }
 
-        private static void OnUpdateStart(bool silent, IEnumerable<string> urlsOverride)
+        private static void OnUpdateStart(byte silentRaw, IntPtr urlsPtr)
         {
             try
             {
-                var urls = urlsOverride?.ToList();
+                var silent = silentRaw != 0;
+                var urlsOverride = ObjectPointer.ToObject<IEnumerable<string>>(urlsPtr);
+
+                if (AnnouncementGuard.ConsumeCancelledUpdate())
+                {
+                    SwapLog.Info("用户在“悲报”式更新公告中选择了取消，本次启动器更新请求被丢弃。");
+                    return;
+                }
+
                 if (!silent && !_allowNextUpdate)
                 {
                     // Owner asked for it explicitly: sandbox the payload, then let the original flow run.
-                    _updateStart.Original<UpdateStartDelegate>().Invoke(false, urls);
+                    _updateStart.Original<UpdateStartDelegate>().Invoke(silentRaw, urlsPtr);
                     return;
                 }
 
@@ -297,10 +371,11 @@ namespace PclDlSwap.Payload.Host
                 {
                     _allowNextUpdate = false;
                     SwapLog.Info("OTA：按用户授权放行一次更新。");
-                    _updateStart.Original<UpdateStartDelegate>().Invoke(false, urls);
+                    _updateStart.Original<UpdateStartDelegate>().Invoke(silentRaw, urlsPtr);
                     return;
                 }
 
+                var urls = urlsOverride?.ToList();
                 var detail = urls != null && urls.Count > 0
                     ? string.Join(Environment.NewLine, urls)
                     : "（服务器未给出下载链接，或更新信息在宿主内部获取）";
@@ -313,7 +388,7 @@ namespace PclDlSwap.Payload.Host
                     case Dialogs.OtaChoice.Update:
                         _allowNextUpdate = true;
                         SwapLog.Info("OTA：用户选择更新，转交原始流程（下载将被沙箱与查毒门拦截）。");
-                        _updateStart.Original<UpdateStartDelegate>().Invoke(false, urls);
+                        _updateStart.Original<UpdateStartDelegate>().Invoke(silentRaw, urlsPtr);
                         break;
                     case Dialogs.OtaChoice.AbortAutoUpdate:
                         _otaDecisionRemembered = true;
@@ -327,7 +402,7 @@ namespace PclDlSwap.Payload.Host
             catch (Exception ex)
             {
                 SwapLog.Error("OTA 钩子异常，已回退到原始行为：" + ex);
-                try { _updateStart.Original<UpdateStartDelegate>().Invoke(silent, urlsOverride); } catch { }
+                try { _updateStart.Original<UpdateStartDelegate>().Invoke(silentRaw, urlsPtr); } catch { }
             }
         }
 
@@ -338,20 +413,25 @@ namespace PclDlSwap.Payload.Host
             return _permission.Original<PermissionDelegate>().Invoke();
         }
 
-        private static void OnDownloadByLoader(IEnumerable<string> urls, string localPath, object loader, object checker, bool simulateBrowserHeaders)
+        private static void OnDownloadByLoader(IntPtr urlsPtr, IntPtr localPathPtr, IntPtr loaderPtr,
+            IntPtr checkerPtr, byte simulateBrowserHeaders)
         {
+            var urls = ObjectPointer.ToObject<IEnumerable<string>>(urlsPtr);
+            var localPath = ObjectPointer.ToObject<string>(localPathPtr);
             var list = urls?.ToList() ?? new List<string>();
             bool isCloud = IsPclCloud(list);
             SwapLog.Info($"下载门回调：isCloud={isCloud} path={localPath} urls={(list.Count == 0 ? "(empty)" : string.Join(",", list))}");
             if (Environment.GetEnvironmentVariable("PCL2SWAP_TEST_NOOP") == "1")
             {
                 // Argument-correctness probe: log and forward without touching the sandbox.
-                _downloadByLoaderEnumerable.Original<DownloadListDelegate>().Invoke(urls, localPath, loader, checker, simulateBrowserHeaders);
+                _downloadByLoaderEnumerable.Original<DownloadListDelegate>()
+                    .Invoke(urlsPtr, localPathPtr, loaderPtr, checkerPtr, simulateBrowserHeaders);
                 return;
             }
             if (!isCloud)
             {
-                _downloadByLoaderEnumerable.Original<DownloadListDelegate>().Invoke(urls, localPath, loader, checker, simulateBrowserHeaders);
+                _downloadByLoaderEnumerable.Original<DownloadListDelegate>()
+                    .Invoke(urlsPtr, localPathPtr, loaderPtr, checkerPtr, simulateBrowserHeaders);
                 return;
             }
 
@@ -368,11 +448,15 @@ namespace PclDlSwap.Payload.Host
             }
         }
 
-        private static void OnDownloadByLoaderSingle(string url, string localPath, object loader, object checker, bool simulateBrowserHeaders)
+        private static void OnDownloadByLoaderSingle(IntPtr urlPtr, IntPtr localPathPtr, IntPtr loaderPtr,
+            IntPtr checkerPtr, byte simulateBrowserHeaders)
         {
+            var url = ObjectPointer.ToObject<string>(urlPtr);
+            var localPath = ObjectPointer.ToObject<string>(localPathPtr);
             if (!IsPclCloud(new[] { url }))
             {
-                _downloadByLoaderString.Original<DownloadSingleDelegate>().Invoke(url, localPath, loader, checker, simulateBrowserHeaders);
+                _downloadByLoaderString.Original<DownloadSingleDelegate>()
+                    .Invoke(urlPtr, localPathPtr, loaderPtr, checkerPtr, simulateBrowserHeaders);
                 return;
             }
 
@@ -387,11 +471,14 @@ namespace PclDlSwap.Payload.Host
             }
         }
 
-        private static void OnDownloadByClient(string url, string localPath, bool simulateBrowserHeaders)
+        private static void OnDownloadByClient(IntPtr urlPtr, IntPtr localPathPtr, byte simulateBrowserHeaders)
         {
+            var url = ObjectPointer.ToObject<string>(urlPtr);
+            var localPath = ObjectPointer.ToObject<string>(localPathPtr);
             if (!IsPclCloud(new[] { url }))
             {
-                _downloadByClient.Original<DownloadByClientDelegate>().Invoke(url, localPath, simulateBrowserHeaders);
+                _downloadByClient.Original<DownloadByClientDelegate>()
+                    .Invoke(urlPtr, localPathPtr, simulateBrowserHeaders);
                 return;
             }
 

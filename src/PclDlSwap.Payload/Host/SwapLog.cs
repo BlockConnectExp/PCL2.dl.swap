@@ -9,7 +9,19 @@ namespace PclDlSwap.Payload.Host
     {
         private static readonly object Sync = new object();
 
-        public static string LogPath => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "pcl2swap.log");
+        /// <summary>Displayed version of the tool, reused by the About page entry.</summary>
+        public const string ToolVersion = "v26.0-Alpha 2";
+
+        /// <summary>File-system friendly form of <see cref="ToolVersion"/>.</summary>
+        public const string ToolVersionCompact = "v26.0-Alpha2";
+
+        /// <summary>
+        /// Primary log lives under %TEMP% so the injected form always has a writable, predictable
+        /// location; a copy is mirrored next to the host when that directory is writable.
+        /// </summary>
+        public static string LogPath => Path.Combine(Path.GetTempPath(), "PCL2Swap", ToolVersionCompact, "pcl2swap.log");
+
+        public static string MirrorLogPath => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "pcl2swap.log");
 
         public static void Info(string message) => Write("info", message);
         public static void Warn(string message) => Write("warn", message);
@@ -29,6 +41,19 @@ namespace PclDlSwap.Payload.Host
                 catch
                 {
                     // logging must never break the host
+                }
+                try
+                {
+                    var mirror = Path.GetDirectoryName(MirrorLogPath);
+                    if (!string.IsNullOrEmpty(mirror))
+                    {
+                        Directory.CreateDirectory(mirror);
+                        File.AppendAllText(MirrorLogPath, line + Environment.NewLine, Encoding.UTF8);
+                    }
+                }
+                catch
+                {
+                    // the mirror is optional; the %TEMP% log is authoritative
                 }
                 TryHostLogger(level, message);
             }

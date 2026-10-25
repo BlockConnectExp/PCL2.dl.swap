@@ -27,7 +27,19 @@ namespace PclDlSwap.Payload.Sandbox
         public bool BlockSilentOta { get; set; } = true;
 
         /// <summary>Deny the host's HasUpdatePermission gate outright.</summary>
-        public bool DenyUpdatePermission { get; set; } = true;
+        public bool DenyUpdatePermission { get; set; }
+
+        /// <summary>Restore the "原版游戏" download page and its sidebar entry.</summary>
+        public bool RestoreDownloadPage { get; set; } = true;
+
+        /// <summary>Give the forced-update ("悲报") announcement a "取消" button.</summary>
+        public bool AddAnnouncementCancel { get; set; } = true;
+
+        /// <summary>Ask which side a report belongs to before opening a feedback flow.</summary>
+        public bool RouteFeedback { get; set; } = true;
+
+        /// <summary>Add the PCL2 Swap row to 更多 → 关于与鸣谢 → 关于.</summary>
+        public bool BrandAboutPage { get; set; } = true;
 
         public string VirusTotalApiKey { get; set; } = "<none>";
         public string MetaDefenderApiKey { get; set; } = "<none>";

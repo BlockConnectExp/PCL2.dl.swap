@@ -23,9 +23,13 @@ namespace PclDlSwap.Payload.Host
     }
 
     /// <summary>
-    /// Loads data/offset-manifest.json (embedded next to the payload) and matches the running host
-    /// by MVID first, then by file SHA-256. Matching by MVID is what allows "adapt only the offsets"
-    /// for later builds: new MVID + new RVAs, same method identities.
+    /// Loads data/offset-manifest.json and matches the running host by MVID first, then by file
+    /// SHA-256. Matching by MVID is what allows "adapt only the offsets" for later builds:
+    /// new MVID + new RVAs, same method identities.
+    ///
+    /// In the loader shape the manifest sits next to the payload on disk; in the ExLoader shape the
+    /// payload ships alone, so the same manifest travels as an embedded resource. When neither is
+    /// available the installer degrades to resolving methods by name.
     /// </summary>
     internal static class OffsetManifest
     {
@@ -63,11 +67,22 @@ namespace PclDlSwap.Payload.Host
 
         private static List<HostTarget> Load()
         {
-            var path = ManifestPath;
-            if (!File.Exists(path))
-                throw new FileNotFoundException("缺少偏移清单 data/offset-manifest.json", path);
+            string json;
+            try
+            {
+                json = ReadManifestJson();
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("偏移清单读取失败，钩子将按名称解析：" + ex.Message);
+                return new List<HostTarget>();
+            }
+            if (json == null)
+            {
+                SwapLog.Warn("偏移清单不可用（磁盘与内嵌副本都没有），钩子将按名称解析。");
+                return new List<HostTarget>();
+            }
 
-            var json = File.ReadAllText(path, Encoding.UTF8);
             var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
             var root = serializer.Deserialize<Dictionary<string, object>>(json);
             var list = new List<HostTarget>();
@@ -94,6 +109,23 @@ namespace PclDlSwap.Payload.Host
                 list.Add(target);
             }
             return list;
+        }
+
+        private static string ReadManifestJson()
+        {
+            if (File.Exists(ManifestPath))
+                return File.ReadAllText(ManifestPath, Encoding.UTF8);
+
+            var assembly = typeof(OffsetManifest).Assembly;
+            var name = assembly.GetManifestResourceNames()
+                .FirstOrDefault(n => n.EndsWith("offset-manifest.json", StringComparison.OrdinalIgnoreCase));
+            if (name == null) return null;
+            using (var stream = assembly.GetManifestResourceStream(name))
+            {
+                if (stream == null) return null;
+                using (var reader = new StreamReader(stream, Encoding.UTF8))
+                    return reader.ReadToEnd();
+            }
         }
 
         private static string Str(Dictionary<string, object> map, string key) =>

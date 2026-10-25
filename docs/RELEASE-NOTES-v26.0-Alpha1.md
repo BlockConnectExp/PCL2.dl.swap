@@ -41,6 +41,21 @@ tracked token is unchanged and the RVAs moved 42-244 bytes, so per this reposito
 bundle is attached here instead of opening a new release. A single loader bundle covers both
 2.99.0.0 and 2.99.0.1 because the manifest ships all retained builds.
 
+### 2.99.0.1 sidebar correction (2026-10-25, commit f2909a1)
+
+The first 2.99.0.1 bundle restored only the download loader, but 2.99.0.1 additionally hides the
+"原版游戏" entry in `PageDownloadLeft..ctor` (`ItemInstall.Visibility = Collapsed`,
+`PageID = DownloadMod`, `ItemMod.Checked = true`). Both bundles were rebuilt and re-uploaded; the
+patch engine now performs a fourth rewrite that removes those eleven IL instructions on any build
+that carries them, while leaving the new `LabResource` element untouched.
+
+Evidence for the re-uploaded bundles:
+
+- `tools/VerifyOffsets` PASS on all four retained samples, including the RVA comparison;
+- patched 2.99.0.1 opens with 原版游戏 in the download sidebar and loads the version list
+  (26.3 正式版 / 26.4-snapshot-5);
+- 2.99.0.0 reports "constructor matches 2.99.0.0" and keeps its three original rewrites.
+
 ## Build Information
 
 | Item | Value |
@@ -57,8 +72,8 @@ bundle is attached here instead of opening a new release. A single loader bundle
 ## Verification Performed
 
 - Patched binary starts and reports `正式版 2.99.0.0 (413)` from the patched path.
-- Re-reading the patched IL confirms all three rewrites (`LoaderInit`, `UpdateStart`,
-  `HasUpdatePermission`).
+- Re-reading the patched IL confirms every rewrite (`LoaderInit`, `PageDownloadLeft..ctor` on
+  2.99.0.1, `UpdateStart`, `HasUpdatePermission`).
 - Microsoft Defender executed a real scan through the sandbox pipeline; uninstalled engines do not
   block, failed engines do.
 

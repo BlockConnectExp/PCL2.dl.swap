@@ -6,6 +6,35 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.26-05:00:00 Alpha 3: property-aware member access, poll-based page repairs
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Host\PclUi.cs                    +60 -25
+.\src\PclDlSwap.Payload\Features\AboutBranding.cs        +170 -150
+.\src\PclDlSwap.Payload\Features\DownloadPageRestore.cs  +130 -75
+.\src\PclDlSwap.Payload\Host\OffsetManifest.cs           +48 -0
+.\src\PclDlSwap.Payload\Host\CoreInstaller.cs            +23 -4
+.\src\PclDlSwap.Payload\Host\SwapLog.cs                  +2 -2
+.\src\Pcl2Swap.Shim\Shim.cpp                             +1 -1
+.\src\PclDlSwap.ExLoaderHarness\Program.cs               +170 -70
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|PclUi|Member reads now fall back to properties. PCL exposes PanLoad/PanAllBack/LoadMinecraft/PanMain/ItemAboutPcl as VB.NET properties, and the previous field-only lookup returned null - the direct cause of the PageLoaderInit NullReferenceException and the silently skipped About row|2026.10.26-05:00:00|PCL2.dl.swap
+2|DownloadPageRestore|LoaderInit now feeds live page controls to PageLoaderInit (the NRE path is gone), and the 2.99.0.1 sidebar repair became a poller over ModMain.FrmDownloadLeft instead of a constructor detour whose prologue cannot be relocated|2026.10.26-05:00:00|PCL2.dl.swap
+3|DownloadPageRestore|Install-time gate probe: LoaderInit is only replaced when its IL carries the "关闭下载 / 不再提供" stub markers, so stock builds (2.12.8.1 and friends) stay on their own download path|2026.10.26-05:00:00|PCL2.dl.swap
+4|AboutBranding|Rebuilt as a poller over ModMain.FrmOtherAbout with UI-thread insertion; the constructor detour is gone and the row is inserted a few hundred milliseconds after the page first appears|2026.10.26-05:00:00|PCL2.dl.swap
+5|OffsetManifest|ResolveFor(host) matches the assembly that actually carries PCL instead of EntryAssembly (the injector can wrap the launcher), and the payload now logs the host path/version/MVID on every activation|2026.10.26-05:00:00|PCL2.dl.swap
+6|SwapLog/Shim|Version bumped to v26.0-Alpha 3, extraction directory v26.0-Alpha3|2026.10.26-05:00:00|PCL2.dl.swap
+
+version: v26.0-Alpha 3
+
+---
 ## 2026.10.25-14:10:00 Restore the vanilla download entry hidden by 2.99.0.1
 
 GitCommitHash: 438ecbe (base)

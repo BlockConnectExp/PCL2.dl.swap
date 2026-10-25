@@ -26,7 +26,7 @@
 #define CAPSTONE_NAME     L"capstone.dll"
 #define ENTRY_TYPE        L"PclDlSwap.Payload.Host.ExLoaderEntry"
 #define ENTRY_METHOD      L"Activate"
-#define TOOL_VERSION      L"v26.0-Alpha2"
+#define TOOL_VERSION      L"v26.0-Alpha3"
 
 // GUIDs from metahost.h, spelled out so no import library is needed.
 static const GUID kClsidClrMetaHost =

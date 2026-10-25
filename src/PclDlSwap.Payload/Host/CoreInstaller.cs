@@ -104,7 +104,8 @@ namespace PclDlSwap.Payload.Host
                     _sandbox = new DownloadSandbox(_config);
                     SwapLog.Info($"注入式装配开始（参数：{argument}，进程：{System.Diagnostics.Process.GetCurrentProcess().Id}，" +
                                  $"{(Environment.Is64BitProcess ? "x64" : "x86")}）。");
-                    _target = OffsetManifest.Match;
+                    LogHostIdentity(host);
+                    _target = OffsetManifest.ResolveFor(host);
                     SwapLog.Info(_target == null
                         ? "宿主不在偏移清单中，钩子将按名称解析。"
                         : $"宿主匹配：{_target.Id}（{_target.BuildType} {_target.Version}，{_target.Role}）。");
@@ -179,7 +180,8 @@ namespace PclDlSwap.Payload.Host
                 return;
             }
 
-            _target = OffsetManifest.Match;
+            LogHostIdentity(host);
+            _target = OffsetManifest.ResolveFor(host);
             if (_target == null)
                 SwapLog.Warn("当前宿主不在偏移清单中，将退化为按名称解析（可能不兼容）。");
             else
@@ -216,6 +218,22 @@ namespace PclDlSwap.Payload.Host
             catch (Exception ex)
             {
                 SwapLog.Error("夹具安装失败：" + ex);
+            }
+        }
+
+        /// <summary>Records which assembly we actually bound to; several builds share a version.</summary>
+        private static void LogHostIdentity(Assembly host)
+        {
+            try
+            {
+                var location = host.Location;
+                var version = host.GetName().Version;
+                var mvid = host.ManifestModule.ModuleVersionId;
+                SwapLog.Info("宿主程序集：" + location + "（版本 " + version + "，MVID " + mvid + "）。");
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("记录宿主身份失败：" + ex.Message);
             }
         }
 

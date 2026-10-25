@@ -50,6 +50,52 @@ namespace PclDlSwap.Payload.Host
             }
         }
 
+        /// <summary>
+        /// Matches an explicit host assembly. The injected shape must use the assembly that actually
+        /// carries PCL (the injector's own launcher wrapper can be the EntryAssembly), otherwise the
+        /// lookup would miss builds that are in the manifest.
+        /// </summary>
+        public static HostTarget ResolveFor(Assembly host)
+        {
+            lock (SyncRoot)
+            {
+                if (_targets == null) _targets = Load();
+                if (host == null) return null;
+
+                string mvid;
+                try
+                {
+                    mvid = host.ManifestModule.ModuleVersionId.ToString("D").ToLowerInvariant();
+                }
+                catch
+                {
+                    return null;
+                }
+
+                var byMvid = _targets.FirstOrDefault(t =>
+                    string.Equals(t.Mvid, mvid, StringComparison.OrdinalIgnoreCase));
+                if (byMvid != null) return byMvid;
+
+                string sha;
+                try
+                {
+                    var location = host.Location;
+                    if (string.IsNullOrEmpty(location) || !File.Exists(location)) return null;
+                    using (var sha256 = SHA256.Create())
+                    using (var stream = File.OpenRead(location))
+                        sha = BitConverter.ToString(sha256.ComputeHash(stream))
+                            .Replace("-", string.Empty).ToLowerInvariant();
+                }
+                catch
+                {
+                    return null;
+                }
+
+                return _targets.FirstOrDefault(t =>
+                    string.Equals(t.Sha256, sha, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
         public static IReadOnlyList<HostTarget> All
         {
             get

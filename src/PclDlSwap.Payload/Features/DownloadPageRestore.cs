@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
 
@@ -23,11 +24,8 @@ namespace PclDlSwap.Payload.Features
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void LoaderInitDelegate(IntPtr self);
 
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void CtorDelegate(IntPtr self);
-
         private static LoaderInitDelegate _loaderInitHook;
-        private static CtorDelegate _ctorHook;
+        private static volatile bool _sidebarFixed;
         private static readonly BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic |
                                                      BindingFlags.Static | BindingFlags.Instance;
 
@@ -53,6 +51,12 @@ namespace PclDlSwap.Payload.Features
                     return;
                 }
 
+                if (!LooksLikeGatedLoader(method))
+                {
+                    SwapLog.Info("下载页恢复：未检测到下载 gate（该构建自带可用下载流程），跳过恢复。");
+                    return;
+                }
+
                 _loaderInitHook = OnLoaderInit;
                 var detour = DetourInstaller.Install(method, _loaderInitHook);
                 _loaderInitOriginal = detour.Original<LoaderInitDelegate>();
@@ -65,31 +69,131 @@ namespace PclDlSwap.Payload.Features
             }
         }
 
-        private static void InstallSidebar(Assembly host)
+        /// <summary>
+        /// 2.99.x replaces the download loader with a stub whose body carries the "关闭下载" task name
+        /// and the "不再提供 MC 下载功能" notice. Detecting those strings in the IL keeps stock builds
+        /// (2.12.8.1 and friends) untouched - their LoaderInit carries no such markers.
+        /// </summary>
+        private static bool LooksLikeGatedLoader(MethodInfo method)
         {
             try
             {
-                var type = host.GetType("PCL.PageDownloadLeft", throwOnError: false);
-                var ctor = type?.GetConstructors(Flags).FirstOrDefault(c => c.GetParameters().Length == 0);
-                if (ctor == null)
+                var il = method.GetMethodBody()?.GetILAsByteArray();
+                if (il == null) return true;
+                var module = method.Module;
+                for (int i = 0; i + 4 < il.Length; i++)
                 {
-                    SwapLog.Warn("下载侧栏恢复：未找到 PageDownloadLeft..ctor。");
-                    return;
+                    if (il[i] != 0x72) continue;   // ldstr
+                    var token = BitConverter.ToInt32(il, i + 1);
+                    string text;
+                    try { text = module.ResolveString(token); }
+                    catch { continue; }
+                    if (string.IsNullOrEmpty(text)) continue;
+                    if (text.IndexOf("关闭下载", StringComparison.Ordinal) >= 0) return true;
+                    if (text.IndexOf("不再提供", StringComparison.Ordinal) >= 0) return true;
+                    if (text.IndexOf("暂时不再", StringComparison.Ordinal) >= 0) return true;
                 }
-
-                _ctorHook = OnSidebarCtor;
-                var detour = DetourInstaller.Install(ctor, _ctorHook);
-                _sidebarOriginal = detour.Original<CtorDelegate>();
-                SidebarInstalled = true;
-                SwapLog.Info("下载侧栏恢复已安装：" + detour.Verify());
             }
             catch (Exception ex)
             {
-                SwapLog.Error("下载侧栏恢复安装失败：" + ex);
+                SwapLog.Warn("下载页恢复：gate 探测失败，按需恢复处理：" + ex.Message);
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 2.99.0.1 collapses the vanilla entry inside PageDownloadLeft..ctor. That constructor's JIT
+        /// prologue is not safe to relocate, so this watcher waits for ModMain.FrmDownloadLeft to
+        /// appear and repairs the already-built page instead (and does nothing on builds where the
+        /// entry is still visible).
+        /// </summary>
+        private static void InstallSidebar(Assembly host)
+        {
+            var watcher = new Thread(() => WatchSidebar(host))
+            {
+                IsBackground = true,
+                Name = "PCL2Swap.SidebarRestore"
+            };
+            watcher.Start();
+            SidebarInstalled = true;
+            SwapLog.Info("下载侧栏恢复已启用（等待下载页首次创建）。");
+        }
+
+        private static void WatchSidebar(Assembly host)
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(30);
+            while (!_sidebarFixed && DateTime.UtcNow < deadline)
+            {
+                try
+                {
+                    var modMain = host.GetType("PCL.ModMain", throwOnError: false);
+                    var page = PclUi.GetMember(modMain, "FrmDownloadLeft");
+                    if (page != null) TryRestoreSidebar(page);
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Error("下载侧栏恢复轮询异常：" + ex.Message);
+                    _sidebarFixed = true;
+                }
+
+                if (!_sidebarFixed) Thread.Sleep(300);
             }
         }
 
-        private static CtorDelegate _sidebarOriginal;
+        private static void TryRestoreSidebar(object page)
+        {
+            PclUi.OnUiThread(() =>
+            {
+                try
+                {
+                    var itemInstall = PclUi.GetMember(page, "ItemInstall");
+                    var itemMod = PclUi.GetMember(page, "ItemMod");
+                    if (itemInstall == null)
+                    {
+                        SwapLog.Warn("下载侧栏恢复：页面没有 ItemInstall，跳过。");
+                        _sidebarFixed = true;
+                        return;
+                    }
+
+                    var visibility = PclUi.GetMember(itemInstall, "Visibility");
+                    if (visibility == null)
+                    {
+                        SwapLog.Warn("下载侧栏恢复：ItemInstall 没有 Visibility，跳过。");
+                        _sidebarFixed = true;
+                        return;
+                    }
+
+                    if (string.Equals(Convert.ToString(visibility), "Visible", StringComparison.Ordinal))
+                    {
+                        // 2.99.0 and older already show the entry - nothing to repair.
+                        _sidebarFixed = true;
+                        SwapLog.Info("下载侧栏“原版游戏”项本就可见，无需修复。");
+                        return;
+                    }
+
+                    var visibleValue = visibility.GetType().IsEnum
+                        ? Enum.Parse(visibility.GetType(), "Visible")
+                        : (object)"Visible";
+                    PclUi.SetMember(itemInstall, "Visibility", visibleValue);
+
+                    var host = Assembly.GetEntryAssembly();
+                    var pageSubType = host?.GetType("PCL.FormMain+PageSubType");
+                    if (pageSubType != null)
+                        PclUi.SetMember(page, "PageID", Enum.Parse(pageSubType, "Default"));
+                    if (itemMod != null)
+                        PclUi.SetMember(itemMod, "Checked", false);
+
+                    _sidebarFixed = true;
+                    SwapLog.Info("下载侧栏“原版游戏”项已恢复可见，并把默认子页切回原版游戏。");
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Error("下载侧栏恢复失败：" + ex);
+                    _sidebarFixed = true;
+                }
+            });
+        }
 
         /// <summary>
         /// Replaces the gated loader with PCL's own download list loader: the page keeps its regular
@@ -125,9 +229,19 @@ namespace PclDlSwap.Payload.Features
                 _page = self;
                 PclUi.Invoke(self, "ControlInit");
 
-                var loadMinecraft = PclUi.GetField(self, "LoadMinecraft");
-                var panLoad = PclUi.GetField(self, "PanLoad");
-                var panAllBack = PclUi.GetField(self, "PanAllBack");
+                // These are VB.NET properties on PCL's page class; a field-only lookup yields null
+                // and PageLoaderInit then dereferences the nulls inside its own body.
+                var loadMinecraft = PclUi.GetMember(self, "LoadMinecraft");
+                var panLoad = PclUi.GetMember(self, "PanLoad");
+                var panAllBack = PclUi.GetMember(self, "PanAllBack");
+                if (loadMinecraft == null || panLoad == null || panAllBack == null)
+                {
+                    SwapLog.Error("下载页恢复：页面控件未就绪（LoadMinecraft=" + (loadMinecraft != null) +
+                                  ", PanLoad=" + (panLoad != null) + ", PanAllBack=" + (panAllBack != null) +
+                                  "），回退到原始 LoaderInit。");
+                    InvokeOriginal(selfPtr);
+                    return;
+                }
 
                 var baseType = pageType.BaseType;
                 var definition = baseType?.GetMethods(Flags)
@@ -197,35 +311,5 @@ namespace PclDlSwap.Payload.Features
         }
 
         private static LoaderInitDelegate _loaderInitOriginal;
-
-        private static void OnSidebarCtor(IntPtr selfPtr)
-        {
-            if (_sidebarOriginal != null)
-                _sidebarOriginal(selfPtr);
-
-            try
-            {
-                var self = ObjectPointer.ToObject(selfPtr);
-                if (self == null) return;
-
-                var host = Assembly.GetEntryAssembly();
-                var pageSubType = host?.GetType("PCL.FormMain+PageSubType");
-                var itemInstall = PclUi.GetField(self, "ItemInstall");
-                var itemMod = PclUi.GetField(self, "ItemMod");
-
-                var visibilityProperty = itemInstall.GetType().GetProperty("Visibility", Flags);
-                PclUi.SetProperty(itemInstall, "Visibility",
-                    Enum.Parse(visibilityProperty.PropertyType, "Visible"));
-                if (pageSubType != null)
-                    PclUi.SetField(self, "PageID", Enum.Parse(pageSubType, "Default"));
-                PclUi.SetProperty(itemMod, "Checked", false);
-
-                SwapLog.Info("下载侧栏“原版游戏”项已恢复可见，并把默认子页切回原版游戏。");
-            }
-            catch (Exception ex)
-            {
-                SwapLog.Error("下载侧栏恢复失败：" + ex);
-            }
-        }
     }
 }

@@ -157,18 +157,46 @@ namespace PclDlSwap.Payload.Host
 
         // ---- small reflection helpers shared by the features ----
 
-        public static object GetField(object instance, string name)
+        /// <summary>
+        /// Reads a member by name: plain fields first, then properties. PCL mixes both shapes
+        /// (VB.NET exposes many members as "virtual properties" whose backing field is the only
+        /// thing a field-only lookup would find), and a field-only lookup silently returns null
+        /// for them - which is how nulls used to reach PageLoaderInit and the About page.
+        /// </summary>
+        public static object GetMember(object instance, string name)
         {
+            if (instance == null) return null;
             var type = instance as Type ?? instance.GetType();
-            return type.GetField(name, AnyMember)?.GetValue(instance as Type == null ? instance : null);
+            var target = instance as Type == null ? instance : null;
+
+            var field = type.GetField(name, AnyMember);
+            if (field != null) return field.GetValue(target);
+
+            var property = type.GetProperty(name, AnyMember);
+            if (property != null && property.CanRead) return property.GetValue(target, null);
+
+            return null;
         }
 
-        public static void SetField(object instance, string name, object value)
+        /// <summary>Writes a member by name: plain fields first, then writable properties.</summary>
+        public static void SetMember(object instance, string name, object value)
         {
             var type = instance.GetType();
             var field = type.GetField(name, AnyMember);
-            if (field == null) throw new MissingFieldException(type.FullName, name);
-            field.SetValue(instance, value);
+            if (field != null)
+            {
+                field.SetValue(instance, value);
+                return;
+            }
+
+            var property = type.GetProperty(name, AnyMember);
+            if (property != null && property.CanWrite)
+            {
+                property.SetValue(instance, value, null);
+                return;
+            }
+
+            throw new MissingMemberException(type.FullName, name);
         }
 
         public static void SetProperty(object instance, string name, object value)

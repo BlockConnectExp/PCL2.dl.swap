@@ -2,8 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
-using PclDlSwap.Payload.Hook;
+using System.Threading;
 using PclDlSwap.Payload.Host;
 
 namespace PclDlSwap.Payload.Features
@@ -13,100 +12,131 @@ namespace PclDlSwap.Payload.Features
     /// 更多 → 关于与鸣谢 → 关于, carrying the swap's own version and the BlockConnect organisation
     /// icon (the high-resolution GitHub avatar shipped inside this payload).
     ///
-    /// The row is injected after the page's constructor has built its visual tree, so it lands in
-    /// the same stack panel as PCL's own entries and inherits PCL's list styling.
+    /// The About page is created lazily (FormMain news up ModMain.FrmOtherAbout on the first visit),
+    /// and the constructor's JIT prologue is not safe to relocate, so instead of detouring the
+    /// constructor this watcher waits for ModMain.FrmOtherAbout to appear and then inserts the row
+    /// on PCL's UI thread. The insertion is idempotent and lands within a few hundred milliseconds
+    /// of the page first being shown.
     /// </summary>
     internal static class AboutBranding
     {
         private const string IconResourceName = "PclDlSwap.Payload.Resources.pcl2swap-org-icon.png";
 
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void CtorDelegate(IntPtr self);
-
-        private static CtorDelegate _hook;
-        private static CtorDelegate _original;
+        private static readonly object Gate = new object();
         private static string _iconPath;
         private static bool _inserted;
+        private static volatile bool _stop;
 
         public static bool Installed { get; private set; }
 
         public static void Install(Assembly host)
         {
-            try
+            if (host == null)
             {
-                var type = host.GetType("PCL.PageOtherAbout", throwOnError: false);
-                var ctor = type?.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                    .FirstOrDefault(c => c.GetParameters().Length == 0);
-                if (ctor == null)
-                {
-                    SwapLog.Warn("AboutBranding：未找到 PageOtherAbout 构造函数。");
-                    return;
-                }
+                SwapLog.Warn("AboutBranding：宿主程序集为空，跳过。");
+                return;
+            }
 
-                _hook = OnCtor;
-                var detour = DetourInstaller.Install(ctor, _hook);
-                _original = detour.Original<CtorDelegate>();
-                Installed = true;
-                SwapLog.Info("关于页品牌项已安装：" + detour.Verify());
-            }
-            catch (Exception ex)
+            var watcher = new Thread(() => Watch(host))
             {
-                SwapLog.Error("AboutBranding 安装失败：" + ex);
-            }
+                IsBackground = true,
+                Name = "PCL2Swap.AboutBranding"
+            };
+            watcher.Start();
+            Installed = true;
+            SwapLog.Info("关于页品牌项已启用（等待关于页首次创建）。");
         }
 
-        private static void OnCtor(IntPtr selfPtr)
+        private static void Watch(Assembly host)
         {
-            if (_original != null)
-                _original(selfPtr);
-
-            try
+            var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(30);
+            while (!_stop && !_inserted && DateTime.UtcNow < deadline)
             {
-                if (_inserted) return;
-
-                var self = ObjectPointer.ToObject(selfPtr);
-                if (self == null) return;
-
-                var host = Assembly.GetEntryAssembly();
-                var listItemType = host?.GetType("PCL.MyListItem", throwOnError: false);
-                if (listItemType == null)
+                try
                 {
-                    SwapLog.Warn("AboutBranding：宿主没有 MyListItem，跳过。");
-                    return;
+                    var modMain = host.GetType("PCL.ModMain", throwOnError: false);
+                    var page = PclUi.GetMember(modMain, "FrmOtherAbout");
+                    if (page != null) Insert(page);
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Error("AboutBranding 轮询异常：" + ex.Message);
+                    _stop = true;
                 }
 
-                var panMain = PclUi.GetField(self, "PanMain");
-                var itemAboutPcl = PclUi.GetField(self, "ItemAboutPcl");
-                if (panMain == null || itemAboutPcl == null) return;
-
-                var children = panMain.GetType().GetProperty("Children", BindingFlags.Public | BindingFlags.Instance)
-                    ?.GetValue(panMain, null);
-                if (children == null) return;
-
-                var item = Activator.CreateInstance(listItemType);
-                PclUi.SetProperty(item, "Title", "PCL2 Swap By BlockConnect");
-                PclUi.SetProperty(item, "Info", "版本 " + SwapLog.ToolVersion +
-                                                " · 下载恢复、静默更新拦截与云下载查毒沙箱");
-
-                var icon = EnsureIconFile();
-                if (!string.IsNullOrEmpty(icon))
-                    PclUi.SetProperty(item, "Logo", icon);
-
-                var indexOf = children.GetType().GetMethods()
-                    .FirstOrDefault(m => m.Name == "IndexOf" && m.GetParameters().Length == 1);
-                var insert = children.GetType().GetMethods()
-                    .FirstOrDefault(m => m.Name == "Insert" && m.GetParameters().Length == 2);
-                if (indexOf == null || insert == null) return;
-
-                var index = (int)indexOf.Invoke(children, new[] { itemAboutPcl });
-                insert.Invoke(children, new object[] { index + 1, item });
-                _inserted = true;
-                SwapLog.Info("关于页已插入 “PCL2 Swap By BlockConnect” 条目（索引 " + (index + 1) + "）。");
+                if (!_inserted && !_stop) Thread.Sleep(300);
             }
-            catch (Exception ex)
+
+            if (_inserted) SwapLog.Info("AboutBranding：品牌项已就位，轮询结束。");
+        }
+
+        private static void Insert(object page)
+        {
+            PclUi.OnUiThread(() =>
             {
-                SwapLog.Error("AboutBranding 插入条目失败：" + ex);
-            }
+                lock (Gate)
+                {
+                    if (_inserted) return;
+                    try
+                    {
+                        var host = Assembly.GetEntryAssembly();
+                        var listItemType = host?.GetType("PCL.MyListItem", throwOnError: false);
+                        if (listItemType == null)
+                        {
+                            SwapLog.Warn("AboutBranding：宿主没有 MyListItem，跳过。");
+                            _stop = true;
+                            return;
+                        }
+
+                        var panMain = PclUi.GetMember(page, "PanMain");
+                        var itemAboutPcl = PclUi.GetMember(page, "ItemAboutPcl");
+                        if (panMain == null || itemAboutPcl == null)
+                        {
+                            SwapLog.Warn("AboutBranding：关于页上没有 PanMain/ItemAboutPcl，跳过。");
+                            _stop = true;
+                            return;
+                        }
+
+                        var children = PclUi.GetMember(panMain, "Children");
+                        if (children == null)
+                        {
+                            SwapLog.Warn("AboutBranding：PanMain 没有 Children，跳过。");
+                            _stop = true;
+                            return;
+                        }
+
+                        var item = Activator.CreateInstance(listItemType);
+                        PclUi.SetProperty(item, "Title", "PCL2 Swap By BlockConnect");
+                        PclUi.SetProperty(item, "Info", "版本 " + SwapLog.ToolVersion +
+                                                        " · 下载恢复、静默更新拦截与云下载查毒沙箱");
+
+                        var icon = EnsureIconFile();
+                        if (!string.IsNullOrEmpty(icon))
+                            PclUi.SetProperty(item, "Logo", icon);
+
+                        var indexOf = children.GetType().GetMethods()
+                            .FirstOrDefault(m => m.Name == "IndexOf" && m.GetParameters().Length == 1);
+                        var insert = children.GetType().GetMethods()
+                            .FirstOrDefault(m => m.Name == "Insert" && m.GetParameters().Length == 2);
+                        if (indexOf == null || insert == null)
+                        {
+                            SwapLog.Warn("AboutBranding：Children 集合缺少 IndexOf/Insert，跳过。");
+                            _stop = true;
+                            return;
+                        }
+
+                        var index = (int)indexOf.Invoke(children, new[] { itemAboutPcl });
+                        insert.Invoke(children, new object[] { index + 1, item });
+                        _inserted = true;
+                        SwapLog.Info("关于页已插入 “PCL2 Swap By BlockConnect” 条目（索引 " + (index + 1) + "）。");
+                    }
+                    catch (Exception ex)
+                    {
+                        SwapLog.Error("AboutBranding 插入条目失败：" + ex);
+                        _stop = true;
+                    }
+                }
+            });
         }
 
         /// <summary>Writes the embedded organisation icon next to the payload (once) and returns its path.</summary>
@@ -129,7 +159,7 @@ namespace PclDlSwap.Payload.Features
                         return null;
                     }
 
-                    var directory = Path.Combine(Path.GetTempPath(), "PCL2Swap", SwapLog.ToolVersion);
+                    var directory = Path.Combine(Path.GetTempPath(), "PCL2Swap", SwapLog.ToolVersionCompact);
                     Directory.CreateDirectory(directory);
                     _iconPath = Path.Combine(directory, "pcl2swap-org-icon.png");
                     using (var file = File.Create(_iconPath))

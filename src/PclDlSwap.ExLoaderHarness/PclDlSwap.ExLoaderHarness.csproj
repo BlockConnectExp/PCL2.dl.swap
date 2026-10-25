@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <!-- The shim and the payload bind to the host bitness; PCL runs x64 on 64-bit Windows. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>PclDlSwap.ExLoaderHarness</AssemblyName>
+    <RootNamespace>PclDlSwap.ExLoaderHarness</RootNamespace>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>0.1.0</Version>
+    <Company>OxygenAILab</Company>
+    <Product>PCL2 DLL-Swap ExLoader harness</Product>
+  </PropertyGroup>
+</Project>
+

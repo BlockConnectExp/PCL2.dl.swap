@@ -14,5 +14,9 @@
     <Company>OxygenAILab</Company>
     <Product>PCL2 DLL-Swap ExLoader harness</Product>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Available to the payload's IL-copy factory when the harness loads it. -->
+    <PackageReference Include="MonoMod.Utils" Version="22.1.0" />
+  </ItemGroup>
 </Project>
 

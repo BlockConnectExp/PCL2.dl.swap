@@ -19,7 +19,36 @@ namespace PclDlSwap.ExLoaderHarness
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void RawProbeHook(IntPtr text, IntPtr payload);
 
+    /// <summary>Native checker used by the ABI test: takes a callable address, returns a bitmask of clobbered registers.</summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate long RegisterCheckFn(IntPtr target);
+
+    /// <summary>The hook used while the ABI checker calls a detoured method.</summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate int RegHook();
+
+    /// <summary>Allocation-heavy hook used by the managed-caller experiment.</summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate int GcHook();
+
+    /// <summary>Parameterised variant of <see cref="GcHook"/> (the one the experiment uses).</summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate int GcHook2(string tag);
+
     /// <summary>Throwaway targets for the detour-engine self test.</summary>
+    public class CopyProbeInstance
+    {
+        public int Value = 5;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public int Add(int delta)
+        {
+            var pad = "copytest.instance." + delta;
+            Value += pad.Length > 0 ? delta : 0;
+            return Value;
+        }
+    }
+
     public static class EngineProbe
     {
         public static int UpdateProbeCalls;
@@ -77,6 +106,83 @@ namespace PclDlSwap.ExLoaderHarness
             RawProbeText = "raw:" + text + ":" + (payload == null ? "null" : payload.GetType().Name);
             RawProbeCalls += RawProbeText.Length > 0 ? 1 : 0;
         }
+
+        public static int RegTargetCalls;
+        public static int RegHookCalls;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int RegTarget()
+        {
+            var pad = "engine.regtarget";
+            RegTargetCalls += pad.Length > 0 ? 1 : 0;
+            return RegTargetCalls;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int RegHookImpl()
+        {
+            var pad = "engine.reghook";
+            RegHookCalls += pad.Length > 0 ? 1 : 0;
+            return 4242;
+        }
+
+        public static int GcTargetCalls;
+        public static int GcHookCalls;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int GcTarget()
+        {
+            GcTargetCalls++;
+            return GcTargetCalls;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int GcHookImpl()
+        {
+            GcHookCalls++;
+            for (int i = 0; i < 4; i++)
+            {
+                var waste = new byte[64 * 1024];
+                GC.KeepAlive(waste);
+            }
+            if ((GcHookCalls & 15) == 0)
+                GC.Collect(2, GCCollectionMode.Forced, true);
+            return 777;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int ManagedCallGcTarget()
+        {
+            return GcTarget();
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int GcTarget2(string tag)
+        {
+            var pad = "engine.gctarget2." + (tag ?? string.Empty);
+            GcTargetCalls += pad.Length > 0 ? 1 : 0;
+            return GcTargetCalls;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int GcHookImpl2(string tag)
+        {
+            GcHookCalls++;
+            for (int i = 0; i < 4; i++)
+            {
+                var waste = new byte[64 * 1024];
+                GC.KeepAlive(waste);
+            }
+            if ((GcHookCalls & 15) == 0)
+                GC.Collect(2, GCCollectionMode.Forced, true);
+            return 777;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int ManagedCallGcTarget2()
+        {
+            return GcTarget2("x");
+        }
     }
 
     /// <summary>
@@ -105,11 +211,23 @@ namespace PclDlSwap.ExLoaderHarness
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr LoadLibraryW(string fileName);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr VirtualAlloc(IntPtr lpAddress, UIntPtr dwSize, uint flAllocationType, uint flProtect);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer,
+            IntPtr nSize, out IntPtr lpNumberOfBytesRead);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
         private static int Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
 
-            if (args.Length >= 2 && args[0] == "--engine") return RunEngineTest(args[1]);
+            if (args.Length >= 2 && args[0] == "--copytest") return RunCopyTest(args[1]);
+            if (args.Length >= 3 && args[0] == "--abi2") return RunManagedCallerTest(args[1], args[2]);
+            if (args.Length >= 2 && args[0] == "--hooktest") return RunHookTest(args[1]);
 
             var reversedOta = args.Contains("--reversed-ota");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
@@ -117,7 +235,8 @@ namespace PclDlSwap.ExLoaderHarness
             if (positional.Length < 1)
             {
                 Console.Error.WriteLine("usage: PclDlSwap.ExLoaderHarness <path-to-Pcl2Swap.Shim.x64.dll> [--reversed-ota]");
-                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --engine <path-to-PclDlSwap.Payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --copytest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --abi2 <payload.dll> <managed|stub>");
                 return 2;
             }
 
@@ -320,11 +439,115 @@ namespace PclDlSwap.ExLoaderHarness
         }
 
         /// <summary>
-        /// Direct exercise of the payload's x64 detour engine without the shim: proves the trampoline
-        /// for a blittable signature and for a managed-reference signature (the shape every real hook
-        /// in this project uses).
+        /// End-to-end v2 verification: DetourInstaller installs a managed-body hook, a JIT caller then calls
+        /// the hooked method 2000 times under GC pressure, and the original is reached through the IL copy.
         /// </summary>
-        private static int RunEngineTest(string payloadPath)
+        private static int RunHookTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var asm = Assembly.LoadFrom(full);
+            var detourType = asm.GetType("PclDlSwap.Payload.Hook.DetourInstaller", throwOnError: true);
+            var installMethod = detourType.GetMethod("Install",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            var invokeOriginal = detourType
+                .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .First(m => m.Name == "InvokeOriginal" && !m.IsGenericMethod);
+
+            var target = typeof(EngineProbe).GetMethod(nameof(EngineProbe.GcTarget2));
+            var hook = typeof(EngineProbe).GetMethod(nameof(EngineProbe.GcHookImpl2));
+            var detour = installMethod.Invoke(null, new object[] { target, hook });
+            Console.WriteLine("[hooktest] detour installed");
+            Console.Out.Flush();
+
+            const int iterations = 2000;
+            EngineProbe.GcTargetCalls = 0;
+            EngineProbe.GcHookCalls = 0;
+            for (int i = 0; i < iterations; i++)
+            {
+                var result = EngineProbe.ManagedCallGcTarget2();
+                if ((i % 500) == 0)
+                {
+                    Console.WriteLine("[hooktest] iter " + i + " result=" + result +
+                                      " hookCalls=" + EngineProbe.GcHookCalls);
+                    Console.Out.Flush();
+                }
+            }
+
+            var hookedOk = EngineProbe.GcHookCalls == iterations && EngineProbe.GcTargetCalls == 0;
+
+            EngineProbe.GcTargetCalls = 0;
+            var originalResult = invokeOriginal.Invoke(detour, new object[] { null, new object[] { "orig" } });
+            Console.WriteLine("[hooktest] original IL copy returned " + originalResult +
+                              " targetCalls=" + EngineProbe.GcTargetCalls);
+            Console.Out.Flush();
+            var originalOk = EngineProbe.GcTargetCalls == 1;
+
+            Console.WriteLine("[hooktest] hooked=" + hookedOk + " original=" + originalOk);
+            Console.WriteLine(hookedOk && originalOk ? "[hooktest] RESULT: PASS" : "[hooktest] RESULT: FAIL");
+            return hookedOk && originalOk ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Exercises the payload's IL-copy factory: the emitted copies must be ordinary managed methods with
+        /// the original behaviour (branching, calls, static-field side effects visible to the host).
+        /// </summary>
+        private static int RunCopyTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var asm = Assembly.LoadFrom(full);
+            var factoryType = asm.GetType("PclDlSwap.Payload.Host.OriginalFactory", throwOnError: true);
+            var create = factoryType.GetMethod("CreateCopy", BindingFlags.Public | BindingFlags.Static);
+            var failures = 0;
+
+            var calcCopy = (MethodInfo)create.Invoke(null,
+                new object[] { typeof(EngineProbe).GetMethod(nameof(EngineProbe.Calc)) });
+            var calcResult = (int)calcCopy.Invoke(null, new object[] { 3, 4 });
+            Console.WriteLine("[copy] Calc copy(3,4) = " + calcResult + " (expect 7)");
+            if (calcResult != 7) failures++;
+
+            var managedCopy = (MethodInfo)create.Invoke(null,
+                new object[] { typeof(EngineProbe).GetMethod(nameof(EngineProbe.Managed)) });
+            var m1 = (int)managedCopy.Invoke(null, new object[] { null });
+            var m2 = (int)managedCopy.Invoke(null, new object[] { new[] { "a", "b" } });
+            Console.WriteLine("[copy] Managed copy(null)=" + m1 + " (expect -1); copy(list)=" + m2 + " (expect 2)");
+            if (m1 != -1 || m2 != 2) failures++;
+
+            EngineProbe.RawProbeCalls = 0;
+            EngineProbe.RawProbeText = null;
+            var rawCopy = (MethodInfo)create.Invoke(null,
+                new object[] { typeof(EngineProbe).GetMethod(nameof(EngineProbe.RawProbe)) });
+            rawCopy.Invoke(null, new object[] { "copytest", null });
+            Console.WriteLine("[copy] RawProbe copy -> Text=" + EngineProbe.RawProbeText +
+                              " calls=" + EngineProbe.RawProbeCalls);
+            if (EngineProbe.RawProbeText != "raw:copytest:null" || EngineProbe.RawProbeCalls != 1) failures++;
+
+            var instance = new CopyProbeInstance();
+            var addCopy = (MethodInfo)create.Invoke(null,
+                new object[] { typeof(CopyProbeInstance).GetMethod(nameof(CopyProbeInstance.Add)) });
+            object instanceResult;
+            if (addCopy.IsStatic)
+                instanceResult = addCopy.Invoke(null, new object[] { instance, 3 });
+            else
+                instanceResult = addCopy.Invoke(instance, new object[] { 3 });
+            Console.WriteLine("[copy] instance copy static=" + addCopy.IsStatic + " Add(3) -> ret=" +
+                              instanceResult + " value=" + instance.Value + " (expect 8/8)");
+            if (!Equals(instanceResult, 8) || instance.Value != 8) failures++;
+
+            Console.WriteLine(failures == 0 ? "[copy] RESULT: PASS" : "[copy] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Reproduces the real failure shape: a JIT-compiled (managed) caller invokes a detoured method whose hook
+        /// performs allocations and GC. Mode "managed" points the detour at a managed method body (the intended
+        /// fix); mode "stub" points it at a Marshal.GetFunctionPointerForDelegate thunk (what the launcher
+        /// currently uses: a thunk that assumes it is entered from unmanaged code).
+        /// </summary>
+        private static int RunManagedCallerTest(string payloadPath, string mode)
         {
             var full = Path.GetFullPath(payloadPath);
             if (!File.Exists(full))
@@ -336,181 +559,146 @@ namespace PclDlSwap.ExLoaderHarness
             var assembly = Assembly.LoadFrom(full);
             var detourType = assembly.GetType("PclDlSwap.Payload.Hook.X64Detour", throwOnError: true);
             var installMethod = detourType.GetMethod("Install", BindingFlags.Public | BindingFlags.Static);
-            var trampolineProp = detourType.GetProperty("Trampoline", BindingFlags.Public | BindingFlags.Instance);
-            var failures = 0;
+            Console.WriteLine("[abi2] payload types resolved");
+            Console.Out.Flush();
 
-            // Mirror the shim: preload the x64 disassembler before any detour runs.
             var capstonePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 @".nuget\packages\gee.external.capstone\2.3.0\runtimes\win-x64\native\capstone.dll");
-            if (File.Exists(capstonePath))
+            if (File.Exists(capstonePath)) LoadLibraryW(capstonePath);
+            Console.WriteLine("[abi2] capstone preload attempted (exists=" + File.Exists(capstonePath) + ")");
+            Console.Out.Flush();
+
+            var rejectMode = string.Equals(mode, "reject", StringComparison.OrdinalIgnoreCase);
+            var targetName = rejectMode ? nameof(EngineProbe.GcTarget) : nameof(EngineProbe.GcTarget2);
+            var hookName = rejectMode ? nameof(EngineProbe.GcHookImpl) : nameof(EngineProbe.GcHookImpl2);
+
+            var targetMethod = typeof(EngineProbe).GetMethod(targetName);
+            RuntimeHelpers.PrepareMethod(targetMethod.MethodHandle);
+            var targetPtr = targetMethod.MethodHandle.GetFunctionPointer();
+
+            Delegate hookDelegate = null;
+            IntPtr hookPtr;
+            if (rejectMode || string.Equals(mode, "stub", StringComparison.OrdinalIgnoreCase))
             {
-                var handle = LoadLibraryW(capstonePath);
-                Console.WriteLine("  [step] capstone preloaded: 0x" + handle.ToInt64().ToString("X"));
+                hookDelegate = rejectMode
+                    ? (Delegate)new GcHook(EngineProbe.GcHookImpl)
+                    : new GcHook2(EngineProbe.GcHookImpl2);
+                hookPtr = Marshal.GetFunctionPointerForDelegate(hookDelegate);
+            }
+            else if (string.Equals(mode, "managed", StringComparison.OrdinalIgnoreCase))
+            {
+                var hookMethod = typeof(EngineProbe).GetMethod(hookName);
+                RuntimeHelpers.PrepareMethod(hookMethod.MethodHandle);
+                hookPtr = hookMethod.MethodHandle.GetFunctionPointer();
             }
             else
             {
-                Console.WriteLine("  [warn] x64 capstone.dll not found: " + capstonePath);
+                Console.Error.WriteLine("mode must be stub|managed|reject");
+                return 2;
             }
 
-            Console.WriteLine("[engine] A) blittable signature (int, int)");
-            var calcMethod = typeof(EngineProbe).GetMethod(nameof(EngineProbe.Calc));
-            DumpPrologue("EngineProbe.Calc", calcMethod);
-            RuntimeHelpers.PrepareMethod(calcMethod.MethodHandle);
-            var calcTarget = calcMethod.MethodHandle.GetFunctionPointer();
-            CalcHook calcHook = (a, b) => a * b;
-            Console.WriteLine("  [step] hook delegate pointer ...");
-            var calcHookPointer = Marshal.GetFunctionPointerForDelegate(calcHook);
-            Console.WriteLine("  [step] installing detour ...");
-            object calcDetour;
+            Console.WriteLine("[abi2] targetPtr=0x" + targetPtr.ToInt64().ToString("X") +
+                              " hookPtr=0x" + hookPtr.ToInt64().ToString("X") + " mode=" + mode);
+            Console.Out.Flush();
+
+            var probe = new byte[64];
+            IntPtr readBytes2;
+            var rpmOk = ReadProcessMemory(GetCurrentProcess(), targetPtr, probe, (IntPtr)probe.Length, out readBytes2);
+            Console.WriteLine("[abi2] target rpm64 ok=" + rpmOk + " read=" + readBytes2.ToInt64() +
+                              " bytes=" + BitConverter.ToString(probe).Replace("-", " "));
+            Console.Out.Flush();
+
+            object detour;
             try
             {
-                calcDetour = installMethod.Invoke(null, new object[] { calcTarget, calcHookPointer });
+                detour = installMethod.Invoke(null, new object[] { targetPtr, hookPtr });
             }
             catch (Exception ex)
             {
-                Console.WriteLine("  [error] detour install threw: " + ex.GetType().FullName + ": " + ex.Message +
-                                  " | inner=" + (ex.InnerException == null ? "(none)" : ex.InnerException.ToString()));
+                Console.WriteLine("[abi2] install threw: " + ex.GetType().Name + " | inner: " +
+                                  (ex.InnerException == null ? "(none)" : ex.InnerException.Message));
+                Console.Out.Flush();
+                if (rejectMode)
+                {
+                    Console.WriteLine("[abi2] RESULT: rejection path completed without a native crash");
+                    return 0;
+                }
                 return 1;
             }
-            Console.WriteLine("  [step] detour installed; reading trampoline ...");
-            var calcTrampoline = (IntPtr)trampolineProp.GetValue(calcDetour);
-            Console.WriteLine("  [step] trampoline = 0x" + calcTrampoline.ToInt64().ToString("X") +
-                              "; creating reverse delegate ...");
-            var calcOriginal = Marshal.GetDelegateForFunctionPointer<CalcHook>(calcTrampoline);
-
-            Console.WriteLine("  [step] invoking hooked Calc ...");
-            var hookedCalc = (int)calcMethod.Invoke(null, new object[] { 3, 4 });
-            Console.WriteLine("  [step] hooked Calc returned, invoking trampoline ...");
-            var trampolinedCalc = calcOriginal(3, 4);
-            Console.WriteLine("  hooked  Calc(3,4)   = " + hookedCalc + " (expect 12)");
-            Console.WriteLine("  original Calc(3,4) = " + trampolinedCalc + " (expect 7)");
-            if (hookedCalc != 12) failures++;
-            if (trampolinedCalc != 7) failures++;
-            GC.KeepAlive(calcHook);
-
-            Console.WriteLine("[engine] B) managed-reference signature (IEnumerable<string>)");
-            var managedMethod = typeof(EngineProbe).GetMethod(nameof(EngineProbe.Managed));
-            DumpPrologue("EngineProbe.Managed", managedMethod);
-            RuntimeHelpers.PrepareMethod(managedMethod.MethodHandle);
-            var managedTarget = managedMethod.MethodHandle.GetFunctionPointer();
-            ManagedHook managedHook = urls => 42;
-            var managedDetour = installMethod.Invoke(null,
-                new object[] { managedTarget, Marshal.GetFunctionPointerForDelegate(managedHook) });
-            var managedTrampoline = (IntPtr)trampolineProp.GetValue(managedDetour);
-
-            Console.WriteLine("  [step] invoking hooked Managed ...");
-            var hookedManaged = (int)managedMethod.Invoke(null, new object[] { null });
-            Console.WriteLine("  hooked  Managed(null)   = " + hookedManaged + " (expect 42)");
-            if (hookedManaged != 42) failures++;
-
-            var managedOriginal = Marshal.GetDelegateForFunctionPointer<ManagedHook>(managedTrampoline);
-            Console.WriteLine("  [step] invoking trampoline Managed ...");
-            var trampolinedManaged = managedOriginal(null);
-            Console.WriteLine("  original Managed(null) = " + trampolinedManaged + " (expect -1)");
-            if (trampolinedManaged != -1) failures++;
-            GC.KeepAlive(managedHook);
-
-            Console.WriteLine("[engine] C) UpdateStart-shaped delegate (Cdecl, bool + IEnumerable<string>)");
-            var updateMethod = typeof(EngineProbe).GetMethod(nameof(EngineProbe.UpdateProbe));
-            DumpPrologue("EngineProbe.UpdateProbe", updateMethod);
-            RuntimeHelpers.PrepareMethod(updateMethod.MethodHandle);
-            var updateTarget = updateMethod.MethodHandle.GetFunctionPointer();
-            UpdateProbeDelegate flatHook = (silent, urls) => { };
-            var updateDetour = installMethod.Invoke(null,
-                new object[] { updateTarget, Marshal.GetFunctionPointerForDelegate(flatHook) });
-            var updateTrampoline = (IntPtr)trampolineProp.GetValue(updateDetour);
-            var updateOriginal =
-                (UpdateProbeDelegate)Marshal.GetDelegateForFunctionPointer(updateTrampoline, typeof(UpdateProbeDelegate));
-            Console.WriteLine("  [step] C: calling trampoline directly ...");
-            var updateBefore = EngineProbe.UpdateProbeCalls;
-            updateOriginal(false, null);
-            Console.WriteLine("  [step] C: trampoline returned; calls delta = " +
-                              (EngineProbe.UpdateProbeCalls - updateBefore) + " (expect 1)");
-            if (EngineProbe.UpdateProbeCalls - updateBefore != 1) failures++;
-            GC.KeepAlive(flatHook);
-
-            Console.WriteLine("[engine] D) hook -> original nesting (the shape used in production)");
-            var nestedMethod = typeof(EngineProbe).GetMethod(nameof(EngineProbe.UpdateProbe2));
-            DumpPrologue("EngineProbe.UpdateProbe2", nestedMethod);
-            RuntimeHelpers.PrepareMethod(nestedMethod.MethodHandle);
-            var nestedTarget = nestedMethod.MethodHandle.GetFunctionPointer();
-            var nestedHook = EngineProbe.MakeNestedHook();
-            var nestedDetour = installMethod.Invoke(null,
-                new object[] { nestedTarget, Marshal.GetFunctionPointerForDelegate(nestedHook) });
-            var nestedTrampoline = (IntPtr)trampolineProp.GetValue(nestedDetour);
-            EngineProbe.SetNestedHookOriginal(
-                (UpdateProbeDelegate)Marshal.GetDelegateForFunctionPointer(nestedTrampoline,
-                    typeof(UpdateProbeDelegate)));
-            Console.WriteLine("  [step] D: invoking hooked method (hook calls the original) ...");
-            var nestedBefore = EngineProbe.UpdateProbeCalls;
-            nestedMethod.Invoke(null, new object[] { false, null });
-            Console.WriteLine("  [step] D: returned; calls delta = " +
-                              (EngineProbe.UpdateProbeCalls - nestedBefore) +
-                              ", hook invocations = " + EngineProbe.UpdateProbeHookInvocations);
-            if (EngineProbe.UpdateProbeCalls - nestedBefore != 1) failures++;
-            if (EngineProbe.UpdateProbeHookInvocations != 1) failures++;
-            GC.KeepAlive(nestedHook);
-
-            Console.WriteLine("[engine] E) raw pointer mirror + ObjectPointer round-trip (string + object)");
-            var objectPointerType = assembly.GetType("PclDlSwap.Payload.Hook.ObjectPointer", throwOnError: true);
-            var toObjectMethod = objectPointerType.GetMethods()
-                .First(m => m.Name == "ToObject" && !m.IsGenericMethod &&
-                            m.GetParameters().Length == 1);
-            var toPointerMethod = objectPointerType.GetMethods()
-                .First(m => m.Name == "ToPointer");
-
-            var roundTripText = new string("round-trip".ToCharArray());
-            var roundTripPtr = (IntPtr)toPointerMethod.Invoke(null, new object[] { roundTripText });
-            var roundTripBack = toObjectMethod.Invoke(null, new object[] { roundTripPtr });
-            Console.WriteLine("  [step] ObjectPointer round-trip = " + roundTripBack + " (expect " + roundTripText + ")");
-            if (!Equals(roundTripBack, roundTripText)) failures++;
-            GC.KeepAlive(roundTripText);
-
-            var rawMethod = typeof(EngineProbe).GetMethod(nameof(EngineProbe.RawProbe));
-            DumpPrologue("EngineProbe.RawProbe", rawMethod);
-            RuntimeHelpers.PrepareMethod(rawMethod.MethodHandle);
-            var rawTarget = rawMethod.MethodHandle.GetFunctionPointer();
-            string capturedText = null;
-            object capturedPayload = null;
-            RawProbeHook rawHook = (textPtr, payloadPtr) =>
+            Console.WriteLine("[abi2] mode=" + mode + " detour installed; hookPtr=0x" + hookPtr.ToInt64().ToString("X"));
+            Console.Out.Flush();
+            if (rejectMode)
             {
-                capturedText = (string)toObjectMethod.Invoke(null, new object[] { textPtr });
-                capturedPayload = toObjectMethod.Invoke(null, new object[] { payloadPtr });
-            };
-            var rawDetour = installMethod.Invoke(null,
-                new object[] { rawTarget, Marshal.GetFunctionPointerForDelegate(rawHook) });
-            var rawTrampoline = (IntPtr)trampolineProp.GetValue(rawDetour);
-            var rawOriginal = Marshal.GetDelegateForFunctionPointer<RawProbeHook>(rawTrampoline);
+                Console.WriteLine("[abi2] RESULT: reject mode installed unexpectedly (engine should have refused)");
+                return 1;
+            }
 
-            EngineProbe.RawProbeCalls = 0;
-            var payloadToken = new object();
-            Console.WriteLine("  [step] E1: calling hooked method with managed references ...");
-            rawMethod.Invoke(null, new object[] { "hello", payloadToken });
-            Console.WriteLine("  captured text = " + capturedText + " (expect hello); payload same reference = " +
-                              ReferenceEquals(capturedPayload, payloadToken) + "; original calls = " +
-                              EngineProbe.RawProbeCalls + " (expect 0)");
-            if (capturedText != "hello") failures++;
-            if (!ReferenceEquals(capturedPayload, payloadToken)) failures++;
-            if (EngineProbe.RawProbeCalls != 0) failures++;
+            const int iterations = 2000;
+            for (int i = 0; i < iterations; i++)
+            {
+                if (i < 5)
+                {
+                    Console.WriteLine("[abi2] before managed call " + i);
+                    Console.Out.Flush();
+                }
+                var result = EngineProbe.ManagedCallGcTarget2();
+                if ((i % 100) == 0 || i == iterations - 1)
+                    Console.WriteLine("[abi2] iter " + i + " result=" + result +
+                                      " targetCalls=" + EngineProbe.GcTargetCalls +
+                                      " hookCalls=" + EngineProbe.GcHookCalls);
+            }
 
-            EngineProbe.RawProbeCalls = 0;
-            EngineProbe.RawProbeText = null;
-            var trampolineText = new string("via-ptr".ToCharArray());
-            var trampolinePayloadPtr = (IntPtr)toPointerMethod.Invoke(null, new object[] { payloadToken });
-            Console.WriteLine("  [step] E2: calling trampoline with pointers ...");
-            rawOriginal((IntPtr)toPointerMethod.Invoke(null, new object[] { trampolineText }), trampolinePayloadPtr);
-            Console.WriteLine("  RawProbeText = " + EngineProbe.RawProbeText +
-                              " (expect raw:via-ptr:Object); calls = " + EngineProbe.RawProbeCalls);
-            if (EngineProbe.RawProbeText != "raw:via-ptr:Object") failures++;
-            if (EngineProbe.RawProbeCalls != 1) failures++;
-            GC.KeepAlive(trampolineText);
-            GC.KeepAlive(payloadToken);
-            GC.KeepAlive(rawHook);
+            Console.WriteLine("[abi2] RESULT: survived " + iterations + " managed calls (hookCalls=" +
+                              EngineProbe.GcHookCalls + ", targetCalls=" + EngineProbe.GcTargetCalls + ")");
+            GC.KeepAlive(hookDelegate);
+            return 0;
+        }
 
-            Console.WriteLine(failures == 0
-                ? "[engine] RESULT: PASS"
-                : "[engine] RESULT: FAIL (" + failures + " check(s))");
-            return failures == 0 ? 0 : 1;
+        /// <summary>
+        /// Direct exercise of the payload's x64 detour engine without the shim: proves the trampoline
+        /// for a blittable signature and for a managed-reference signature (the shape every real hook
+        /// in this project uses).
+        /// </summary>
+        /// </summary>
+        private static byte[] BuildRegisterChecker()
+        {
+            const ulong s1 = 0x1111111111111111UL;
+            const ulong s2 = 0x2222222222222222UL;
+            const ulong s3 = 0x3333333333333333UL;
+            const ulong s4 = 0x4444444444444444UL;
+            const ulong s5 = 0x5555555555555555UL;
+            const ulong s6 = 0x6666666666666666UL;
+            const ulong s7 = 0x7777777777777777UL;
+
+            var code = new List<byte>();
+            code.AddRange(new byte[] { 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
+            code.AddRange(new byte[] { 0x48, 0x83, 0xEC, 0x20 });
+            code.AddRange(MovImm64(0xBB, s1));
+            code.AddRange(MovImm64(0xBE, s2));
+            code.AddRange(MovImm64(0xBF, s3));
+            code.AddRange(MovImm64(0xBC, s4, true));
+            code.AddRange(MovImm64(0xBD, s5, true));
+            code.AddRange(MovImm64(0xBE, s6, true));
+            code.AddRange(MovImm64(0xBF, s7, true));
+            code.AddRange(new byte[] { 0xFF, 0xD1 });
+            code.AddRange(MovImm64(0xBA, s1)); code.AddRange(new byte[] { 0x48, 0x31, 0xD3, 0x48, 0x89, 0xD8 });
+            code.AddRange(MovImm64(0xBA, s2)); code.AddRange(new byte[] { 0x48, 0x31, 0xD6, 0x48, 0x09, 0xF0 });
+            code.AddRange(MovImm64(0xBA, s3)); code.AddRange(new byte[] { 0x48, 0x31, 0xD7, 0x48, 0x09, 0xF8 });
+            code.AddRange(MovImm64(0xBA, s4)); code.AddRange(new byte[] { 0x49, 0x31, 0xD4, 0x4C, 0x09, 0xE0 });
+            code.AddRange(MovImm64(0xBA, s5)); code.AddRange(new byte[] { 0x49, 0x31, 0xD5, 0x4C, 0x09, 0xE8 }); // xor r13,rdx
+            code.AddRange(MovImm64(0xBA, s6)); code.AddRange(new byte[] { 0x49, 0x31, 0xD6, 0x4C, 0x09, 0xF0 }); // xor r14,rdx
+            code.AddRange(MovImm64(0xBA, s7)); code.AddRange(new byte[] { 0x49, 0x31, 0xD7, 0x4C, 0x09, 0xF8 }); // xor r15,rdx
+            code.AddRange(new byte[] { 0x48, 0x83, 0xC4, 0x20 });
+            code.AddRange(new byte[] { 0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C, 0x5F, 0x5E, 0x5B });
+            code.Add(0xC3);
+            return code.ToArray();
+        }
+
+        private static byte[] MovImm64(byte opcode, ulong value, bool rexB = false)
+        {
+            var bytes = new List<byte> { (byte)(0x48 | (rexB ? 0x01 : 0x00)), opcode };
+            bytes.AddRange(BitConverter.GetBytes(value));
+            return bytes.ToArray();
         }
 
         private static void ResetLogs()

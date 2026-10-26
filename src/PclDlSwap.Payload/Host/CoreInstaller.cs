@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -474,25 +475,54 @@ namespace PclDlSwap.Payload.Host
         private static void HookDownloadByLoader(object urls, string localPath, object loader,
             object checker, bool simulateBrowserHeaders)
         {
+            // Let PCL's own downloader run: it is multi-source and segmented, while the earlier flow
+            // re-downloaded every launcher-cloud file through a single-threaded WebClient inside this
+            // hook. Only the extensions that can execute or carry code are scanned afterwards.
+            _downloadByLoaderEnumerable.InvokeOriginal(null, urls, localPath, loader, checker, simulateBrowserHeaders);
+
+            if (Environment.GetEnvironmentVariable("PCL2SWAP_TEST_NOOP") == "1") return;
             var list = (urls as IEnumerable<string>)?.ToList() ?? new List<string>();
-            bool isCloud = IsPclCloud(list);
-            SwapLog.Info($"下载门回调：isCloud={isCloud} path={localPath} urls={(list.Count == 0 ? "(empty)" : string.Join(",", list))}");
-            if (Environment.GetEnvironmentVariable("PCL2SWAP_TEST_NOOP") == "1")
-            {
-                // Argument-correctness probe: log and forward without touching the sandbox.
-                _downloadByLoaderEnumerable.InvokeOriginal(null, urls, localPath, loader, checker, simulateBrowserHeaders);
-                return;
-            }
-            if (!isCloud)
-            {
-                _downloadByLoaderEnumerable.InvokeOriginal(null, urls, localPath, loader, checker, simulateBrowserHeaders);
-                return;
-            }
+            if (IsPclCloud(list)) VerifyCloudDownload(localPath);
+        }
 
-            SwapLog.Info("PCL 云下载进入沙箱：" + localPath);
-            var result = _sandbox.FetchAndPublish(list.ToArray(), localPath);
-            SwapLog.Info("沙箱结果：" + (result.Success ? "通过" : result.Blocked ? "拦截" : "失败") + " | " + result.Summary);
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void HookDownloadByLoaderSingle(string url, string localPath, object loader,
+            object checker, bool simulateBrowserHeaders)
+        {
+            _downloadByLoaderString.InvokeOriginal(null, url, localPath, loader, checker, simulateBrowserHeaders);
 
+            if (Environment.GetEnvironmentVariable("PCL2SWAP_TEST_NOOP") == "1") return;
+            if (IsPclCloud(new[] { url })) VerifyCloudDownload(localPath);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void HookDownloadByClient(string url, string localPath, bool simulateBrowserHeaders)
+        {
+            _downloadByClient.InvokeOriginal(null, url, localPath, simulateBrowserHeaders);
+
+            if (Environment.GetEnvironmentVariable("PCL2SWAP_TEST_NOOP") == "1") return;
+            if (IsPclCloud(new[] { url })) VerifyCloudDownload(localPath);
+        }
+
+        /// <summary>
+        /// Scans a file PCL just downloaded from its own cloud, and aborts the download (deleting the
+        /// file first) when a scanner objects. Content the launcher fetches constantly - version
+        /// indexes, icons, translations - is not scanned at all, because a MpCmdRun process per file
+        /// was the dominant cost in the field report.
+        ///
+        /// Owner's policy (2026-10-26): game content - game files, mods, resource packs and shaders,
+        /// i.e. everything that lands inside the Minecraft directory - skips the scanner entirely;
+        /// files fetched from PCL's own servers (the new-version package and friends) keep it.
+        /// </summary>
+        private static void VerifyCloudDownload(string localPath)
+        {
+            if (string.IsNullOrEmpty(localPath) || !File.Exists(localPath)) return;
+            if (!ScannerSet.ShouldScan(localPath)) return;
+            if (IsGameContentPath(localPath)) return;
+
+            var result = _sandbox.VerifyDownloadedFile(localPath);
+            SwapLog.Info("云下载查毒：" + (result.Success ? "通过" : result.Blocked ? "拦截" : "失败") +
+                         " | " + localPath + " | " + result.Summary.Replace(Environment.NewLine, " "));
             if (!result.Success)
             {
                 if (result.Blocked)
@@ -502,44 +532,24 @@ namespace PclDlSwap.Payload.Host
             }
         }
 
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private static void HookDownloadByLoaderSingle(string url, string localPath, object loader,
-            object checker, bool simulateBrowserHeaders)
+        private static readonly string[] GameContentMarkers =
         {
-            if (!IsPclCloud(new[] { url }))
-            {
-                _downloadByLoaderString.InvokeOriginal(null, url, localPath, loader, checker, simulateBrowserHeaders);
-                return;
-            }
+            "\\.minecraft\\", "\\mods\\", "\\resourcepacks\\", "\\shaderpacks\\", "\\versions\\"
+        };
 
-            SwapLog.Info("PCL 云下载进入沙箱（单链接重载）：" + localPath);
-            var result = _sandbox.FetchAndPublish(new[] { url }, localPath);
-            SwapLog.Info("沙箱结果：" + (result.Success ? "通过" : result.Blocked ? "拦截" : "失败") + " | " + result.Summary);
-            if (!result.Success)
-            {
-                if (result.Blocked)
-                    Dialogs.OnStaThread(() => { Dialogs.BlockedDownload(localPath, result.Summary); return 0; }, 0);
-                throw new InvalidOperationException("PCL2 DLL-Swap 已阻止未通过病毒检测的下载：" + result.Summary);
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private static void HookDownloadByClient(string url, string localPath, bool simulateBrowserHeaders)
+        /// <summary>
+        /// True when the download lands inside a Minecraft directory. The markers are matched as whole
+        /// path segments ("\mods\" does not match "\mymods\"), so only actual game content is skipped.
+        /// </summary>
+        private static bool IsGameContentPath(string path)
         {
-            if (!IsPclCloud(new[] { url }))
+            if (string.IsNullOrEmpty(path)) return false;
+            var normalized = path.Replace('/', '\\');
+            foreach (var marker in GameContentMarkers)
             {
-                _downloadByClient.InvokeOriginal(null, url, localPath, simulateBrowserHeaders);
-                return;
+                if (normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0) return true;
             }
-
-            SwapLog.Info("PCL 云下载（单链接）进入沙箱：" + localPath);
-            var result = _sandbox.FetchAndPublish(new[] { url }, localPath);
-            if (!result.Success)
-            {
-                if (result.Blocked)
-                    Dialogs.OnStaThread(() => { Dialogs.BlockedDownload(localPath, result.Summary); return 0; }, 0);
-                throw new InvalidOperationException("PCL2 DLL-Swap 已阻止未通过病毒检测的下载：" + result.Summary);
-            }
+            return false;
         }
 
         private static bool IsPclCloud(IEnumerable<string> urls)

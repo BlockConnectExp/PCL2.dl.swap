@@ -8,12 +8,15 @@ namespace PclDlSwap.Payload.Host
     internal static class SwapLog
     {
         private static readonly object Sync = new object();
+        private static volatile bool _mirrorDisabled;
+        private static MethodInfo _hostLogger;
+        private static bool _hostLoggerProbed;
 
         /// <summary>Displayed version of the tool, reused by the About page entry.</summary>
-        public const string ToolVersion = "v26.0-Alpha 5";
+        public const string ToolVersion = "v26.0-Alpha 2";
 
         /// <summary>File-system friendly form of <see cref="ToolVersion"/>.</summary>
-        public const string ToolVersionCompact = "v26.0-Alpha5";
+        public const string ToolVersionCompact = "v26.0-Alpha2";
 
         /// <summary>
         /// Primary log lives under %TEMP% so the injected form always has a writable, predictable
@@ -45,7 +48,7 @@ namespace PclDlSwap.Payload.Host
                 try
                 {
                     var mirror = Path.GetDirectoryName(MirrorLogPath);
-                    if (!string.IsNullOrEmpty(mirror))
+                    if (!_mirrorDisabled && !string.IsNullOrEmpty(mirror))
                     {
                         Directory.CreateDirectory(mirror);
                         File.AppendAllText(MirrorLogPath, line + Environment.NewLine, Encoding.UTF8);
@@ -54,6 +57,7 @@ namespace PclDlSwap.Payload.Host
                 catch
                 {
                     // the mirror is optional; the %TEMP% log is authoritative
+                    _mirrorDisabled = true;
                 }
                 TryHostLogger(level, message);
             }
@@ -63,12 +67,15 @@ namespace PclDlSwap.Payload.Host
         {
             try
             {
-                var host = Assembly.GetEntryAssembly();
-                var logger = host?.GetType("PCL.PclLogger", throwOnError: false);
-                if (logger == null) return;
-                var method = logger.GetMethod("Info", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-                    null, new[] { typeof(string) }, null);
-                method?.Invoke(null, new object[] { "[PCL2.dl.swap] " + message });
+                if (!_hostLoggerProbed)
+                {
+                    _hostLoggerProbed = true;
+                    var host = Assembly.GetEntryAssembly();
+                    var logger = host?.GetType("PCL.PclLogger", throwOnError: false);
+                    _hostLogger = logger?.GetMethod("Info", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                        null, new[] { typeof(string) }, null);
+                }
+                _hostLogger?.Invoke(null, new object[] { "[PCL2.dl.swap] " + message });
             }
             catch
             {

@@ -231,6 +231,7 @@ namespace PclDlSwap.ExLoaderHarness
             if (args.Length >= 2 && args[0] == "--hooktest") return RunHookTest(args[1]);
             if (args.Length >= 2 && args[0] == "--uitest") return RunUiThreadTest(args[1]);
             if (args.Length >= 3 && args[0] == "--manifest") return RunManifestTest(args[1], args[2]);
+            if (args.Length >= 2 && args[0] == "--scantest") return RunScanPolicyTest(args[1]);
 
             var reversedOta = args.Contains("--reversed-ota");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
@@ -243,6 +244,7 @@ namespace PclDlSwap.ExLoaderHarness
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --hooktest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --uitest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --manifest <payload.dll> <host.exe>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --scantest <payload.dll>");
                 return 2;
             }
 
@@ -395,6 +397,7 @@ namespace PclDlSwap.ExLoaderHarness
             {
                 if (sidebar.ItemInstall.Visibility == PCL.StubVisibility.Visible &&
                     sidebar.PageID == PCL.FormMain.PageSubType.Default &&
+                    PCL.ModMain.FrmDownloadInstall != null &&
                     about.PanMain.Children.Count == 2)
                     break;
                 Thread.Sleep(100);
@@ -402,9 +405,31 @@ namespace PclDlSwap.ExLoaderHarness
             checks.Add(("sidebar poller restores the collapsed entry",
                 sidebar.ItemInstall.Visibility == PCL.StubVisibility.Visible &&
                 sidebar.PageID == PCL.FormMain.PageSubType.Default &&
-                sidebar.ItemMod.Checked == false,
+                sidebar.ItemMod.Checked == false &&
+                PCL.ModMain.FrmDownloadInstall != null,
                 "visibility=" + sidebar.ItemInstall.Visibility + " pageId=" + sidebar.PageID +
-                " modChecked=" + sidebar.ItemMod.Checked));
+                " modChecked=" + sidebar.ItemMod.Checked +
+                " installPage=" + (PCL.ModMain.FrmDownloadInstall != null)));
+
+            // The field crash (22:23:35 / 22:25:28): ItemInstall_Click runs
+            // FrmDownloadInstall.ExitSelectPage() as soon as the entry is checked. The old repair
+            // wrote the PageID field directly, skipped PageGet and left FrmDownloadInstall null, so
+            // that click died with a NullReferenceException. The restored entry must be click-safe.
+            var clickCallsBefore = PCL.PageDownloadInstall.ExitSelectPageCalls;
+            var clickSafe = true;
+            try
+            {
+                if (sidebar.ItemInstall.Checked) PCL.ModMain.FrmDownloadInstall.ExitSelectPage();
+            }
+            catch (NullReferenceException)
+            {
+                clickSafe = false;
+            }
+            checks.Add(("clicking the restored entry cannot hit the field NullReferenceException",
+                clickSafe &&
+                PCL.ModMain.FrmDownloadInstall != null &&
+                PCL.PageDownloadInstall.ExitSelectPageCalls == clickCallsBefore + 1,
+                "exitSelectPageCalls=" + PCL.PageDownloadInstall.ExitSelectPageCalls));
             checks.Add(("About poller inserts the brand row",
                 about.PanMain.Children.Count == 2 &&
                 about.PanMain.Children[1] is PCL.MyListItem &&
@@ -550,6 +575,52 @@ namespace PclDlSwap.ExLoaderHarness
             }
 
             Console.WriteLine(failures == 0 ? "[manifest] RESULT: PASS" : "[manifest] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Regression test for the scan policy: only files that can execute or carry code are worth a
+        /// scan, and Owner's policy excludes everything landing inside the Minecraft directory (game
+        /// files, mods, resource packs, shaders) while keeping launcher files fetched from PCL's
+        /// servers. Both rules together are what removed the field report's performance loss.
+        /// </summary>
+        private static int RunScanPolicyTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var payload = Assembly.LoadFrom(full);
+            var scannerType = payload.GetType("PclDlSwap.Payload.Sandbox.ScannerSet", throwOnError: true);
+            var shouldScan = scannerType.GetMethod("ShouldScan", BindingFlags.Public | BindingFlags.Static);
+            var coreType = payload.GetType("PclDlSwap.Payload.Host.CoreInstaller", throwOnError: true);
+            var isGamePath = coreType.GetMethod("IsGameContentPath", BindingFlags.NonPublic | BindingFlags.Static);
+            if (shouldScan == null || isGamePath == null)
+            {
+                Console.Error.WriteLine("[scan] payload is missing ShouldScan/IsGameContentPath");
+                return 1;
+            }
+
+            var failures = 0;
+            void Expect(string label, Func<object> call, object expected)
+            {
+                var actual = call();
+                var ok = Equals(actual, expected);
+                Console.WriteLine((ok ? "[scan] ok   " : "[scan] FAIL ") + label + " => " + actual +
+                                  " (expect " + expected + ")");
+                if (!ok) failures++;
+            }
+
+            Expect("ShouldScan(PCL update .exe)", () => shouldScan.Invoke(null, new object[] { @"C:\Temp\PCL\update.exe" }), true);
+            Expect("ShouldScan(version index .json)", () => shouldScan.Invoke(null, new object[] { @"C:\Temp\PCL\index.json" }), false);
+            Expect("ShouldScan(mod .jar)", () => shouldScan.Invoke(null, new object[] { @"C:\MC\mods\mod.jar" }), true);
+            Expect("IsGameContentPath(.minecraft\\mods)", () => isGamePath.Invoke(null, new object[] { @"C:\Users\x\.minecraft\mods\a.jar" }), true);
+            Expect("IsGameContentPath(shaderpacks)", () => isGamePath.Invoke(null, new object[] { @"D:\MC\shaderpacks\a.zip" }), true);
+            Expect("IsGameContentPath(resourcepacks)", () => isGamePath.Invoke(null, new object[] { @"D:\MC\resourcepacks\a.zip" }), true);
+            Expect("IsGameContentPath(versions)", () => isGamePath.Invoke(null, new object[] { @"D:\MC\versions\1.21\client.jar" }), true);
+            Expect("IsGameContentPath(PCL update temp)", () => isGamePath.Invoke(null, new object[] { @"C:\Users\x\AppData\Local\Temp\PCL\update.exe" }), false);
+            Expect("IsGameContentPath(mymods trap)", () => isGamePath.Invoke(null, new object[] { @"C:\Tools\mymods\a.exe" }), false);
+
+            Console.WriteLine(failures == 0 ? "[scan] RESULT: PASS" : "[scan] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
         }
 
@@ -1112,6 +1183,15 @@ namespace PCL
             var pad = "harness.onfinish";
             OnFinishCalls += pad.Length > 0 ? 1 : 0;
         }
+
+        public static int ExitSelectPageCalls;
+
+        /// <summary>The handler that crashed in the field (ItemInstall_Click calls this).</summary>
+        public void ExitSelectPage()
+        {
+            var pad = "harness.exitselect.";
+            ExitSelectPageCalls += pad.Length > 0 ? 1 : 0;
+        }
     }
 
     /// <summary>WPF-free visibility enum for the sidebar stub.</summary>
@@ -1167,9 +1247,31 @@ namespace PCL
     /// <summary>Stand-in for PCL.PageDownloadLeft (members are VB.NET properties on the real class).</summary>
     public class PageDownloadLeft
     {
-        public StubItem ItemInstall { get; } = new StubItem { Visibility = StubVisibility.Collapsed };
+        public StubItem ItemInstall { get; } = new StubItem { Visibility = StubVisibility.Collapsed, Checked = false };
         public StubItem ItemMod { get; } = new StubItem { Checked = true };
         public FormMain.PageSubType PageID = FormMain.PageSubType.Mod;
+        public int PageChangeCalls;
+
+        /// <summary>Mirrors PCL's PageChange: early-returns on the current id, otherwise resolves through PageGet.</summary>
+        public void PageChange(FormMain.PageSubType id)
+        {
+            PageChangeCalls++;
+            if (PageID == id) return;
+            PageGet(id);
+            PageID = id;
+        }
+
+        /// <summary>Mirrors PCL's PageGet: creates the sub-page object on first use.</summary>
+        public object PageGet(FormMain.PageSubType id = (FormMain.PageSubType)(-1))
+        {
+            if (id == (FormMain.PageSubType)(-1)) id = PageID;
+            if (id == FormMain.PageSubType.Default)
+            {
+                if (ModMain.FrmDownloadInstall == null) ModMain.FrmDownloadInstall = new PageDownloadInstall();
+                return ModMain.FrmDownloadInstall;
+            }
+            return null;
+        }
     }
 
     /// <summary>Stand-in for PCL.PageOtherAbout with the properties the branding insert reads.</summary>
@@ -1204,6 +1306,7 @@ namespace PCL
         // Lazy page references the pollers watch (the real launcher news these up on first visit).
         public static PageDownloadLeft FrmDownloadLeft;
         public static PageOtherAbout FrmOtherAbout;
+        public static PageDownloadInstall FrmDownloadInstall;
 
         public static int MsgBoxCalls;
         public static int NextResult;

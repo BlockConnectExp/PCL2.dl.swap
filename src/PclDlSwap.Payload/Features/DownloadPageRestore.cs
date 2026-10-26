@@ -168,28 +168,75 @@ namespace PclDlSwap.Payload.Features
                         return;
                     }
 
-                    if (string.Equals(Convert.ToString(visibility), "Visible", StringComparison.Ordinal))
+                    var host = Assembly.GetEntryAssembly();
+                    var pageSubType = host?.GetType("PCL.FormMain+PageSubType", throwOnError: false);
+                    var defaultId = pageSubType == null ? null : Enum.Parse(pageSubType, "Default");
+                    var modMain = host?.GetType("PCL.ModMain", throwOnError: false);
+
+                    var currentId = PclUi.GetMember(page, "PageID");
+                    var installPage = modMain == null ? null : PclUi.GetMember(modMain, "FrmDownloadInstall");
+                    bool alreadyVisible = string.Equals(Convert.ToString(visibility), "Visible", StringComparison.Ordinal);
+                    bool alreadyDefault = defaultId == null || Equals(currentId, defaultId);
+
+                    if (alreadyVisible && alreadyDefault && installPage != null)
                     {
-                        // 2.99.0 and older already show the entry - nothing to repair.
+                        // 2.99.0 and older already show the entry on the Default sub-page.
                         _sidebarFixed = true;
-                        SwapLog.Info("下载侧栏“原版游戏”项本就可见，无需修复。");
+                        SwapLog.Info("下载侧栏“原版游戏”项本就可见且页面已就绪，无需修复。");
                         return;
                     }
 
+                    // 1) Restore the entry itself.
                     var visibleValue = visibility.GetType().IsEnum
                         ? Enum.Parse(visibility.GetType(), "Visible")
                         : (object)"Visible";
                     PclUi.SetMember(itemInstall, "Visibility", visibleValue);
 
-                    var host = Assembly.GetEntryAssembly();
-                    var pageSubType = host?.GetType("PCL.FormMain+PageSubType");
-                    if (pageSubType != null)
-                        PclUi.SetMember(page, "PageID", Enum.Parse(pageSubType, "Default"));
+                    // 2) Let PCL's own navigation run. Setting Checked drives Check -> PageCheck ->
+                    //    PageChange(Default) inside the real launcher, which is what creates
+                    //    ModMain.FrmDownloadInstall through PageGet. Writing the PageID field directly
+                    //    used to skip PageGet entirely, and the next click then died in
+                    //    ItemInstall_Click (FrmDownloadInstall.ExitSelectPage on a null reference) -
+                    //    the crash in the field logs at 22:23:35 and 22:25:28.
+                    var checkedState = PclUi.GetMember(itemInstall, "Checked");
+                    if (!(checkedState is bool isChecked && isChecked))
+                        PclUi.SetMember(itemInstall, "Checked", true);
+
+                    // 3) Fallback for shapes where the Checked change cannot raise the event: run the
+                    //    launcher's own sub-page switch. PageChange returns early when PageID already
+                    //    equals its target, so this also covers a half-restored state.
+                    currentId = PclUi.GetMember(page, "PageID");
+                    if (defaultId != null && !Equals(currentId, defaultId))
+                    {
+                        PclUi.Invoke(page, "PageChange", defaultId);
+                        currentId = PclUi.GetMember(page, "PageID");
+                    }
+
+                    // 4) Make sure the sub-page object exists: create it through PCL's own PageGet
+                    //    (identical to what the launcher does) when navigation did not.
+                    installPage = modMain == null ? null : PclUi.GetMember(modMain, "FrmDownloadInstall");
+                    if (installPage == null && defaultId != null)
+                    {
+                        try { installPage = PclUi.Invoke(page, "PageGet", defaultId); }
+                        catch (Exception ex) { SwapLog.Warn("下载侧栏恢复：PageGet(Default) 失败：" + ex.Message); }
+                    }
+
                     if (itemMod != null)
+                    {
+                        // Checked=false never raises the Check event, so this cannot bounce the
+                        // sub-page back to the mod list.
                         PclUi.SetMember(itemMod, "Checked", false);
+                    }
+
+                    if (installPage == null)
+                    {
+                        NoteSidebarFailure("下载侧栏恢复：FrmDownloadInstall 仍未创建",
+                            new InvalidOperationException("FrmDownloadInstall=null"));
+                        return;
+                    }
 
                     _sidebarFixed = true;
-                    SwapLog.Info("下载侧栏“原版游戏”项已恢复可见，并把默认子页切回原版游戏。");
+                    SwapLog.Info("下载侧栏“原版游戏”项已恢复：项可见、子页为 Default、FrmDownloadInstall 已就绪。");
                 }
                 catch (Exception ex)
                 {

@@ -14,6 +14,13 @@ namespace PclDlSwap.Payload.Host
         private const BindingFlags AnyMember =
             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
 
+        private static readonly object CacheLock = new object();
+        private static Type _applicationType;
+        private static Type _dispatcherType;
+        private static MethodInfo _checkAccessMethod;
+        private static MethodInfo _invokeWithArgs;
+        private static MethodInfo _invokeAction;
+
         private static Assembly Host => Assembly.GetEntryAssembly();
 
         private static Type HostType(string name) => Host?.GetType(name, throwOnError: false);
@@ -27,7 +34,8 @@ namespace PclDlSwap.Payload.Host
                 if (dispatcher == null)
                     return body();
 
-                var checkAccess = dispatcher.GetType().GetMethod("CheckAccess", Type.EmptyTypes);
+                EnsureDispatcherMethods(dispatcher.GetType());
+                var checkAccess = GetCheckAccessMethod();
                 if (checkAccess != null && (bool)checkAccess.Invoke(dispatcher, null))
                     return body();
 
@@ -67,6 +75,21 @@ namespace PclDlSwap.Payload.Host
         /// </summary>
         private static Type ResolveApplicationType()
         {
+            lock (CacheLock)
+            {
+                if (_applicationType != null) return _applicationType;
+            }
+
+            var resolved = FindApplicationType();
+            if (resolved != null)
+            {
+                lock (CacheLock) { _applicationType = resolved; }
+            }
+            return resolved;
+        }
+
+        private static Type FindApplicationType()
+        {
             var type = Type.GetType("System.Windows.Application, PresentationFramework", throwOnError: false);
             if (type != null) return type;
 
@@ -97,14 +120,11 @@ namespace PclDlSwap.Payload.Host
 
         private static T InvokeOnDispatcher<T>(object dispatcher, Func<T> body, T fallback)
         {
-            var methods = dispatcher.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance);
+            EnsureDispatcherMethods(dispatcher.GetType());
+            var withArgs = GetInvokeWithArgs();
+            var actionInvoke = GetInvokeAction();
 
             // WPF: public object Invoke(Delegate method, params object[] args)
-            var withArgs = methods.FirstOrDefault(m =>
-                m.Name == "Invoke" &&
-                m.GetParameters().Length == 2 &&
-                m.GetParameters()[0].ParameterType == typeof(Delegate) &&
-                m.GetParameters()[1].ParameterType == typeof(object[]));
             if (withArgs != null)
             {
                 var result = withArgs.Invoke(dispatcher, new object[] { body, new object[0] });
@@ -113,11 +133,6 @@ namespace PclDlSwap.Payload.Host
             }
 
             // WPF: public void Invoke(Action callback)
-            var actionInvoke = methods.FirstOrDefault(m =>
-                m.Name == "Invoke" &&
-                m.GetParameters().Length == 1 &&
-                m.GetParameters()[0].ParameterType == typeof(Action) &&
-                m.ReturnType == typeof(void));
             if (actionInvoke != null)
             {
                 var result = fallback;
@@ -134,6 +149,44 @@ namespace PclDlSwap.Payload.Host
 
             SwapLog.Warn("PclUi.OnUiThread：Dispatcher 上没有可用的 Invoke 重载，跳过该次 UI 更新以避免跨线程访问。");
             return fallback;
+        }
+
+        // Reflection lookups on the dispatcher are cached per type; OnUiThread sits on the pollers'
+        // hot path (every 300 ms until a page repair lands).
+        private static void EnsureDispatcherMethods(Type dispatcherType)
+        {
+            lock (CacheLock)
+            {
+                if (_dispatcherType == dispatcherType) return;
+                var methods = dispatcherType.GetMethods(BindingFlags.Public | BindingFlags.Instance);
+                _checkAccessMethod = dispatcherType.GetMethod("CheckAccess", Type.EmptyTypes);
+                _invokeWithArgs = methods.FirstOrDefault(m =>
+                    m.Name == "Invoke" &&
+                    m.GetParameters().Length == 2 &&
+                    m.GetParameters()[0].ParameterType == typeof(Delegate) &&
+                    m.GetParameters()[1].ParameterType == typeof(object[]));
+                _invokeAction = methods.FirstOrDefault(m =>
+                    m.Name == "Invoke" &&
+                    m.GetParameters().Length == 1 &&
+                    m.GetParameters()[0].ParameterType == typeof(Action) &&
+                    m.ReturnType == typeof(void));
+                _dispatcherType = dispatcherType;
+            }
+        }
+
+        private static MethodInfo GetCheckAccessMethod()
+        {
+            lock (CacheLock) { return _checkAccessMethod; }
+        }
+
+        private static MethodInfo GetInvokeWithArgs()
+        {
+            lock (CacheLock) { return _invokeWithArgs; }
+        }
+
+        private static MethodInfo GetInvokeAction()
+        {
+            lock (CacheLock) { return _invokeAction; }
         }
 
         public static void OnUiThread(Action body)

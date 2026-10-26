@@ -6,6 +6,38 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.26-22:40:00 Alpha 2 (release cut): download-path performance and sidebar crash fixes
+
+> 版本号规则（Owner，2026-10-26）：Alpha 号随**发布**递增。Alpha 1 是唯一已发布版本，因此本次
+> 对外构建收敛为 **v26.0-Alpha 2**；下方 Alpha 3-5 的条目属于未发布的内部迭代，全部并入本次
+> Alpha 2 的变更集。
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Host\CoreInstaller.cs            +57 -45
+.\src\PclDlSwap.Payload\Features\DownloadPageRestore.cs  +55 -8
+.\src\PclDlSwap.Payload\Sandbox\DownloadSandbox.cs       +35 -0
+.\src\PclDlSwap.Payload\Sandbox\ScannerSet.cs            +59 -8
+.\src\PclDlSwap.Payload\Host\PclUi.cs                    +77 -12
+.\src\PclDlSwap.Payload\Host\SwapLog.cs                  +17 -8
+.\src\Pcl2Swap.Shim\Shim.cpp                             +1 -1
+.\src\PclDlSwap.ExLoaderHarness\Program.cs               +105 -4
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|CoreInstaller/DownloadSandbox|Launcher-cloud downloads now run through PCL's own multi-source downloader; the scanner runs afterwards on the produced file and deletes it when a scanner objects. The previous flow re-downloaded every launcher-cloud file through a single-threaded WebClient inside the hook and spawned one MpCmdRun process per file - both halves of the reported performance loss|2026.10.26-22:40:00|PCL2.dl.swap
+2|CoreInstaller|Scan policy (per Owner): only executable/archive extensions are scanned, and anything landing inside the Minecraft directory (game files, mods, resource packs, shaders) skips the scanner entirely, while launcher files fetched from PCL's servers keep it. JSON/PNG and friends pass through untouched|2026.10.26-22:40:00|PCL2.dl.swap
+3|DownloadPageRestore|The 2.99.0.1 sidebar repair no longer writes the PageID field. It now drives PCL's own navigation (Checked -> PageChange -> PageGet) and only finishes after verifying ModMain.FrmDownloadInstall exists. The old field write skipped PageGet, left the page object null, and the next click died in PCL.PageDownloadLeft.ItemInstall_Click with a NullReferenceException (field logs 22:23:35 and 22:25:28)|2026.10.26-22:40:00|PCL2.dl.swap
+4|ScannerSet/SwapLog/PclUi|MpCmdRun and clamscan lookups are cached, the log mirror disables itself after the first failure, the host logger is resolved once, and the dispatcher method table is cached (the pollers call OnUiThread every 300 ms until a repair lands)|2026.10.26-22:40:00|PCL2.dl.swap
+5|Harness|New --scantest (extension + game-directory policy) and a click-safety regression that reproduces the field NullReferenceException path; integration suite is now 10/10|2026.10.26-22:40:00|PCL2.dl.swap
+
+version: v26.0-Alpha 2
+
+---
 ## 2026.10.26-21:45:00 Alpha 5: UI-thread marshalling, manifest merge and double-injection guards
 
 GitCommitHash: (unreleased)

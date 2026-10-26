@@ -37,8 +37,31 @@ namespace PclDlSwap.Payload.Sandbox
     public sealed class ScannerSet
     {
         private readonly SwapConfig _config;
+        private static readonly object PathCacheLock = new object();
+        private static readonly Dictionary<string, string> PathCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         public ScannerSet(SwapConfig config) => _config = config;
+
+        /// <summary>
+        /// Extensions whose files can execute or carry executable code. PCL fetches version indexes,
+        /// icons, translations and fonts constantly while browsing - scanning each of those used to
+        /// spawn a MpCmdRun process and produced the field report's "严重的性能损失". Everything not
+        /// listed here passes straight through (the machine's real-time protection still sees it).
+        /// </summary>
+        private static readonly HashSet<string> ScannableExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".exe", ".dll", ".msi", ".msp", ".com", ".bat", ".cmd", ".cpl", ".msc",
+            ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".scr",
+            ".sys", ".ocx", ".drv",
+            ".jar", ".zip", ".7z", ".rar", ".tar", ".gz", ".xz", ".cab", ".iso",
+            ".bin", ".dat"
+        };
+
+        public static bool ShouldScan(string path)
+        {
+            var extension = Path.GetExtension(path);
+            return !string.IsNullOrEmpty(extension) && ScannableExtensions.Contains(extension);
+        }
 
         public IReadOnlyList<ScanVerdict> Scan(string path)
         {
@@ -76,12 +99,7 @@ namespace PclDlSwap.Payload.Sandbox
 
         private ScanVerdict RunDefender(string path)
         {
-            var candidates = new[]
-            {
-                @"C:\Program Files\Windows Defender\MpCmdRun.exe",
-                @"C:\ProgramData\Microsoft\Windows Defender\Platform"
-            };
-            var mp = FindMpCmdRun(candidates[0], candidates[1]);
+            var mp = CachedMpCmdRun();
             if (mp == null)
                 return new ScanVerdict { Clean = false, Engine = "Microsoft Defender", Status = "unavailable", Detail = "未找到 MpCmdRun.exe", Participating = false };
 
@@ -94,6 +112,19 @@ namespace PclDlSwap.Payload.Sandbox
                     return new ScanVerdict { Clean = false, Engine = "Microsoft Defender", Status = "threat", Detail = Trim(result.Output) };
                 default:
                     return new ScanVerdict { Clean = false, Engine = "Microsoft Defender", Status = "error(" + result.ExitCode + ")", Detail = Trim(result.Output) };
+            }
+        }
+
+        private static string CachedMpCmdRun()
+        {
+            lock (PathCacheLock)
+            {
+                if (PathCache.TryGetValue("mpcmdrun", out var cached)) return cached;
+                var found = FindMpCmdRun(
+                    @"C:\Program Files\Windows Defender\MpCmdRun.exe",
+                    @"C:\ProgramData\Microsoft\Windows Defender\Platform");
+                PathCache["mpcmdrun"] = found;
+                return found;
             }
         }
 
@@ -113,13 +144,25 @@ namespace PclDlSwap.Payload.Sandbox
 
         private ScanVerdict RunClamAv(string path)
         {
-            var clam = FindOnPath("clamscan.exe");
+            var clam = CachedOnPath("clamscan.exe");
             if (clam == null)
                 return new ScanVerdict { Clean = true, Engine = "ClamAV", Status = "not-installed", Detail = "未安装 clamscan，本机不参与判定", Participating = false };
             var result = RunProcess(clam, $"--no-summary --infected \"{path}\"", 300000);
             return result.ExitCode == 0
                 ? new ScanVerdict { Clean = true, Engine = "ClamAV", Status = "clean", Detail = "无威胁" }
                 : new ScanVerdict { Clean = false, Engine = "ClamAV", Status = "threat/error(" + result.ExitCode + ")", Detail = Trim(result.Output) };
+        }
+
+        private static string CachedOnPath(string exe)
+        {
+            lock (PathCacheLock)
+            {
+                var key = "path:" + exe;
+                if (PathCache.TryGetValue(key, out var cached)) return cached;
+                var found = FindOnPath(exe);
+                PathCache[key] = found;
+                return found;
+            }
         }
 
         private ScanVerdict RunVirusTotal(string path)

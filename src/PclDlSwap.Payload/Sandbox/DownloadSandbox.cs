@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Runtime.InteropServices;
@@ -68,6 +69,38 @@ namespace PclDlSwap.Payload.Sandbox
             }
 
             return new Result { Success = true, Blocked = false, StagedPath = stagedPath, Summary = summary };
+        }
+
+        /// <summary>
+        /// Post-download verification for launcher-cloud payloads: PCL's own downloader produces the
+        /// file (its multi-source, segmented fast path stays untouched), then this scans it and
+        /// deletes it again when a scanner objects. This replaced the earlier "download into a
+        /// sandbox first" flow, which re-downloaded every launcher-cloud file through a
+        /// single-threaded WebClient and spawned a MpCmdRun process per file - both halves of the
+        /// performance loss reported from the field. Callers decide which extensions are worth a
+        /// scan (see ScannerSet.ShouldScan) and abort the host download when this returns Blocked.
+        /// </summary>
+        public Result VerifyDownloadedFile(string path)
+        {
+            IReadOnlyList<ScanVerdict> verdicts;
+            try
+            {
+                verdicts = _scanners.Scan(path);
+            }
+            catch (Exception ex)
+            {
+                return new Result { Success = false, Blocked = false, StagedPath = path, Summary = "查毒失败：" + ex.Message };
+            }
+
+            bool clean = _scanners.AllClean(verdicts, out var summary);
+            if (!clean && !_config.AllowDegradedCommit)
+            {
+                try { File.Delete(path); } catch { }
+                return new Result { Success = false, Blocked = true, StagedPath = path, Summary = summary };
+            }
+
+            try { ZoneIdentifier.Stamp(path); } catch { }
+            return new Result { Success = true, Blocked = false, StagedPath = path, Summary = summary };
         }
 
         private static void Download(string[] urls, string stagedPath)

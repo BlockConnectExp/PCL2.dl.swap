@@ -52,10 +52,24 @@ The form is English-only and reviewers are strict: answer as written, do not imp
 
 ## Pre-submit checklist
 
-- [ ] ExLoader injects the DLL and PCL2 stays healthy (owner test)
-- [ ] All four in-launcher features seen working once (owner test)
-- [ ] Screenshots uploaded to imgur, links pasted in #6
-- [ ] Repository pushed (main + v26.0) with the Alpha 2 commits
-- [ ] GitHub Release v26.0-Alpha2 published with the shim DLL attached
+- [x] ExLoader injects the DLL and PCL2 stays healthy (owner test)
+- [x] In-launcher features seen working (download page, About row, feedback routing; the
+      forced-update notice could not be reproduced that day because PCL's update server was down)
+- [x] Screenshots hosted as public GitHub Release assets (`shot-1-download-page.png`,
+      `shot-2-about-page.png`, `shot-3-exloader.png`) - imgur was unreachable from this host
+      (direct, Clash and the HK SOCKS tunnel all time out)
+- [x] Repository pushed (main + v26.0) with the Alpha 2 commits
+- [x] GitHub Release v26.0-Alpha2 published with the shim DLL attached
+
+## Submission record
+
+- Submitted 2026-10-27 (local) through the live form with a Playwright-driven Edge session; the
+  form answered "Form submitted - Thanks for completing this form!".
+- Field notes worth remembering: the "How to open the menu" answer is limited to 100 characters
+  (the first attempt was rejected with "Please enter 100 characters or less"), and the screenshots
+  field is a multi-line textarea (one URL per line).
+- Networking wording used (owner decision of 2026-10-26): the module itself makes no network
+  connections - it restores PCL2's own built-in download page and the launcher keeps doing all
+  networking by itself.
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

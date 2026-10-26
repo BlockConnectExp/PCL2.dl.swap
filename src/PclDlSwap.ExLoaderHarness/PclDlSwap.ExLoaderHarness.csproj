@@ -18,5 +18,12 @@
     <!-- Available to the payload's IL-copy factory when the harness loads it. -->
     <PackageReference Include="MonoMod.Utils" Version="22.1.0" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The uitest mode spins a real WPF Dispatcher, matching the environment PCL marshals against. -->
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Xaml" />
+  </ItemGroup>
 </Project>
 

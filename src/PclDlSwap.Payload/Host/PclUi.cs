@@ -23,9 +23,7 @@ namespace PclDlSwap.Payload.Host
         {
             try
             {
-                var application = Type.GetType("System.Windows.Application, PresentationFramework");
-                var current = application?.GetProperty("Current", BindingFlags.Public | BindingFlags.Static)?.GetValue(null, null);
-                var dispatcher = current?.GetType().GetProperty("Dispatcher", BindingFlags.Public | BindingFlags.Instance)?.GetValue(current, null);
+                var dispatcher = TryGetDispatcher();
                 if (dispatcher == null)
                     return body();
 
@@ -33,24 +31,115 @@ namespace PclDlSwap.Payload.Host
                 if (checkAccess != null && (bool)checkAccess.Invoke(dispatcher, null))
                     return body();
 
-                var invoke = dispatcher.GetType().GetMethods()
-                    .FirstOrDefault(m => m.Name == "Invoke" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(Delegate));
-                if (invoke == null)
-                    return body();
-
-                Func<T> wrapped = body;
-                return (T)invoke.Invoke(dispatcher, new object[] { wrapped });
+                return InvokeOnDispatcher(dispatcher, body, fallback);
             }
             catch (Exception ex)
             {
                 SwapLog.Warn("PclUi.OnUiThread 失败：" + ex.Message);
-                try { return body(); } catch { return fallback; }
+                return fallback;
             }
+        }
+
+        /// <summary>
+        /// PCL is a WPF application, so its own Dispatcher is the marshalling point. The first
+        /// version looked for an "Invoke(Delegate)" single-parameter overload - WPF has no such
+        /// overload (the real shape is "Invoke(Delegate, params object[])"), the lookup returned
+        /// null and the body silently ran on the polling thread. The runtime evidence is in
+        /// %TEMP%\PCL2Swap\v26.0-Alpha4\pcl2swap.log: the About-page insert and the 2.99.0.1
+        /// sidebar repair both died with "调用线程无法访问此对象".
+        /// </summary>
+        private static object TryGetDispatcher()
+        {
+            var application = ResolveApplicationType();
+            var current = application?
+                .GetProperty("Current", BindingFlags.Public | BindingFlags.Static)?
+                .GetValue(null, null);
+            return current?
+                .GetType().GetProperty("Dispatcher", BindingFlags.Public | BindingFlags.Instance)?
+                .GetValue(current, null);
+        }
+
+        /// <summary>
+        /// "System.Windows.Application, PresentationFramework" does not bind from inside the injected
+        /// payload: a named Type.GetType runs against the payload's LoadFrom context and returns null
+        /// even while the assembly sits loaded in the process (the uitest hit exactly this). Walk the
+        /// loaded assemblies first, and keep Assembly.Load as a last resort.
+        /// </summary>
+        private static Type ResolveApplicationType()
+        {
+            var type = Type.GetType("System.Windows.Application, PresentationFramework", throwOnError: false);
+            if (type != null) return type;
+
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    if (assembly.GetName().Name != "PresentationFramework") continue;
+                    type = assembly.GetType("System.Windows.Application", throwOnError: false);
+                    if (type != null) return type;
+                }
+                catch
+                {
+                    // dynamic or reflection-only assemblies can throw from GetName/GetType
+                }
+            }
+
+            try
+            {
+                return Assembly.Load("PresentationFramework")
+                    ?.GetType("System.Windows.Application", throwOnError: false);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static T InvokeOnDispatcher<T>(object dispatcher, Func<T> body, T fallback)
+        {
+            var methods = dispatcher.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance);
+
+            // WPF: public object Invoke(Delegate method, params object[] args)
+            var withArgs = methods.FirstOrDefault(m =>
+                m.Name == "Invoke" &&
+                m.GetParameters().Length == 2 &&
+                m.GetParameters()[0].ParameterType == typeof(Delegate) &&
+                m.GetParameters()[1].ParameterType == typeof(object[]));
+            if (withArgs != null)
+            {
+                var result = withArgs.Invoke(dispatcher, new object[] { body, new object[0] });
+                if (result is T) return (T)result;
+                return result == null ? default(T) : fallback;
+            }
+
+            // WPF: public void Invoke(Action callback)
+            var actionInvoke = methods.FirstOrDefault(m =>
+                m.Name == "Invoke" &&
+                m.GetParameters().Length == 1 &&
+                m.GetParameters()[0].ParameterType == typeof(Action) &&
+                m.ReturnType == typeof(void));
+            if (actionInvoke != null)
+            {
+                var result = fallback;
+                Exception failure = null;
+                Action action = () =>
+                {
+                    try { result = body(); }
+                    catch (Exception ex) { failure = ex; }
+                };
+                actionInvoke.Invoke(dispatcher, new object[] { action });
+                if (failure != null) throw failure;
+                return result;
+            }
+
+            SwapLog.Warn("PclUi.OnUiThread：Dispatcher 上没有可用的 Invoke 重载，跳过该次 UI 更新以避免跨线程访问。");
+            return fallback;
         }
 
         public static void OnUiThread(Action body)
         {
-            OnUiThread(() => { body(); return true; }, true);
+            if (!OnUiThread(() => { body(); return true; }, true))
+                SwapLog.Warn("PclUi.OnUiThread：这次 UI 更新未能 marshal 到 Dispatcher，已跳过。");
         }
 
         /// <summary>

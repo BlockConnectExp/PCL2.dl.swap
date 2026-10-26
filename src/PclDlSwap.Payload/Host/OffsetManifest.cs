@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -113,27 +114,101 @@ namespace PclDlSwap.Payload.Host
 
         private static List<HostTarget> Load()
         {
-            string json;
+            var list = new List<HostTarget>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var candidate in ReadManifestCandidates())
+            {
+                try
+                {
+                    var parsed = ParseTargets(candidate.Value);
+                    int added = 0, duplicates = 0;
+                    foreach (var target in parsed)
+                    {
+                        if (string.IsNullOrEmpty(target.Id) || !seen.Add(target.Id))
+                        {
+                            duplicates++;
+                            continue;
+                        }
+                        list.Add(target);
+                        added++;
+                    }
+                    SwapLog.Info($"偏移清单[{candidate.Key}]：{parsed.Count} 个目标，并入 {added} 个，重复/无效 {duplicates} 个。");
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn($"偏移清单[{candidate.Key}]解析失败（已忽略）：" + ex.Message);
+                }
+            }
+
+            if (list.Count == 0)
+                SwapLog.Warn("偏移清单不可用或为空（磁盘与内嵌副本都没有可解析的目标），钩子将按名称解析。");
+            return list;
+        }
+
+        /// <summary>
+        /// Returns every manifest copy we can see, disk first. The injected shape ships the manifest
+        /// as an embedded resource, but the disk file used to shadow it completely (single-source,
+        /// disk-first), so a stale "data\offset-manifest.json" next to the host made every retained
+        /// build report "宿主不在偏移清单中". Now both copies are parsed and merged by target id,
+        /// with the disk copy winning on conflicts.
+        /// </summary>
+        private static List<KeyValuePair<string, string>> ReadManifestCandidates()
+        {
+            var candidates = new List<KeyValuePair<string, string>>();
+
             try
             {
-                json = ReadManifestJson();
+                if (File.Exists(ManifestPath))
+                    candidates.Add(new KeyValuePair<string, string>(
+                        "disk:" + ManifestPath, File.ReadAllText(ManifestPath, Encoding.UTF8)));
             }
             catch (Exception ex)
             {
-                SwapLog.Warn("偏移清单读取失败，钩子将按名称解析：" + ex.Message);
-                return new List<HostTarget>();
-            }
-            if (json == null)
-            {
-                SwapLog.Warn("偏移清单不可用（磁盘与内嵌副本都没有），钩子将按名称解析。");
-                return new List<HostTarget>();
+                SwapLog.Warn("磁盘偏移清单读取失败：" + ex.Message);
             }
 
+            try
+            {
+                var assembly = typeof(OffsetManifest).Assembly;
+                var name = assembly.GetManifestResourceNames()
+                    .FirstOrDefault(n => n.EndsWith("offset-manifest.json", StringComparison.OrdinalIgnoreCase));
+                if (name != null)
+                {
+                    using (var stream = assembly.GetManifestResourceStream(name))
+                    {
+                        if (stream != null)
+                            using (var reader = new StreamReader(stream, Encoding.UTF8))
+                                candidates.Add(new KeyValuePair<string, string>("embedded:" + name, reader.ReadToEnd()));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("内嵌偏移清单读取失败：" + ex.Message);
+            }
+
+            return candidates;
+        }
+
+        private static List<HostTarget> ParseTargets(string json)
+        {
             var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
             var root = serializer.Deserialize<Dictionary<string, object>>(json);
             var list = new List<HostTarget>();
-            if (!(root.TryGetValue("targets", out var targetsObj) && targetsObj is object[] targets))
+            if (root == null || !root.TryGetValue("targets", out var targetsObj))
+            {
+                SwapLog.Warn("偏移清单缺少 targets 节点。");
                 return list;
+            }
+
+            // JavaScriptSerializer hands JSON arrays back as object[] on the runtimes we have seen;
+            // accept any IEnumerable so an ArrayList (or a future shape) cannot silently empty the list.
+            if (!(targetsObj is IEnumerable targets))
+            {
+                SwapLog.Warn("偏移清单的 targets 不是数组（" + targetsObj.GetType().Name + "）。");
+                return list;
+            }
 
             foreach (var item in targets)
             {
@@ -155,23 +230,6 @@ namespace PclDlSwap.Payload.Host
                 list.Add(target);
             }
             return list;
-        }
-
-        private static string ReadManifestJson()
-        {
-            if (File.Exists(ManifestPath))
-                return File.ReadAllText(ManifestPath, Encoding.UTF8);
-
-            var assembly = typeof(OffsetManifest).Assembly;
-            var name = assembly.GetManifestResourceNames()
-                .FirstOrDefault(n => n.EndsWith("offset-manifest.json", StringComparison.OrdinalIgnoreCase));
-            if (name == null) return null;
-            using (var stream = assembly.GetManifestResourceStream(name))
-            {
-                if (stream == null) return null;
-                using (var reader = new StreamReader(stream, Encoding.UTF8))
-                    return reader.ReadToEnd();
-            }
         }
 
         private static string Str(Dictionary<string, object> map, string key) =>

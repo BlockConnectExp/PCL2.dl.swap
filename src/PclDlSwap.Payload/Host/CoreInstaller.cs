@@ -90,6 +90,13 @@ namespace PclDlSwap.Payload.Host
                         ? "宿主不在偏移清单中，钩子将按名称解析。"
                         : $"宿主匹配：{_target.Id}（{_target.BuildType} {_target.Version}，{_target.Role}）。");
 
+                    if (HostAlreadyPatched(host))
+                    {
+                        SwapLog.Warn("检测到宿主已被先前注入的 payload 挂钩，跳过本次装配以避免双重挂钩。");
+                        _installed = true;
+                        return;
+                    }
+
                     InstallOtaBlock(host, PclProfile);
                     InstallPermissionBlock(host, PclProfile);
                     InstallDownloadGate(host, PclProfile);
@@ -215,6 +222,54 @@ namespace PclDlSwap.Payload.Host
             {
                 SwapLog.Warn("记录宿主身份失败：" + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// A previous payload (possibly an older build that predates any in-process marker) may
+        /// already live in this process: ExLoader can fire twice, or a newer shim can be injected
+        /// over a running PCL. Installing a second detour would make the first engine copy the
+        /// already-patched body as the "original" and both payloads would recurse. Detect the jump
+        /// this tool writes at the JIT entry instead of trusting version state.
+        /// </summary>
+        private static bool HostAlreadyPatched(Assembly host)
+        {
+            try
+            {
+                const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic |
+                                           BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+
+                var secret = host.GetType(PclProfile.SecretType, throwOnError: false);
+                if (secret != null)
+                {
+                    foreach (var candidate in secret.GetMethods(flags))
+                    {
+                        if (candidate.Name == PclProfile.UpdateStart && DetourInstaller.IsHooked(candidate))
+                            return true;
+                        if (candidate.Name == PclProfile.PermissionProperty && DetourInstaller.IsHooked(candidate))
+                            return true;
+                    }
+                }
+
+                var net = host.GetType(PclProfile.NetType, throwOnError: false);
+                if (net != null)
+                {
+                    foreach (var candidate in net.GetMethods(flags))
+                    {
+                        if (candidate.Name != PclProfile.DownloadByLoader) continue;
+                        if (DetourInstaller.IsHooked(candidate)) return true;
+                    }
+                    foreach (var candidate in net.GetMethods(flags))
+                    {
+                        if (candidate.Name == PclProfile.DownloadByClient && DetourInstaller.IsHooked(candidate))
+                            return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("重复注入探测失败（继续正常装配）：" + ex.Message);
+            }
+            return false;
         }
 
         private static Assembly WaitForHostAssembly(TimeSpan timeout)

@@ -26,6 +26,14 @@ namespace PclDlSwap.Payload.Features
         private static string _iconPath;
         private static bool _inserted;
         private static volatile bool _stop;
+        private static int _attempts;
+
+        /// <summary>
+        /// The page can appear before its visual tree is fully usable; a failed attempt is retried
+        /// until this cap instead of giving up on the first try (the Alpha 4 log shows a single
+        /// cross-thread failure silenced the row for the whole session).
+        /// </summary>
+        private const int MaxAttempts = 40;
 
         public static bool Installed { get; private set; }
 
@@ -83,8 +91,7 @@ namespace PclDlSwap.Payload.Features
                         var listItemType = host?.GetType("PCL.MyListItem", throwOnError: false);
                         if (listItemType == null)
                         {
-                            SwapLog.Warn("AboutBranding：宿主没有 MyListItem，跳过。");
-                            _stop = true;
+                            NoteAttemptFailure("AboutBranding：宿主没有 MyListItem", new MissingMemberException("PCL.MyListItem"));
                             return;
                         }
 
@@ -92,16 +99,15 @@ namespace PclDlSwap.Payload.Features
                         var itemAboutPcl = PclUi.GetMember(page, "ItemAboutPcl");
                         if (panMain == null || itemAboutPcl == null)
                         {
-                            SwapLog.Warn("AboutBranding：关于页上没有 PanMain/ItemAboutPcl，跳过。");
-                            _stop = true;
+                            NoteAttemptFailure("AboutBranding：关于页上没有 PanMain/ItemAboutPcl",
+                                new MissingMemberException("PanMain/ItemAboutPcl"));
                             return;
                         }
 
                         var children = PclUi.GetMember(panMain, "Children");
                         if (children == null)
                         {
-                            SwapLog.Warn("AboutBranding：PanMain 没有 Children，跳过。");
-                            _stop = true;
+                            NoteAttemptFailure("AboutBranding：PanMain 没有 Children", new MissingMemberException("Children"));
                             return;
                         }
 
@@ -120,8 +126,8 @@ namespace PclDlSwap.Payload.Features
                             .FirstOrDefault(m => m.Name == "Insert" && m.GetParameters().Length == 2);
                         if (indexOf == null || insert == null)
                         {
-                            SwapLog.Warn("AboutBranding：Children 集合缺少 IndexOf/Insert，跳过。");
-                            _stop = true;
+                            NoteAttemptFailure("AboutBranding：Children 集合缺少 IndexOf/Insert",
+                                new MissingMemberException("IndexOf/Insert"));
                             return;
                         }
 
@@ -132,11 +138,28 @@ namespace PclDlSwap.Payload.Features
                     }
                     catch (Exception ex)
                     {
-                        SwapLog.Error("AboutBranding 插入条目失败：" + ex);
-                        _stop = true;
+                        NoteAttemptFailure("AboutBranding 插入条目失败", ex);
                     }
                 }
             });
+        }
+
+        private static void NoteAttemptFailure(string label, Exception ex)
+        {
+            var attempts = Interlocked.Increment(ref _attempts);
+            if (attempts >= MaxAttempts)
+            {
+                _stop = true;
+                SwapLog.Error($"{label}（第 {attempts} 次仍失败，停止重试）：{ex}");
+            }
+            else if (attempts == 1)
+            {
+                SwapLog.Warn($"{label}（第 {attempts} 次，将继续重试）：{ex.Message}");
+            }
+            else if (attempts % 10 == 0)
+            {
+                SwapLog.Info($"{label}（第 {attempts} 次失败，继续重试）。");
+            }
         }
 
         /// <summary>Writes the embedded organisation icon next to the payload (once) and returns its path.</summary>

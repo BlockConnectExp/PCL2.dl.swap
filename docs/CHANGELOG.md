@@ -6,6 +6,38 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.26-21:45:00 Alpha 5: UI-thread marshalling, manifest merge and double-injection guards
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Host\PclUi.cs                    +92 -27
+.\src\PclDlSwap.Payload\Host\OffsetManifest.cs           +111 -45
+.\src\PclDlSwap.Payload\Host\CoreInstaller.cs            +58 -0
+.\src\PclDlSwap.Payload\Host\SwapLog.cs                  +2 -2
+.\src\PclDlSwap.Payload\Hook\DetourInstaller.cs          +28 -0
+.\src\PclDlSwap.Payload\Features\AboutBranding.cs        +44 -18
+.\src\PclDlSwap.Payload\Features\DownloadPageRestore.cs  +32 -8
+.\src\Pcl2Swap.Shim\Shim.cpp                             +1 -1
+.\src\PclDlSwap.ExLoaderHarness\Program.cs               +158 -12
+.\src\PclDlSwap.ExLoaderHarness\PclDlSwap.ExLoaderHarness.csproj   +6 -0
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|PclUi|OnUiThread now marshals through WPF's real overloads (`Invoke(Delegate, object[])` / `Invoke(Action)`). The previous code looked for a single-parameter `Invoke(Delegate)` that WPF does not have, silently ran the body on the polling thread and produced the field-log failure "调用线程无法访问此对象" for the About row (2.99.0 and 2.99.0.1) and the 2.99.0.1 sidebar repair|2026.10.26-21:45:00|PCL2.dl.swap
+2|PclUi|The WPF Application type is resolved by walking the loaded assemblies. A named `Type.GetType("System.Windows.Application, PresentationFramework")` does not bind from the payload's LoadFrom context - measured by the new uitest, which now runs a real Dispatcher on an STA thread|2026.10.26-21:45:00|PCL2.dl.swap
+3|OffsetManifest|The disk and embedded manifests are parsed and merged by target id (disk wins on conflict), and JSON arrays are read as `IEnumerable`. The previous disk-first single source made every retained build log "宿主不在偏移清单中" even though the MVIDs matched; both 2.99.0 and 2.99.0.1 now resolve to their manifest entries|2026.10.26-21:45:00|PCL2.dl.swap
+4|AboutBranding/DownloadPageRestore|A failed insert/repair is retried up to 40 poll rounds (first failure warns, every tenth logs) instead of silencing the feature for the whole session; the 2.99.0.1 sidebar collapse now recovers after the page appears|2026.10.26-21:45:00|PCL2.dl.swap
+5|CoreInstaller/DetourInstaller|`HostAlreadyPatched` / `IsHooked` probe the JIT entry (FF25 on x64, E9 on x86) before installing; a second injection into the same process (ExLoader firing twice, or a newer shim over a running PCL) is refused instead of stacking a second detour over an already-patched body|2026.10.26-21:45:00|PCL2.dl.swap
+6|Harness|New `--uitest` (real WPF dispatcher; cross-thread and inline assertions) and `--manifest` (per-host MVID match against real PCL binaries; run once per host because .NET reuses same-identity assemblies inside one process). Integration suite stays 9/9|2026.10.26-21:45:00|PCL2.dl.swap
+7|Shim|`TOOL_VERSION` -> v26.0-Alpha5: the extraction directory moves to `%TEMP%\PCL2Swap\v26.0-Alpha5` so a payload locked by an already-running PCL cannot block the new build (the Alpha 4 directory held a 129024-byte payload locked by PID 42888 while the new payload is 132608 bytes)|2026.10.26-21:45:00|PCL2.dl.swap
+
+version: v26.0-Alpha 5
+
+---
 ## 2026.10.26-08:35:00 Alpha 4: managed hook targets and IL-copied originals (AccessViolation fix)
 
 GitCommitHash: (unreleased)

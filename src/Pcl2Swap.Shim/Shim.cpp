@@ -30,7 +30,7 @@
 #define CECIL_NAME        L"Mono.Cecil.dll"
 #define ENTRY_TYPE        L"PclDlSwap.Payload.Host.ExLoaderEntry"
 #define ENTRY_METHOD      L"Activate"
-#define TOOL_VERSION      L"v26.0-Alpha4"
+#define TOOL_VERSION      L"v26.0-Alpha5"
 
 // GUIDs from metahost.h, spelled out so no import library is needed.
 static const GUID kClsidClrMetaHost =

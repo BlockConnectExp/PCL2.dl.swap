@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -228,6 +229,8 @@ namespace PclDlSwap.ExLoaderHarness
             if (args.Length >= 2 && args[0] == "--copytest") return RunCopyTest(args[1]);
             if (args.Length >= 3 && args[0] == "--abi2") return RunManagedCallerTest(args[1], args[2]);
             if (args.Length >= 2 && args[0] == "--hooktest") return RunHookTest(args[1]);
+            if (args.Length >= 2 && args[0] == "--uitest") return RunUiThreadTest(args[1]);
+            if (args.Length >= 3 && args[0] == "--manifest") return RunManifestTest(args[1], args[2]);
 
             var reversedOta = args.Contains("--reversed-ota");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
@@ -237,6 +240,9 @@ namespace PclDlSwap.ExLoaderHarness
                 Console.Error.WriteLine("usage: PclDlSwap.ExLoaderHarness <path-to-Pcl2Swap.Shim.x64.dll> [--reversed-ota]");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --copytest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --abi2 <payload.dll> <managed|stub>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --hooktest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --uitest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --manifest <payload.dll> <host.exe>");
                 return 2;
             }
 
@@ -487,6 +493,184 @@ namespace PclDlSwap.ExLoaderHarness
             Console.WriteLine("[hooktest] hooked=" + hookedOk + " original=" + originalOk);
             Console.WriteLine(hookedOk && originalOk ? "[hooktest] RESULT: PASS" : "[hooktest] RESULT: FAIL");
             return hookedOk && originalOk ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Regression test for the manifest pipeline: the payload must resolve a real PCL binary to
+        /// its manifest target by MVID. The Alpha 4 field logs reported "宿主不在偏移清单中" for both
+        /// 2.99.0 and 2.99.0.1 even though the embedded manifest carries their MVIDs, so this test
+        /// pins the parse + resolve path against real binaries instead of the harness stand-in.
+        /// </summary>
+        private static int RunManifestTest(string payloadPath, string hostPath)
+        {
+            var payloadFull = Path.GetFullPath(payloadPath);
+            if (!File.Exists(payloadFull)) { Console.Error.WriteLine("payload not found: " + payloadFull); return 2; }
+            var hostFull = Path.GetFullPath(hostPath);
+            if (!File.Exists(hostFull)) { Console.Error.WriteLine("host not found: " + hostFull); return 2; }
+
+            var failures = 0;
+            var payload = Assembly.LoadFrom(payloadFull);
+            var manifestType = payload.GetType("PclDlSwap.Payload.Host.OffsetManifest", throwOnError: true);
+            var resolve = manifestType.GetMethod("ResolveFor", BindingFlags.Public | BindingFlags.Static);
+
+            var all = ((IEnumerable)manifestType.GetProperty("All", BindingFlags.Public | BindingFlags.Static)
+                    .GetValue(null, null))
+                .Cast<object>().ToList();
+            Console.WriteLine("[manifest] parsed targets: " + all.Count);
+            foreach (var target in all)
+            {
+                var t = target.GetType();
+                Console.WriteLine("  - " + t.GetProperty("Id").GetValue(target) +
+                                  " @" + t.GetProperty("Mvid").GetValue(target));
+            }
+            if (all.Count == 0) failures++;
+            Console.Out.Flush();
+
+            var host = Assembly.LoadFrom(hostFull);
+            var hostMvid = host.ManifestModule.ModuleVersionId.ToString("D").ToLowerInvariant();
+            Console.WriteLine("[manifest] host " + Path.GetFileName(hostPath) + " mvid=" + hostMvid);
+
+            var match = resolve.Invoke(null, new object[] { host });
+            if (match == null)
+            {
+                Console.Error.WriteLine("[manifest] ResolveFor returned null for " + hostPath);
+                failures++;
+            }
+            else
+            {
+                var mt = match.GetType();
+                var id = mt.GetProperty("Id").GetValue(match);
+                var mvid = Convert.ToString(mt.GetProperty("Mvid").GetValue(match));
+                Console.WriteLine("[manifest] resolved: " + id + " @" + mvid);
+                if (!string.Equals(mvid, hostMvid, StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine("[manifest] resolved MVID does not match the host");
+                    failures++;
+                }
+            }
+
+            Console.WriteLine(failures == 0 ? "[manifest] RESULT: PASS" : "[manifest] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Regression test for the WPF marshalling fix: PclUi.OnUiThread used to look for a
+        /// single-parameter Invoke(Delegate) overload that WPF does not have, silently ran the body
+        /// on the polling thread and produced "调用线程无法访问此对象" on the About page and the
+        /// 2.99.0.1 sidebar. This spins a real WPF Dispatcher on an STA thread and asserts that a
+        /// cross-thread call lands there (and that an on-thread call runs inline).
+        /// </summary>
+        private static int RunUiThreadTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var payload = Assembly.LoadFrom(full);
+            var pclUi = payload.GetType("PclDlSwap.Payload.Host.PclUi", throwOnError: true);
+            var onUi = pclUi.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .First(m => m.Name == "OnUiThread" && m.IsGenericMethodDefinition);
+            var closed = onUi.MakeGenericMethod(typeof(string));
+
+            System.Windows.Threading.Dispatcher dispatcher = null;
+            var uiThreadId = 0;
+            var ready = new ManualResetEventSlim(false);
+            var ui = new Thread(() =>
+            {
+                try
+                {
+                    var application = new System.Windows.Application();
+                    dispatcher = application.Dispatcher;
+                    uiThreadId = Thread.CurrentThread.ManagedThreadId;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("[uitest] dispatcher setup failed: " + ex.Message);
+                }
+                finally
+                {
+                    ready.Set();
+                }
+                System.Windows.Threading.Dispatcher.Run();
+            });
+            ui.SetApartmentState(ApartmentState.STA);
+            ui.IsBackground = true;
+            ui.Start();
+
+            if (!ready.Wait(TimeSpan.FromSeconds(15)) || dispatcher == null)
+            {
+                Console.Error.WriteLine("[uitest] WPF dispatcher did not start");
+                return 1;
+            }
+
+            var failures = 0;
+            Console.WriteLine("[uitest] ui thread=" + uiThreadId + ", caller thread=" + Thread.CurrentThread.ManagedThreadId);
+
+            // Diagnostics for the payload's own dispatcher lookup path (it runs in the payload's
+            // LoadFrom context, so harness-side Type.GetType results would not prove anything).
+            var tryGetDispatcher = pclUi.GetMethod("TryGetDispatcher", BindingFlags.NonPublic | BindingFlags.Static);
+            var callerDispatcher = tryGetDispatcher.Invoke(null, null);
+            Console.WriteLine("[uitest] caller: Application.Current=" +
+                              (System.Windows.Application.Current == null ? "null" : "set") +
+                              ", payload lookup=" + (callerDispatcher == null ? "null" : "found"));
+            var uiThreadDispatcherFound = false;
+            var uiProbeDone = new ManualResetEventSlim(false);
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                try { uiThreadDispatcherFound = tryGetDispatcher.Invoke(null, null) != null; }
+                finally { uiProbeDone.Set(); }
+            }));
+            uiProbeDone.Wait(TimeSpan.FromSeconds(10));
+            Console.WriteLine("[uitest] payload lookup on ui thread: " + (uiThreadDispatcherFound ? "found" : "null"));
+
+            var observedThreadId = 0;
+            var body = new Func<string>(() =>
+            {
+                observedThreadId = Thread.CurrentThread.ManagedThreadId;
+                return "body:" + observedThreadId;
+            });
+
+            var result = (string)closed.Invoke(null, new object[] { body, "fallback" });
+            Console.WriteLine("[uitest] cross-thread result=" + result + " observed=" + observedThreadId);
+            if (observedThreadId != uiThreadId)
+            {
+                Console.Error.WriteLine("[uitest] body did not run on the dispatcher thread");
+                failures++;
+            }
+            if (result != "body:" + uiThreadId)
+            {
+                Console.Error.WriteLine("[uitest] cross-thread call did not return the body's value");
+                failures++;
+            }
+
+            // Already on the UI thread: the body must run inline instead of dead-locking on Invoke.
+            var inlineResult = string.Empty;
+            var inlineDone = new ManualResetEventSlim(false);
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                try { inlineResult = (string)closed.Invoke(null, new object[] { body, "fallback" }); }
+                catch (Exception ex) { Console.Error.WriteLine("[uitest] inline call failed: " + ex.Message); }
+                finally { inlineDone.Set(); }
+            }));
+            if (!inlineDone.Wait(TimeSpan.FromSeconds(10)))
+            {
+                Console.Error.WriteLine("[uitest] inline call timed out");
+                failures++;
+            }
+            else
+            {
+                Console.WriteLine("[uitest] inline result=" + inlineResult);
+                if (inlineResult != "body:" + uiThreadId)
+                {
+                    Console.Error.WriteLine("[uitest] on-thread call did not run inline");
+                    failures++;
+                }
+            }
+
+            dispatcher.BeginInvoke(new Action(() => dispatcher.InvokeShutdown()));
+            ui.Join(TimeSpan.FromSeconds(10));
+
+            Console.WriteLine(failures == 0 ? "[uitest] RESULT: PASS" : "[uitest] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
         }
 
         /// <summary>

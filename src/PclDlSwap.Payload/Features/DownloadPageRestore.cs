@@ -23,6 +23,15 @@ namespace PclDlSwap.Payload.Features
     {
         private static DetourInstaller _loaderDetour;
         private static volatile bool _sidebarFixed;
+        private static int _sidebarAttempts;
+
+        /// <summary>
+        /// A repair that lands on an unfinished visual tree is retried instead of silencing the
+        /// sidebar for the rest of the session (the Alpha 4 2.99.0.1 run lost the entry after one
+        /// cross-thread failure).
+        /// </summary>
+        private const int MaxSidebarAttempts = 40;
+
         private static readonly BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic |
                                                      BindingFlags.Static | BindingFlags.Instance;
 
@@ -148,16 +157,14 @@ namespace PclDlSwap.Payload.Features
                     var itemMod = PclUi.GetMember(page, "ItemMod");
                     if (itemInstall == null)
                     {
-                        SwapLog.Warn("下载侧栏恢复：页面没有 ItemInstall，跳过。");
-                        _sidebarFixed = true;
+                        NoteSidebarFailure("下载侧栏恢复：页面没有 ItemInstall", new MissingMemberException("ItemInstall"));
                         return;
                     }
 
                     var visibility = PclUi.GetMember(itemInstall, "Visibility");
                     if (visibility == null)
                     {
-                        SwapLog.Warn("下载侧栏恢复：ItemInstall 没有 Visibility，跳过。");
-                        _sidebarFixed = true;
+                        NoteSidebarFailure("下载侧栏恢复：ItemInstall 没有 Visibility", new MissingMemberException("Visibility"));
                         return;
                     }
 
@@ -186,10 +193,27 @@ namespace PclDlSwap.Payload.Features
                 }
                 catch (Exception ex)
                 {
-                    SwapLog.Error("下载侧栏恢复失败：" + ex);
-                    _sidebarFixed = true;
+                    NoteSidebarFailure("下载侧栏恢复失败", ex);
                 }
             });
+        }
+
+        private static void NoteSidebarFailure(string label, Exception ex)
+        {
+            var attempts = Interlocked.Increment(ref _sidebarAttempts);
+            if (attempts >= MaxSidebarAttempts)
+            {
+                _sidebarFixed = true;
+                SwapLog.Error($"{label}（第 {attempts} 次仍失败，停止重试）：{ex}");
+            }
+            else if (attempts == 1)
+            {
+                SwapLog.Warn($"{label}（第 {attempts} 次，将继续重试）：{ex.Message}");
+            }
+            else if (attempts % 10 == 0)
+            {
+                SwapLog.Info($"{label}（第 {attempts} 次失败，继续重试）。");
+            }
         }
 
         /// <summary>

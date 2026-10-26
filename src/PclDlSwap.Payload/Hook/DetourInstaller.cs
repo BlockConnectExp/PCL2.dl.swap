@@ -140,6 +140,29 @@ namespace PclDlSwap.Payload.Hook
             return null;
         }
 
+        /// <summary>
+        /// True when this method's JIT entry already carries a detour this tool wrote (x64: FF 25,
+        /// x86: E9 - see the respective engine). A second injection into the same process (a newer
+        /// shim, or ExLoader firing twice) must not stack a second hook: the first engine's patched
+        /// body would then be copied as the "original" and the two payloads would recurse.
+        /// </summary>
+        public static bool IsHooked(MethodBase method)
+        {
+            try
+            {
+                if (method == null) return false;
+                RuntimeHelpers.PrepareMethod(method.MethodHandle);
+                var entry = method.MethodHandle.GetFunctionPointer();
+                var b0 = Marshal.ReadByte(entry);
+                if (b0 == 0xFF && Marshal.ReadByte(entry, 1) == 0x25) return true;
+                return b0 == 0xE9;   // x86 relative jump
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         public static MethodInfo ResolveByToken(Assembly host, string tokenHex)
         {
             if (string.IsNullOrEmpty(tokenHex)) return null;

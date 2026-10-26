@@ -6,6 +6,38 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.26-08:35:00 Alpha 4: managed hook targets and IL-copied originals (AccessViolation fix)
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Hook\X64Detour.cs            rewritten (v2)
+.\src\PclDlSwap.Payload\Hook\DetourInstaller.cs      rewritten (v2)
+.\src\PclDlSwap.Payload\Host\OriginalFactory.cs      new (MonoMod IL copies)
+.\src\PclDlSwap.Payload\Host\CoreInstaller.cs        hooks -> managed methods
+.\src\PclDlSwap.Payload\Features\AnnouncementGuard.cs    hook -> managed method
+.\src\PclDlSwap.Payload\Features\DownloadPageRestore.cs  hook -> managed method
+.\src\PclDlSwap.Payload\Features\FeedbackRouter.cs       hook -> managed method
+.\src\PclDlSwap.Payload\Host\ExLoaderEntry.cs        generic dependency resolver
+.\src\Pcl2Swap.Shim\Shim.cpp                         embeds MonoMod.Utils + Mono.Cecil
+.\src\Pcl2Swap.Shim\build.ps1                        new resources, /Gs9999999
+.\src\PclDlSwap.ExLoaderHarness\Program.cs           v2 tests (copytest/hooktest)
+.\docs\av-root-cause.md                              new (root cause writeup)
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|X64Detour/DetourInstaller|The detour now jumps to a managed method body (PrepareMethod + GetFunctionPointer) instead of a Marshal.GetFunctionPointerForDelegate thunk. The thunk assumes it is entered from unmanaged code, and JIT callers trip the GC mode - field crashes proved this (PCL 2.99.0 crash at TryFeedback IL+13 `e.Handled=true`; 2.99.0.1 crash inside the MyImage worker)|2026.10.26-08:35:00|PCL2.dl.swap
+2|OriginalFactory|"Original" now runs from a full IL copy of the target method generated with MonoMod.Utils' DynamicMethodDefinition and invoked through reflection - a genuine managed call, no relocated prologue. The stolen-prologue trampoline, Capstone disassembly and the relocation engine are gone|2026.10.26-08:35:00|PCL2.dl.swap
+3|X64Detour|v2 only backs up the entry and writes the 14-byte absolute jump, with a short-method guard; the old RIP-relative relocation failures (and the crash while rejecting `mov eax,[rip+...]` prologues) cannot happen any more|2026.10.26-08:35:00|PCL2.dl.swap
+4|Hooks (OTA/download/dialog/loader/feedback)|All hooks became static managed methods with the target's ABI (reference parameters as object, value parameters exact); their originals are reached through DetourInstaller.InvokeOriginal|2026.10.26-08:35:00|PCL2.dl.swap
+5|Harness|New --copytest (IL copy equivalence) and --hooktest (managed hook + 2000 calls under GC pressure + original through the copy). The old trampoline-based engine/abi tests were retired. Integration suite: 9/9|2026.10.26-08:35:00|PCL2.dl.swap
+
+version: v26.0-Alpha 4
+
+---
 ## 2026.10.26-05:00:00 Alpha 3: property-aware member access, poll-based page repairs
 
 GitCommitHash: (unreleased)

@@ -232,6 +232,7 @@ namespace PclDlSwap.ExLoaderHarness
             if (args.Length >= 2 && args[0] == "--uitest") return RunUiThreadTest(args[1]);
             if (args.Length >= 3 && args[0] == "--manifest") return RunManifestTest(args[1], args[2]);
             if (args.Length >= 2 && args[0] == "--scantest") return RunScanPolicyTest(args[1]);
+            if (args.Length >= 2 && args[0] == "--loaderhooktest") return RunLoaderHookTest(args[1]);
 
             var reversedOta = args.Contains("--reversed-ota");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
@@ -245,6 +246,7 @@ namespace PclDlSwap.ExLoaderHarness
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --uitest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --manifest <payload.dll> <host.exe>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --scantest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --loaderhooktest <payload.dll>");
                 return 2;
             }
 
@@ -575,6 +577,60 @@ namespace PclDlSwap.ExLoaderHarness
             }
 
             Console.WriteLine(failures == 0 ? "[manifest] RESULT: PASS" : "[manifest] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Regression test for the loader-shape download hook: after the IL rewrite, DownloadHook must
+        /// rebuild PCL's own NetFile/LoaderDownload pipeline (multi-source, progress sync, checker)
+        /// through reflection - the old version replaced it with a single-threaded WebClient and
+        /// dropped the checker. The stub above mirrors the real ctor/method signatures measured from
+        /// PCL 2.99.0's IL.
+        /// </summary>
+        private static int RunLoaderHookTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var payload = Assembly.LoadFrom(full);
+            var hookType = payload.GetType("PclDlSwap.Payload.Host.HookEntryPoints", throwOnError: true);
+            var configType = payload.GetType("PclDlSwap.Payload.Sandbox.SwapConfig", throwOnError: true);
+            var config = Activator.CreateInstance(configType);
+            var configProperty = hookType.GetProperty("Config", BindingFlags.Public | BindingFlags.Static);
+            configProperty?.GetSetMethod(nonPublic: true)?.Invoke(null, new object[] { config });
+
+            PCL.ModNet.LoaderDownload.WaitForExitCalls = 0;
+            PCL.ModNet.LoaderDownload.CancelCalls = 0;
+            PCL.ModNet.LoaderDownload.LastInput = null;
+            PCL.ModNet.LoaderDownload.LastLoaderToSync = null;
+            PCL.ModNet.LoaderDownload.LastForceRestart = true;
+            PCL.ModNet.LoaderDownload.LastProvider = null;
+
+            var downloadHook = hookType.GetMethod("DownloadHook", BindingFlags.Public | BindingFlags.Static);
+            var loaderSync = new object();
+            var urls = new[] { "https://pcl2-server.example/file.json" };
+            var localPath = Path.Combine(Path.GetTempPath(), "pcl2swap-loaderhooktest.json");
+            if (File.Exists(localPath)) File.Delete(localPath);
+
+            downloadHook.Invoke(null, new object[] { urls, localPath, loaderSync, null, false });
+
+            var failures = 0;
+            void Expect(string label, bool ok)
+            {
+                Console.WriteLine((ok ? "[loaderhook] ok   " : "[loaderhook] FAIL ") + label);
+                if (!ok) failures++;
+            }
+
+            Expect("WaitForExit called once", PCL.ModNet.LoaderDownload.WaitForExitCalls == 1);
+            Expect("Cancel called once", PCL.ModNet.LoaderDownload.CancelCalls == 1);
+            Expect("loader passed as LoaderToSyncProgress",
+                ReferenceEquals(PCL.ModNet.LoaderDownload.LastLoaderToSync, loaderSync));
+            Expect("IsForceRestart false", PCL.ModNet.LoaderDownload.LastForceRestart == false);
+            Expect("Input null", PCL.ModNet.LoaderDownload.LastInput == null);
+
+            Console.WriteLine(failures == 0
+                ? "[loaderhook] RESULT: PASS"
+                : "[loaderhook] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
         }
 
@@ -1106,6 +1162,58 @@ namespace PCL
         {
             var pad = "pcl2swap.harness.client." + (url ?? string.Empty).Length;
             PclDlSwap.ExLoaderHarness.Probes.DownloadByClientCalls += pad.Length > 0 ? 1 : 0;
+        }
+
+        /// <summary>Stand-in for PCL.ModNet.NetFile (the loader shape rebuilds it via reflection).</summary>
+        public sealed class NetFile
+        {
+            public readonly IEnumerable<string> Urls;
+            public readonly string LocalPath;
+            public readonly object Checker;
+            public readonly bool SimulateBrowserHeaders;
+
+            public NetFile(IEnumerable<string> urls, string localPath, object checker, bool simulateBrowserHeaders)
+            {
+                Urls = urls;
+                LocalPath = localPath;
+                Checker = checker;
+                SimulateBrowserHeaders = simulateBrowserHeaders;
+            }
+        }
+
+        /// <summary>Stand-in for PCL.ModNet.LoaderDownload (carries the WaitForExit/Cancel surface).</summary>
+        public sealed class LoaderDownload
+        {
+            public static int WaitForExitCalls;
+            public static int CancelCalls;
+            public static object LastInput;
+            public static object LastLoaderToSync;
+            public static bool LastForceRestart = true;
+            public static object LastProvider;
+
+            public readonly string Name;
+            public readonly List<NetFile> Tasks;
+
+            public LoaderDownload(string name, IEnumerable<NetFile> fileTasks)
+            {
+                Name = name;
+                Tasks = new List<NetFile>(fileTasks ?? Enumerable.Empty<NetFile>());
+            }
+
+            public void WaitForExit(object input, object loaderToSyncProgress, bool isForceRestart,
+                CancellationToken cancellationToken, object progressProvider)
+            {
+                WaitForExitCalls++;
+                LastInput = input;
+                LastLoaderToSync = loaderToSyncProgress;
+                LastForceRestart = isForceRestart;
+                LastProvider = progressProvider;
+            }
+
+            public void Cancel()
+            {
+                CancelCalls++;
+            }
         }
     }
 

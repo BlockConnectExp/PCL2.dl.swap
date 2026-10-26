@@ -35,6 +35,14 @@ Num|File Name|Change Description|Change Time|Changer
 4|ScannerSet/SwapLog/PclUi|MpCmdRun and clamscan lookups are cached, the log mirror disables itself after the first failure, the host logger is resolved once, and the dispatcher method table is cached (the pollers call OnUiThread every 300 ms until a repair lands)|2026.10.26-22:40:00|PCL2.dl.swap
 5|Harness|New --scantest (extension + game-directory policy) and a click-safety regression that reproduces the field NullReferenceException path; integration suite is now 10/10|2026.10.26-22:40:00|PCL2.dl.swap
 
+### Loader (disk-patch) shape: Alpha 2 rebuild (2026-10-27)
+
+- The disk-patch shape is a pure static IL rewrite (download-page gate restore, 2.99.0.1 sidebar repair, silent-OTA confirmation prefix, update-permission gate). Its runtime profiler hook was never wired up, so the bundle is a version-alignment rebuild rather than a behaviour change.
+- `HookEntryPoints.DownloadHook` (the loader-side hook used once profiling is wired) now rebuilds PCL's own `NetFile`/`LoaderDownload` pipeline through reflection - multi-source failover, progress sync into the loader and FileChecker validation - instead of the old single-threaded WebClient that also skipped the checker. The harness regression `--loaderhooktest` pins the call chain against a stub that mirrors PCL 2.99.0's IL.
+- `ScanPolicy` (shared by both shapes) now owns the "game content is never scanned" rule; `CoreInstaller` keeps a thin wrapper so the existing `--scantest` still passes.
+- `src\PclDlSwap.Profiler\build.cmd`: the trailing watermark line became `rem` (the bare `#` line made cmd exit non-zero after a successful build, so build.ps1 always reported "profiler failed").
+- Bundle: `PCL2.dl.swap-Loader-v26.0-Alpha2.zip` (loader + patcher + payload + dnlib + MonoMod.Utils/Mono.Cecil + Capstone + `data/offset-manifest.json`).
+
 version: v26.0-Alpha 2
 
 ---

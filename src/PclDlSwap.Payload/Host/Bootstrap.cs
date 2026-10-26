@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -127,19 +128,7 @@ namespace PclDlSwap.Payload.Host
             try
             {
                 var list = Materialize(urls);
-                if (!IsPclCloud(list) || !Config.InterceptPclCloudDownloads)
-                {
-                    SwapLog.Info("下载门放行非 PCL 云下载：" + localPath);
-                    return;
-                }
-
-                var result = _sandbox.FetchAndPublish(list.ToArray(), localPath);
-                SwapLog.Info("沙箱结果：" + (result.Success ? "通过" : result.Blocked ? "拦截" : "失败") + " | " + result.Summary);
-                if (result.Success) return;
-
-                if (result.Blocked)
-                    Dialogs.OnStaThread(() => { Dialogs.BlockedDownload(localPath, result.Summary); return 0; }, 0);
-                throw new InvalidOperationException("PCL2 DLL-Swap 已阻止未通过病毒检测的下载：" + result.Summary);
+                DownloadHook(list, localPath, loader, checker, simulateBrowserHeaders);
             }
             catch (Exception ex)
             {
@@ -168,31 +157,36 @@ namespace PclDlSwap.Payload.Host
             return list;
         }
 
-        /// <summary>Rewritten PCL.ModNet.NetDownloadByLoader body.</summary>
+        /// <summary>
+        /// Rewritten body of <c>PCL.ModNet.NetDownloadByLoader</c>. The original implementation is a
+        /// thin wrapper around PCL's own multi-threaded downloader (<c>NetFile</c> +
+        /// <c>LoaderDownload</c>: multi-source failover, progress sync through the loader,
+        /// FileChecker validation). Rewriting the body replaces that engine, so this hook rebuilds
+        /// the very same call graph through reflection - the launcher keeps its own download
+        /// behaviour - and then applies the post-download scan policy on top. The previous version
+        /// downloaded everything through a single-threaded WebClient and ignored the checker
+        /// entirely, which is exactly the loader shape's performance/completeness gap.
+        /// </summary>
         public static void DownloadHook(IEnumerable<string> urls, string localPath, object loader, object checker, bool simulateBrowserHeaders)
         {
             var list = urls?.ToList() ?? new List<string>();
-            bool isCloud = IsPclCloud(list);
-            SwapLog.Info($"下载钩子：isCloud={isCloud} path={localPath} urls={(list.Count == 0 ? "(empty)" : string.Join(",", list))}");
-
-            // Note: rewriting NetDownloadByLoader replaces the host's download engine wholesale,
-            // so this hook performs both roles itself instead of forwarding: PCL cloud payloads go
-            // through the sandbox scanner, everything else uses a plain HTTP download into the
-            // caller's destination. That keeps behaviour correct without needing the original body.
             try
             {
-                if (isCloud && Config.InterceptPclCloudDownloads)
-                {
-                    var result = _sandbox.FetchAndPublish(list.ToArray(), localPath);
-                    SwapLog.Info("沙箱结果：" + (result.Success ? "通过" : result.Blocked ? "拦截" : "失败") + " | " + result.Summary);
-                    if (result.Success) return;
+                RunHostDownload(list, localPath, loader, checker, simulateBrowserHeaders);
 
-                    if (result.Blocked)
-                        Dialogs.OnStaThread(() => { Dialogs.BlockedDownload(localPath, result.Summary); return 0; }, 0);
-                    throw new InvalidOperationException("PCL2 DLL-Swap 已阻止未通过病毒检测的下载：" + result.Summary);
-                }
+                if (!Config.InterceptPclCloudDownloads) return;
+                if (!IsPclCloud(list)) return;
+                if (!File.Exists(localPath)) return;
+                if (!ScanPolicy.ShouldScanDownload(localPath)) return;
 
-                DirectDownload(list, localPath);
+                var result = _sandbox.VerifyDownloadedFile(localPath);
+                SwapLog.Info("云下载查毒：" + (result.Success ? "通过" : result.Blocked ? "拦截" : "失败") +
+                             " | " + localPath + " | " + result.Summary.Replace(Environment.NewLine, " "));
+                if (result.Success) return;
+
+                if (result.Blocked)
+                    Dialogs.OnStaThread(() => { Dialogs.BlockedDownload(localPath, result.Summary); return 0; }, 0);
+                throw new InvalidOperationException("PCL2 DLL-Swap 已阻止未通过病毒检测的下载：" + result.Summary);
             }
             catch (Exception ex)
             {
@@ -200,6 +194,75 @@ namespace PclDlSwap.Payload.Host
                 throw;
             }
         }
+
+        /// <summary>
+        /// Rebuilds PCL's own download pipeline through reflection so the rewritten method keeps the
+        /// host's behaviour (multi-source failover, progress reporting into the loader, FileChecker
+        /// validation). Mirrors the original IL exactly:
+        ///   new LoaderDownload(name, new List&lt;NetFile&gt; { new NetFile(urls, path, checker, headers) })
+        ///     .WaitForExit(null, loader, false, default(CancellationToken), null)
+        ///   finally -&gt; Cancel()
+        /// Falls back to a plain download only when the host types cannot be resolved.
+        /// </summary>
+        private static void RunHostDownload(List<string> urls, string localPath, object loader, object checker, bool simulateBrowserHeaders)
+        {
+            var host = Assembly.GetEntryAssembly();
+            var netFileType = host?.GetType("PCL.ModNet+NetFile", throwOnError: false);
+            var loaderDownloadType = host?.GetType("PCL.ModNet+LoaderDownload", throwOnError: false);
+            if (netFileType == null || loaderDownloadType == null)
+            {
+                SwapLog.Warn("未找到 PCL.ModNet 下载类型（NetFile/LoaderDownload），退回内置直连下载。");
+                DirectDownload(urls, localPath);
+                return;
+            }
+
+            var netFileCtor = netFileType
+                .GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .FirstOrDefault(cctor => cctor.GetParameters().Length == 4);
+            var loaderCtor = loaderDownloadType
+                .GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .FirstOrDefault(cctor => cctor.GetParameters().Length == 2);
+            if (netFileCtor == null || loaderCtor == null)
+            {
+                SwapLog.Warn("PCL.ModNet 下载类型的构造签名不匹配，退回内置直连下载。");
+                DirectDownload(urls, localPath);
+                return;
+            }
+
+            var netFile = netFileCtor.Invoke(new object[] { urls, localPath, checker, simulateBrowserHeaders });
+            var taskList = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(netFileType));
+            taskList.Add(netFile);
+
+            var name = "文件下载 " + Guid.NewGuid().ToString("N").Substring(0, 8) + "#";
+            var download = loaderCtor.Invoke(new object[] { name, taskList });
+
+            try
+            {
+                var waitForExit = download.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(candidate => candidate.Name == "WaitForExit" &&
+                                                 candidate.GetParameters().Length == 5);
+                if (waitForExit == null)
+                    throw new MissingMethodException(download.GetType().FullName, "WaitForExit");
+
+                var parameters = waitForExit.GetParameters();
+                var args = new object[parameters.Length];
+                args[0] = null;                                 // Input
+                if (parameters.Length > 1) args[1] = loader;    // LoaderToSyncProgress
+                if (parameters.Length > 2) args[2] = false;     // IsForceRestart
+                for (var i = 3; i < parameters.Length; i++)
+                    args[i] = DefaultValue(parameters[i].ParameterType);
+
+                waitForExit.Invoke(download, args);
+            }
+            finally
+            {
+                try { download.GetType().GetMethod("Cancel", Type.EmptyTypes)?.Invoke(download, null); }
+                catch { }
+            }
+        }
+
+        private static object DefaultValue(Type type) =>
+            type != null && type.IsValueType ? Activator.CreateInstance(type) : null;
 
         /// <summary>Fallback downloader for non-cloud sources after the host engine is replaced.</summary>
         private static void DirectDownload(List<string> urls, string localPath)

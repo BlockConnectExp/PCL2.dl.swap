@@ -41,12 +41,29 @@
 | `Pcl2Swap.Shim.x64.dll` | the ExLoader injection shim (upload this on the injector card) |
 | `Pcl2Swap.Shim.x64.dat` | the same build as a decimal byte dump for ExLoader's userFiles encoding |
 | `PCL2.dl.swap-v26.0-Alpha2.zip` | both files above plus `SHA256SUMS.txt` |
+| `PCL2.dl.swap-Loader-v26.0-Alpha2.zip` | the disk-patch shape (Loader + Patcher + Payload + dependencies) rebuilt for this version |
 
 SHA-256:
 
 ```
 393944d64e67665efb525f10c62f6a6a25b9886ca10317982809a2ecd31bc175  Pcl2Swap.Shim.x64.dll
 313d209520849e598a65635791482b646a28633e688a8d0f47754bb53ee2c2fb  Pcl2Swap.Shim.x64.dat
+```
+
+## Disk-Patch Shape (Loader)
+
+The loader bundle patches a **copy** of PCL and launches it; the original executable is never
+modified. This shape is a pure **static IL rewrite** and provides: the download-page gate restore,
+the 2.99.0.1 sidebar repair, silent-OTA confirmation (a cancellable prompt before any background
+update) and the update-permission gate. Its runtime profiler hook has never been wired up, so this
+bundle is a version-alignment rebuild; the payload's `DownloadHook` (used once profiling is
+connected) now rebuilds PCL's own `NetFile`/`LoaderDownload` pipeline instead of replacing it with
+a single-threaded WebClient.
+
+```powershell
+# Lay the zip next to PCL (or anywhere), then:
+.\PclDlSwap.Loader.exe "D:\PCL\Plain Craft Launcher 2.exe"
+# -repatch  force a fresh patched copy, -watch  supervise the launched process
 ```
 
 ## Field Verification (owner, 2.99.0 and 2.99.0.1)

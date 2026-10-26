@@ -517,8 +517,7 @@ namespace PclDlSwap.Payload.Host
         private static void VerifyCloudDownload(string localPath)
         {
             if (string.IsNullOrEmpty(localPath) || !File.Exists(localPath)) return;
-            if (!ScannerSet.ShouldScan(localPath)) return;
-            if (IsGameContentPath(localPath)) return;
+            if (!ScanPolicy.ShouldScanDownload(localPath)) return;
 
             var result = _sandbox.VerifyDownloadedFile(localPath);
             SwapLog.Info("云下载查毒：" + (result.Success ? "通过" : result.Blocked ? "拦截" : "失败") +
@@ -532,25 +531,8 @@ namespace PclDlSwap.Payload.Host
             }
         }
 
-        private static readonly string[] GameContentMarkers =
-        {
-            "\\.minecraft\\", "\\mods\\", "\\resourcepacks\\", "\\shaderpacks\\", "\\versions\\"
-        };
-
-        /// <summary>
-        /// True when the download lands inside a Minecraft directory. The markers are matched as whole
-        /// path segments ("\mods\" does not match "\mymods\"), so only actual game content is skipped.
-        /// </summary>
-        private static bool IsGameContentPath(string path)
-        {
-            if (string.IsNullOrEmpty(path)) return false;
-            var normalized = path.Replace('/', '\\');
-            foreach (var marker in GameContentMarkers)
-            {
-                if (normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            }
-            return false;
-        }
+        /// <summary>Thin wrapper kept for the harness scan-policy test; the policy itself lives in ScanPolicy.</summary>
+        private static bool IsGameContentPath(string path) => ScanPolicy.IsGameContentPath(path);
 
         private static bool IsPclCloud(IEnumerable<string> urls)
         {

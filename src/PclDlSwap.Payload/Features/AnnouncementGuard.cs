@@ -1,29 +1,24 @@
 using System;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
 
 namespace PclDlSwap.Payload.Features
 {
     /// <summary>
-    /// PCL's server announcements can be declared as "must act now" notices: the notice carries a
-    /// single button and PCL shows it with <c>ForceWait</c>, so the window cannot be dismissed. The
-    /// 2.99.x "悲报" notice (id 230, "为遵守相关法律法规，PCL 不再提供 MC 下载功能……") uses exactly
-    /// that shape and pushes users into an update that removes the download module.
+    /// PCL's server announcements can be declared as "must act now" notices: the notice carries a single
+    /// button and PCL shows it with <c>ForceWait</c>, so the window cannot be dismissed. The 2.99.x "悲报"
+    /// notice uses exactly that shape and pushes users into an update that removes the download module.
     ///
-    /// This hook keeps the notice but re-renders it through PCL's own dialog with an extra "取消"
-    /// button, and remembers the decision so the update the notice triggers can be dropped.
+    /// This hook keeps the notice but re-renders it through PCL's own dialog with an extra "取消" button, and
+    /// remembers the decision so the update the notice triggers can be dropped. The hook is a managed method
+    /// with the target's ABI; the original dialog is reached through its IL copy.
     /// </summary>
     internal static class AnnouncementGuard
     {
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate int MyMsgBoxDelegate(IntPtr caption, IntPtr title, IntPtr button1, IntPtr button2,
-            IntPtr button3, byte isWarn, byte highLight, byte forceWait,
-            IntPtr button1Action, IntPtr button2Action, IntPtr button3Action);
-
-        private static MyMsgBoxDelegate _original;
+        private static DetourInstaller _detour;
         private static bool _updateCancelled;
         private static readonly object Gate = new object();
 
@@ -43,11 +38,11 @@ namespace PclDlSwap.Payload.Features
                     return;
                 }
 
-                _hookDelegate = OnMsgBox;
-                var detour = DetourInstaller.Install(method, _hookDelegate);
-                _original = detour.Original<MyMsgBoxDelegate>();
+                var hook = typeof(AnnouncementGuard).GetMethod(nameof(HookMyMsgBox),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                _detour = DetourInstaller.Install(method, hook);
                 Installed = true;
-                SwapLog.Info("公告守卫已安装：" + detour.Verify());
+                SwapLog.Info("公告守卫已安装：" + _detour.Verify());
             }
             catch (Exception ex)
             {
@@ -55,39 +50,26 @@ namespace PclDlSwap.Payload.Features
             }
         }
 
-        private static MyMsgBoxDelegate _hookDelegate;
-
-        private static int OnMsgBox(IntPtr captionPtr, IntPtr titlePtr, IntPtr button1Ptr, IntPtr button2Ptr,
-            IntPtr button3Ptr, byte isWarn, byte highLight, byte forceWait,
-            IntPtr button1Action, IntPtr button2Action, IntPtr button3Action)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static int HookMyMsgBox(string caption, string title, string button1, string button2,
+            string button3, bool isWarn, bool highLight, bool forceWait,
+            object button1Action, object button2Action, object button3Action)
         {
             try
             {
-                var caption = ObjectPointer.ToObject<string>(captionPtr);
-                var title = ObjectPointer.ToObject<string>(titlePtr);
-                var button1 = ObjectPointer.ToObject<string>(button1Ptr);
-                var button2 = ObjectPointer.ToObject<string>(button2Ptr);
-                var button3 = ObjectPointer.ToObject<string>(button3Ptr);
-
-                if (_original != null &&
-                    IsForcedUpdateNotice(caption, title, button1, button2, button3, forceWait != 0))
+                if (_detour != null &&
+                    IsForcedUpdateNotice(caption, title, button1, button2, button3, forceWait))
                 {
                     SwapLog.Warn("拦截到无法关闭的“悲报”式更新公告，已为其追加“取消”按钮。");
                     var body = caption + Environment.NewLine + Environment.NewLine +
                                "点击“取消”可以保持当前版本继续使用，不会下载或安装更新。";
-                    var bodyPtr = ObjectPointer.ToPointer(body);
-                    var cancelPtr = ObjectPointer.ToPointer("取消");
-                    var emptyPtr = ObjectPointer.ToPointer(string.Empty);
-                    int result = _original(bodyPtr, titlePtr, button1Ptr, cancelPtr, emptyPtr,
-                        isWarn, highLight, 0, button1Action, button2Action, button3Action);
-                    GC.KeepAlive(body);
+                    int result = _detour.InvokeOriginal<int>(null, body, title, button1, "取消", string.Empty,
+                        isWarn, highLight, false, button1Action, button2Action, button3Action);
                     if (result == 2)
                     {
                         lock (Gate) _updateCancelled = true;
                         SwapLog.Info("用户在更新公告中选择“取消”，本次公告更新将被丢弃。");
                     }
-                    // PCL clamps the result into the notice's own button range (1), so the update action
-                    // still runs; ConsumeCancelledUpdate() makes the update itself a no-op.
                     return result;
                 }
             }
@@ -96,9 +78,9 @@ namespace PclDlSwap.Payload.Features
                 SwapLog.Error("公告守卫钩子异常，按原始行为继续：" + ex);
             }
 
-            if (_original != null)
-                return _original(captionPtr, titlePtr, button1Ptr, button2Ptr, button3Ptr, isWarn, highLight, forceWait,
-                    button1Action, button2Action, button3Action);
+            if (_detour != null)
+                return _detour.InvokeOriginal<int>(null, caption, title, button1, button2, button3,
+                    isWarn, highLight, forceWait, button1Action, button2Action, button3Action);
             return 1;
         }
 
@@ -128,3 +110,6 @@ namespace PclDlSwap.Payload.Features
         }
     }
 }
+
+
+// GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

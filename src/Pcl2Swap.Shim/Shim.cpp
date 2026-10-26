@@ -21,12 +21,16 @@
 #define PAYLOAD_RES_ID    101
 #define CLRWRAPPER_RES_ID 102
 #define CAPSTONE_RES_ID   103
+#define MONOMOD_RES_ID    104
+#define CECIL_RES_ID      105
 #define PAYLOAD_ASM_NAME  L"PclDlSwap.Payload.dll"
 #define CLRWRAPPER_NAME   L"Gee.External.Capstone.dll"
 #define CAPSTONE_NAME     L"capstone.dll"
+#define MONOMOD_NAME      L"MonoMod.Utils.dll"
+#define CECIL_NAME        L"Mono.Cecil.dll"
 #define ENTRY_TYPE        L"PclDlSwap.Payload.Host.ExLoaderEntry"
 #define ENTRY_METHOD      L"Activate"
-#define TOOL_VERSION      L"v26.0-Alpha3"
+#define TOOL_VERSION      L"v26.0-Alpha4"
 
 // GUIDs from metahost.h, spelled out so no import library is needed.
 static const GUID kClsidClrMetaHost =
@@ -42,6 +46,14 @@ static const GUID kIidIclrRuntimeHost =
 
 static HMODULE g_module;
 static volatile LONG g_workerStarted;
+
+// The worker runs exactly once per process; keeping the path buffers static keeps the thread's stack frame
+// small enough that the compiler does not emit a __chkstk call (this DLL links without the CRT).
+static wchar_t g_payloadPath[MAX_PATH];
+static wchar_t g_clrWrapperPath[MAX_PATH];
+static wchar_t g_capstonePath[MAX_PATH];
+static wchar_t g_monoModPath[MAX_PATH];
+static wchar_t g_cecilPath[MAX_PATH];
 
 static void AppendLog(const wchar_t* text)
 {
@@ -211,16 +223,17 @@ static DWORD WINAPI WorkerThread(LPVOID parameter)
         return 1;
     }
 
-    wchar_t payloadPath[MAX_PATH];
-    wchar_t clrWrapperPath[MAX_PATH];
-    wchar_t capstonePath[MAX_PATH];
-    lstrcpyW(payloadPath, directory);   lstrcatW(payloadPath, PAYLOAD_ASM_NAME);
-    lstrcpyW(clrWrapperPath, directory); lstrcatW(clrWrapperPath, CLRWRAPPER_NAME);
-    lstrcpyW(capstonePath, directory);   lstrcatW(capstonePath, CAPSTONE_NAME);
+    lstrcpyW(g_payloadPath, directory);   lstrcatW(g_payloadPath, PAYLOAD_ASM_NAME);
+    lstrcpyW(g_clrWrapperPath, directory); lstrcatW(g_clrWrapperPath, CLRWRAPPER_NAME);
+    lstrcpyW(g_capstonePath, directory);   lstrcatW(g_capstonePath, CAPSTONE_NAME);
+    lstrcpyW(g_monoModPath, directory);    lstrcatW(g_monoModPath, MONOMOD_NAME);
+    lstrcpyW(g_cecilPath, directory);      lstrcatW(g_cecilPath, CECIL_NAME);
 
-    if (!ExtractResource(g_module, PAYLOAD_RES_ID, payloadPath) ||
-        !ExtractResource(g_module, CLRWRAPPER_RES_ID, clrWrapperPath) ||
-        !ExtractResource(g_module, CAPSTONE_RES_ID, capstonePath))
+    if (!ExtractResource(g_module, PAYLOAD_RES_ID, g_payloadPath) ||
+        !ExtractResource(g_module, CLRWRAPPER_RES_ID, g_clrWrapperPath) ||
+        !ExtractResource(g_module, CAPSTONE_RES_ID, g_capstonePath) ||
+        !ExtractResource(g_module, MONOMOD_RES_ID, g_monoModPath) ||
+        !ExtractResource(g_module, CECIL_RES_ID, g_cecilPath))
     {
         LogStageCode(L"payload extraction failed", (long)GetLastError());
         return 1;
@@ -229,7 +242,7 @@ static DWORD WINAPI WorkerThread(LPVOID parameter)
 
     // Preload the native disassembler so the managed wrapper's DllImport("capstone") resolves to
     // this extracted copy instead of searching the launcher directory.
-    HMODULE capstone = LoadLibraryW(capstonePath);
+    HMODULE capstone = LoadLibraryW(g_capstonePath);
     if (capstone == NULL)
         LogStageCode(L"LoadLibraryW(capstone) failed", (long)GetLastError());
     else
@@ -245,7 +258,7 @@ static DWORD WINAPI WorkerThread(LPVOID parameter)
     if (GetModuleHandleW(L"clr.dll") == NULL)
         LogStage(L"warning: clr.dll still not loaded, trying anyway");
 
-    HostManagedPayload(payloadPath);
+    HostManagedPayload(g_payloadPath);
     LogStage(L"shim finished");
     return 0;
 }

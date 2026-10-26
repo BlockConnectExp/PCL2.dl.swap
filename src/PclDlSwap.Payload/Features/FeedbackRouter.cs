@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
 
@@ -11,16 +11,15 @@ namespace PclDlSwap.Payload.Features
     /// "更多 → 反馈" used to drop the user straight into PCL's own feedback flow, which is wrong for
     /// a build that ships extra behaviour: a Swap bug must go to Swap, an upstream PCL bug to PCL.
     /// The hook asks which side the report belongs to first, then runs the matching flow.
+    ///
+    /// The hook is a static managed method with the target's exact ABI (see DetourInstaller) and reaches the
+    /// original through its IL copy.
     /// </summary>
     internal static class FeedbackRouter
     {
         private const string SwapIssuesUrl = "https://github.com/BlockConnectExp/PCL2.dl.swap/issues";
 
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void TryFeedbackDelegate();
-
-        private static TryFeedbackDelegate _original;
-        private static TryFeedbackDelegate _hook;
+        private static DetourInstaller _detour;
 
         public static bool Installed { get; private set; }
 
@@ -37,11 +36,11 @@ namespace PclDlSwap.Payload.Features
                     return;
                 }
 
-                _hook = OnTryFeedback;
-                var detour = DetourInstaller.Install(method, _hook);
-                _original = detour.Original<TryFeedbackDelegate>();
+                var hook = typeof(FeedbackRouter).GetMethod(nameof(HookTryFeedback),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                _detour = DetourInstaller.Install(method, hook);
                 Installed = true;
-                SwapLog.Info("反馈分流已安装：" + detour.Verify());
+                SwapLog.Info("反馈分流已安装：" + _detour.Verify());
             }
             catch (Exception ex)
             {
@@ -49,7 +48,8 @@ namespace PclDlSwap.Payload.Features
             }
         }
 
-        private static void OnTryFeedback()
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void HookTryFeedback()
         {
             try
             {
@@ -63,7 +63,7 @@ namespace PclDlSwap.Payload.Features
                 {
                     case 1:
                         SwapLog.Info("反馈分流：用户选择 PCL 启动器，走官方流程。");
-                        if (_original != null) _original();
+                        if (_detour != null) _detour.InvokeOriginal(null);
                         return;
                     case 2:
                         SwapLog.Info("反馈分流：用户选择 PCL2 Swap，打开项目 Issues。");
@@ -78,7 +78,7 @@ namespace PclDlSwap.Payload.Features
             catch (Exception ex)
             {
                 SwapLog.Error("反馈分流异常，回退到官方流程：" + ex);
-                try { if (_original != null) _original(); } catch { }
+                try { if (_detour != null) _detour.InvokeOriginal(null); } catch { }
             }
         }
     }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Features;
@@ -22,36 +23,15 @@ namespace PclDlSwap.Payload.Host
         private static DownloadSandbox _sandbox;
         private static HostTarget _target;
 
-        // Delegates and detours must stay reachable for the process lifetime: the CLR will collect
-        // a delegate whose only reference is the native function pointer.
+        // Detour handles (and the underlying IL copies) must stay reachable for the process lifetime.
         private static DetourInstaller _updateStart;
         private static DetourInstaller _permission;
         private static DetourInstaller _downloadByLoaderEnumerable;
         private static DetourInstaller _downloadByLoaderString;
         private static DetourInstaller _downloadByClient;
 
-        private static UpdateStartDelegate _updateStartHook;
-        private static PermissionDelegate _permissionHook;
-        private static DownloadListDelegate _downloadListHook;
-        private static DownloadSingleDelegate _downloadSingleHook;
-        private static DownloadByClientDelegate _downloadByClientHook;
-
         private static bool _otaDecisionRemembered;
         private static bool _allowNextUpdate;
-
-        // Detour thunks must stay byte-for-byte transparent: every reference-typed parameter is
-        // declared as IntPtr so the reverse P/Invoke stub never marshals it. ObjectPointer converts
-        // the raw value back into a GC-tracked reference inside the hook.
-        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
-        private delegate void UpdateStartDelegate(byte silent, IntPtr urlsOverride);
-        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
-        private delegate bool PermissionDelegate();
-        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
-        private delegate void DownloadListDelegate(IntPtr urls, IntPtr localPath, IntPtr loader, IntPtr checker, byte simulateBrowserHeaders);
-        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
-        private delegate void DownloadSingleDelegate(IntPtr url, IntPtr localPath, IntPtr loader, IntPtr checker, byte simulateBrowserHeaders);
-        [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Cdecl)]
-        private delegate void DownloadByClientDelegate(IntPtr url, IntPtr localPath, byte simulateBrowserHeaders);
 
         /// <summary>Entry point invoked by the native shim through ICLRRuntimeHost::ExecuteInDefaultAppDomain.</summary>
         public static int Activate(string argument)
@@ -282,9 +262,10 @@ namespace PclDlSwap.Payload.Host
                 return;
             }
 
-            _updateStartHook = OnUpdateStart;
-            _updateStart = DetourInstaller.Install(method, _updateStartHook);
-            SwapLog.Info($"OTA 拦截已安装：token=0x{method.MetadataToken:X8} target=0x{_updateStart.Target.ToInt64():X} trampoline=0x{_updateStart.Trampoline.ToInt64():X}");
+            var hook = typeof(CoreInstaller).GetMethod(nameof(HookUpdateStart),
+                BindingFlags.NonPublic | BindingFlags.Static);
+            _updateStart = DetourInstaller.Install(method, hook);
+            SwapLog.Info($"OTA 拦截已安装：token=0x{method.MetadataToken:X8} | {_updateStart.Verify()}");
         }
 
         private static void InstallPermissionBlock(Assembly host, InstallProfile profile)
@@ -303,8 +284,9 @@ namespace PclDlSwap.Payload.Host
                 SwapLog.Warn("找不到 PCL.ModSecret.get_HasUpdatePermission，跳过权限门。");
                 return;
             }
-            _permissionHook = () => false;
-            _permission = DetourInstaller.Install(method, _permissionHook);
+            var hook = typeof(CoreInstaller).GetMethod(nameof(HookPermission),
+                BindingFlags.NonPublic | BindingFlags.Static);
+            _permission = DetourInstaller.Install(method, hook);
             SwapLog.Info("更新权限门已安装：HasUpdatePermission 恒为 false。");
         }
 
@@ -340,22 +322,25 @@ namespace PclDlSwap.Payload.Host
 
                 if (enumerable != null)
                 {
-                    _downloadListHook = OnDownloadByLoader;
-                    _downloadByLoaderEnumerable = DetourInstaller.Install(enumerable, _downloadListHook);
+                    var hook = typeof(CoreInstaller).GetMethod(nameof(HookDownloadByLoader),
+                        BindingFlags.NonPublic | BindingFlags.Static);
+                    _downloadByLoaderEnumerable = DetourInstaller.Install(enumerable, hook);
                     SwapLog.Info($"云下载沙箱门已安装：{profile.DownloadByLoader}(IEnumerable)，token=0x{enumerable.MetadataToken:X8} | {_downloadByLoaderEnumerable.Verify()}");
                 }
                 if (single != null)
                 {
-                    _downloadSingleHook = OnDownloadByLoaderSingle;
-                    _downloadByLoaderString = DetourInstaller.Install(single, _downloadSingleHook);
+                    var hook = typeof(CoreInstaller).GetMethod(nameof(HookDownloadByLoaderSingle),
+                        BindingFlags.NonPublic | BindingFlags.Static);
+                    _downloadByLoaderString = DetourInstaller.Install(single, hook);
                     SwapLog.Info($"云下载沙箱门已安装：{profile.DownloadByLoader}(string)，token=0x{single.MetadataToken:X8} | {_downloadByLoaderString.Verify()}");
                 }
 
                 var client = DetourInstaller.ResolveTypeMethod(host, profile.NetType, profile.DownloadByClient, true);
                 if (client != null)
                 {
-                    _downloadByClientHook = OnDownloadByClient;
-                    _downloadByClient = DetourInstaller.Install(client, _downloadByClientHook);
+                    var hook = typeof(CoreInstaller).GetMethod(nameof(HookDownloadByClient),
+                        BindingFlags.NonPublic | BindingFlags.Static);
+                    _downloadByClient = DetourInstaller.Install(client, hook);
                     SwapLog.Info($"云下载沙箱门已安装：{profile.DownloadByClient}，token=0x{client.MetadataToken:X8}");
                 }
             }
@@ -365,13 +350,11 @@ namespace PclDlSwap.Payload.Host
             }
         }
 
-        private static void OnUpdateStart(byte silentRaw, IntPtr urlsPtr)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void HookUpdateStart(bool silent, object urlsOverride)
         {
             try
             {
-                var silent = silentRaw != 0;
-                var urlsOverride = ObjectPointer.ToObject<IEnumerable<string>>(urlsPtr);
-
                 if (AnnouncementGuard.ConsumeCancelledUpdate())
                 {
                     SwapLog.Info("用户在“悲报”式更新公告中选择了取消，本次启动器更新请求被丢弃。");
@@ -381,7 +364,7 @@ namespace PclDlSwap.Payload.Host
                 if (!silent && !_allowNextUpdate)
                 {
                     // Owner asked for it explicitly: sandbox the payload, then let the original flow run.
-                    _updateStart.Original<UpdateStartDelegate>().Invoke(silentRaw, urlsPtr);
+                    _updateStart.InvokeOriginal(null, silent, urlsOverride);
                     return;
                 }
 
@@ -389,11 +372,11 @@ namespace PclDlSwap.Payload.Host
                 {
                     _allowNextUpdate = false;
                     SwapLog.Info("OTA：按用户授权放行一次更新。");
-                    _updateStart.Original<UpdateStartDelegate>().Invoke(silentRaw, urlsPtr);
+                    _updateStart.InvokeOriginal(null, silent, urlsOverride);
                     return;
                 }
 
-                var urls = urlsOverride?.ToList();
+                var urls = (urlsOverride as IEnumerable<string>)?.ToList();
                 var detail = urls != null && urls.Count > 0
                     ? string.Join(Environment.NewLine, urls)
                     : "（服务器未给出下载链接，或更新信息在宿主内部获取）";
@@ -406,7 +389,7 @@ namespace PclDlSwap.Payload.Host
                     case Dialogs.OtaChoice.Update:
                         _allowNextUpdate = true;
                         SwapLog.Info("OTA：用户选择更新，转交原始流程（下载将被沙箱与查毒门拦截）。");
-                        _updateStart.Original<UpdateStartDelegate>().Invoke(silentRaw, urlsPtr);
+                        _updateStart.InvokeOriginal(null, silent, urlsOverride);
                         break;
                     case Dialogs.OtaChoice.AbortAutoUpdate:
                         _otaDecisionRemembered = true;
@@ -420,36 +403,34 @@ namespace PclDlSwap.Payload.Host
             catch (Exception ex)
             {
                 SwapLog.Error("OTA 钩子异常，已回退到原始行为：" + ex);
-                try { _updateStart.Original<UpdateStartDelegate>().Invoke(silentRaw, urlsPtr); } catch { }
+                try { _updateStart.InvokeOriginal(null, silent, urlsOverride); } catch { }
             }
         }
 
-        private static bool OnPermission()
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static bool HookPermission()
         {
             if (_otaDecisionRemembered || _config.BlockSilentOta)
                 return false;
-            return _permission.Original<PermissionDelegate>().Invoke();
+            return _permission.InvokeOriginal<bool>(null);
         }
 
-        private static void OnDownloadByLoader(IntPtr urlsPtr, IntPtr localPathPtr, IntPtr loaderPtr,
-            IntPtr checkerPtr, byte simulateBrowserHeaders)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void HookDownloadByLoader(object urls, string localPath, object loader,
+            object checker, bool simulateBrowserHeaders)
         {
-            var urls = ObjectPointer.ToObject<IEnumerable<string>>(urlsPtr);
-            var localPath = ObjectPointer.ToObject<string>(localPathPtr);
-            var list = urls?.ToList() ?? new List<string>();
+            var list = (urls as IEnumerable<string>)?.ToList() ?? new List<string>();
             bool isCloud = IsPclCloud(list);
             SwapLog.Info($"下载门回调：isCloud={isCloud} path={localPath} urls={(list.Count == 0 ? "(empty)" : string.Join(",", list))}");
             if (Environment.GetEnvironmentVariable("PCL2SWAP_TEST_NOOP") == "1")
             {
                 // Argument-correctness probe: log and forward without touching the sandbox.
-                _downloadByLoaderEnumerable.Original<DownloadListDelegate>()
-                    .Invoke(urlsPtr, localPathPtr, loaderPtr, checkerPtr, simulateBrowserHeaders);
+                _downloadByLoaderEnumerable.InvokeOriginal(null, urls, localPath, loader, checker, simulateBrowserHeaders);
                 return;
             }
             if (!isCloud)
             {
-                _downloadByLoaderEnumerable.Original<DownloadListDelegate>()
-                    .Invoke(urlsPtr, localPathPtr, loaderPtr, checkerPtr, simulateBrowserHeaders);
+                _downloadByLoaderEnumerable.InvokeOriginal(null, urls, localPath, loader, checker, simulateBrowserHeaders);
                 return;
             }
 
@@ -466,15 +447,13 @@ namespace PclDlSwap.Payload.Host
             }
         }
 
-        private static void OnDownloadByLoaderSingle(IntPtr urlPtr, IntPtr localPathPtr, IntPtr loaderPtr,
-            IntPtr checkerPtr, byte simulateBrowserHeaders)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void HookDownloadByLoaderSingle(string url, string localPath, object loader,
+            object checker, bool simulateBrowserHeaders)
         {
-            var url = ObjectPointer.ToObject<string>(urlPtr);
-            var localPath = ObjectPointer.ToObject<string>(localPathPtr);
             if (!IsPclCloud(new[] { url }))
             {
-                _downloadByLoaderString.Original<DownloadSingleDelegate>()
-                    .Invoke(urlPtr, localPathPtr, loaderPtr, checkerPtr, simulateBrowserHeaders);
+                _downloadByLoaderString.InvokeOriginal(null, url, localPath, loader, checker, simulateBrowserHeaders);
                 return;
             }
 
@@ -489,14 +468,12 @@ namespace PclDlSwap.Payload.Host
             }
         }
 
-        private static void OnDownloadByClient(IntPtr urlPtr, IntPtr localPathPtr, byte simulateBrowserHeaders)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void HookDownloadByClient(string url, string localPath, bool simulateBrowserHeaders)
         {
-            var url = ObjectPointer.ToObject<string>(urlPtr);
-            var localPath = ObjectPointer.ToObject<string>(localPathPtr);
             if (!IsPclCloud(new[] { url }))
             {
-                _downloadByClient.Original<DownloadByClientDelegate>()
-                    .Invoke(urlPtr, localPathPtr, simulateBrowserHeaders);
+                _downloadByClient.InvokeOriginal(null, url, localPath, simulateBrowserHeaders);
                 return;
             }
 

@@ -79,12 +79,11 @@ namespace PclDlSwap.Payload.Host
             {
                 try
                 {
-                    var requested = new AssemblyName(args.Name);
-                    if (!string.Equals(requested.Name, "Gee.External.Capstone", StringComparison.OrdinalIgnoreCase))
-                        return null;
+                    var requested = new AssemblyName(args.Name).Name;
+                    if (string.IsNullOrEmpty(requested)) return null;
                     var directory = Path.GetDirectoryName(typeof(ExLoaderEntry).Assembly.Location);
                     if (string.IsNullOrEmpty(directory)) return null;
-                    var candidate = Path.Combine(directory, "Gee.External.Capstone.dll");
+                    var candidate = Path.Combine(directory, requested + ".dll");
                     return File.Exists(candidate) ? Assembly.LoadFrom(candidate) : null;
                 }
                 catch
@@ -93,7 +92,7 @@ namespace PclDlSwap.Payload.Host
                 }
             };
 
-            SwapLog.Info("依赖解析器已安装（Gee.External.Capstone → 解包目录）。");
+            SwapLog.Info("依赖解析器已安装（Gee.External.Capstone / MonoMod.Utils / Mono.Cecil → 解包目录）。");
         }
 
         private static Assembly WaitForHostAssembly(TimeSpan timeout)

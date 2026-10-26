@@ -28,6 +28,8 @@ $outDir = Join-Path $root 'dist\exloader'
 $payloadDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\PclDlSwap.Payload.dll"
 $wrapperDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\Gee.External.Capstone.dll"
 $capstoneX64 = Join-Path $env:USERPROFILE ".nuget\packages\gee.external.capstone\2.3.0\runtimes\win-x64\native\capstone.dll"
+$monoModDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\MonoMod.Utils.dll"
+$cecilDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\Mono.Cecil.dll"
 
 if (-not $SkipPayloadBuild) {
     Write-Host "[shim] building payload ($Configuration)"
@@ -35,7 +37,7 @@ if (-not $SkipPayloadBuild) {
     if ($LASTEXITCODE -ne 0) { throw 'payload build failed' }
 }
 
-foreach ($input in @($payloadDll, $wrapperDll, $capstoneX64)) {
+foreach ($input in @($payloadDll, $wrapperDll, $capstoneX64, $monoModDll, $cecilDll)) {
     if (-not (Test-Path -LiteralPath $input)) { throw "missing input: $input" }
 }
 
@@ -54,6 +56,8 @@ $rc = @"
 101 RCDATA "$($payloadDll -replace '\\', '/')"
 102 RCDATA "$($wrapperDll -replace '\\', '/')"
 103 RCDATA "$($capstoneX64 -replace '\\', '/')"
+104 RCDATA "$($monoModDll -replace '\\', '/')"
+105 RCDATA "$($cecilDll -replace '\\', '/')"
 "@
 Set-Content -LiteralPath (Join-Path $workDir 'Pcl2Swap.Shim.rc') -Value $rc -Encoding ASCII
 
@@ -76,7 +80,7 @@ $cmd = @"
 call "$vcvars" >nul || exit /b 1
 cd /d "$workDir" || exit /b 1
 rc /nologo /fo "Pcl2Swap.Shim.res" "Pcl2Swap.Shim.rc" || exit /b 1
-cl /nologo /c /O2 /GS- /utf-8 /W3 /DUNICODE /D_UNICODE "$shimCpp" /Fo:"Pcl2Swap.Shim.obj" || exit /b 1
+cl /nologo /c /O2 /GS- /Gs9999999 /utf-8 /W3 /DUNICODE /D_UNICODE "$shimCpp" /Fo:"Pcl2Swap.Shim.obj" || exit /b 1
 link /nologo /DLL /NODEFAULTLIB /ENTRY:DllMain /MACHINE:X64 /INCREMENTAL:NO /OPT:REF /OPT:ICF "Pcl2Swap.Shim.obj" "Pcl2Swap.Shim.res" kernel32.lib user32.lib /OUT:"Pcl2Swap.Shim.x64.dll" || exit /b 1
 dumpbin /nologo /exports "Pcl2Swap.Shim.x64.dll" > "exports.txt" || exit /b 1
 dumpbin /nologo /headers "Pcl2Swap.Shim.x64.dll" > "headers.txt" || exit /b 1

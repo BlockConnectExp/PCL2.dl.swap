@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
@@ -21,10 +21,7 @@ namespace PclDlSwap.Payload.Features
     /// </summary>
     internal static class DownloadPageRestore
     {
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void LoaderInitDelegate(IntPtr self);
-
-        private static LoaderInitDelegate _loaderInitHook;
+        private static DetourInstaller _loaderDetour;
         private static volatile bool _sidebarFixed;
         private static readonly BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic |
                                                      BindingFlags.Static | BindingFlags.Instance;
@@ -57,11 +54,11 @@ namespace PclDlSwap.Payload.Features
                     return;
                 }
 
-                _loaderInitHook = OnLoaderInit;
-                var detour = DetourInstaller.Install(method, _loaderInitHook);
-                _loaderInitOriginal = detour.Original<LoaderInitDelegate>();
+                var hook = typeof(DownloadPageRestore).GetMethod(nameof(HookLoaderInit),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                _loaderDetour = DetourInstaller.Install(method, hook);
                 LoaderInstalled = true;
-                SwapLog.Info("下载页装载器恢复已安装：" + detour.Verify());
+                SwapLog.Info("下载页装载器恢复已安装：" + _loaderDetour.Verify());
             }
             catch (Exception ex)
             {
@@ -199,14 +196,14 @@ namespace PclDlSwap.Payload.Features
         /// Replaces the gated loader with PCL's own download list loader: the page keeps its regular
         /// loader UI and finish callback, only the work action is swapped back to the real one.
         /// </summary>
-        private static void OnLoaderInit(IntPtr selfPtr)
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void HookLoaderInit(object self)
         {
             try
             {
-                var self = ObjectPointer.ToObject(selfPtr);
                 if (self == null)
                 {
-                    InvokeOriginal(selfPtr);
+                    InvokeOriginal(self);
                     return;
                 }
 
@@ -222,7 +219,7 @@ namespace PclDlSwap.Payload.Features
                 {
                     SwapLog.Error("下载页恢复：宿主缺少 DlClientListMain/DlClientListLoader，回退到原始 LoaderInit。" +
                                   " 该构建可能已经删除了下载模块。");
-                    InvokeOriginal(selfPtr);
+                    InvokeOriginal(self);
                     return;
                 }
 
@@ -239,7 +236,7 @@ namespace PclDlSwap.Payload.Features
                     SwapLog.Error("下载页恢复：页面控件未就绪（LoadMinecraft=" + (loadMinecraft != null) +
                                   ", PanLoad=" + (panLoad != null) + ", PanAllBack=" + (panAllBack != null) +
                                   "），回退到原始 LoaderInit。");
-                    InvokeOriginal(selfPtr);
+                    InvokeOriginal(self);
                     return;
                 }
 
@@ -250,7 +247,7 @@ namespace PclDlSwap.Payload.Features
                 if (definition == null)
                 {
                     SwapLog.Error("下载页恢复：未找到 PageLoaderInit<,>，回退到原始 LoaderInit。");
-                    InvokeOriginal(selfPtr);
+                    InvokeOriginal(self);
                     return;
                 }
 
@@ -279,7 +276,7 @@ namespace PclDlSwap.Payload.Features
             catch (Exception ex)
             {
                 SwapLog.Error("下载页装载器恢复异常，回退到原始 LoaderInit：" + ex);
-                InvokeOriginal(selfPtr);
+                InvokeOriginal(self);
             }
         }
 
@@ -298,18 +295,16 @@ namespace PclDlSwap.Payload.Features
             }
         }
 
-        private static void InvokeOriginal(IntPtr selfPtr)
+        private static void InvokeOriginal(object self)
         {
             try
             {
-                if (_loaderInitOriginal != null) _loaderInitOriginal(selfPtr);
+                if (_loaderDetour != null) _loaderDetour.InvokeOriginal(self);
             }
             catch (Exception ex)
             {
                 SwapLog.Error("调用原始 LoaderInit 失败：" + ex.Message);
             }
         }
-
-        private static LoaderInitDelegate _loaderInitOriginal;
     }
 }

@@ -22,12 +22,12 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Gee.External.Capstone" Version="2.3.0" />
+    <PackageReference Include="MonoMod.Utils" Version="22.1.0" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\pcl2swap-org-icon.png" />
     <!-- The ExLoader shape ships the payload alone, so the token manifest travels with it. -->
-    <EmbeddedResource Include="..\..\data\offset-manifest.json"
-                      LogicalName="PclDlSwap.Payload.data.offset-manifest.json" />
+    <EmbeddedResource Include="..\..\data\offset-manifest.json" LogicalName="PclDlSwap.Payload.data.offset-manifest.json" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Web.Extensions" />

@@ -12,7 +12,7 @@
 > 对外构建收敛为 **v26.0-Alpha 2**；下方 Alpha 3-5 的条目属于未发布的内部迭代，全部并入本次
 > Alpha 2 的变更集。
 
-GitCommitHash: (unreleased)
+GitCommitHash: 1f1514a (release notes and hash recorded in the follow-up docs commit)
 
 ChangedFiles:
 ```

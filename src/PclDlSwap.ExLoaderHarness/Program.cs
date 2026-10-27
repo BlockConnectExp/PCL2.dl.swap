@@ -212,6 +212,25 @@ namespace PclDlSwap.ExLoaderHarness
             SampleCalls++;
             return value + 100;
         }
+
+        public static void Before(int value) => PCL.HookTarget.Order.Add("before:" + value);
+
+        public static void After(int value) => PCL.HookTarget.Order.Add("after:" + value);
+    }
+
+    /// <summary>Instance-delegate handler with a reference-typed parameter.</summary>
+    public sealed class InstanceHookHandler
+    {
+        private readonly string _tag;
+        public int Calls;
+
+        public InstanceHookHandler(string tag) => _tag = tag;
+
+        public string Echo(string value)
+        {
+            Calls++;
+            return _tag + ":" + value;
+        }
     }
 
     /// <summary>
@@ -1000,6 +1019,7 @@ namespace PclDlSwap.ExLoaderHarness
                 var token = attachScoped?.Invoke(api, new object[]
                 {
                     "test.sample", "PCL.HookTarget", "Ping", "sample.ping",
+                    PCL2Swap.Api.HookMode.Replace,
                     (Func<int, int>)HookHandlers.Sample
                 }) as IDisposable;
                 Expect("scoped hook installed", token != null);
@@ -1023,6 +1043,45 @@ namespace PclDlSwap.ExLoaderHarness
                 var afterDispose = PCL.HookTarget.Ping(5);
                 Expect("disposed token forwards to the original",
                     HookHandlers.SampleCalls == handlerBefore + 2 && afterDispose == 10);
+
+                // ---- hook modes: prefix observes before, postfix after, both keep the host result ----
+                PCL.HookTarget.Order.Clear();
+                var prefixToken = attachScoped?.Invoke(api, new object[]
+                {
+                    "test.sample", "PCL.HookTarget", "Ping", "sample.prefix",
+                    PCL2Swap.Api.HookMode.Prefix, (Action<int>)HookHandlers.Before
+                }) as IDisposable;
+                Expect("prefix hook installed", prefixToken != null);
+                var prefixResult = PCL.HookTarget.Ping(7);
+                Expect("prefix keeps the host result and observes first",
+                    prefixResult == 14 && PCL.HookTarget.Order.SequenceEqual(new[] { "before:7", "original:7" }));
+                prefixToken?.Dispose();
+
+                var postfixToken = attachScoped?.Invoke(api, new object[]
+                {
+                    "test.sample", "PCL.HookTarget", "Ping", "sample.postfix",
+                    PCL2Swap.Api.HookMode.Postfix, (Action<int>)HookHandlers.After
+                }) as IDisposable;
+                Expect("postfix hook installed", postfixToken != null);
+                PCL.HookTarget.Order.Clear();
+                var postfixResult = PCL.HookTarget.Ping(7);
+                Expect("postfix keeps the host result and observes after",
+                    postfixResult == 14 && PCL.HookTarget.Order.SequenceEqual(new[] { "original:7", "after:7" }));
+                postfixToken?.Dispose();
+
+                // ---- instance delegate + reference-typed parameter ----
+                var instanceHandler = new InstanceHookHandler("inst");
+                var echoToken = attachScoped?.Invoke(api, new object[]
+                {
+                    "test.sample", "PCL.HookTarget", "Echo", "sample.echo",
+                    PCL2Swap.Api.HookMode.Replace, (Func<string, string>)instanceHandler.Echo
+                }) as IDisposable;
+                Expect("instance delegate attaches", echoToken != null);
+                var echoed = PCL.HookTarget.Echo("abc");
+                Expect("instance handler with a reference parameter runs",
+                    instanceHandler.Calls == 1 && echoed == "inst:abc");
+                echoToken?.Dispose();
+                Expect("disposed echo hook restores the host body", PCL.HookTarget.Echo("abc") == "harness:abc");
             }
             finally
             {
@@ -1812,6 +1871,7 @@ namespace PCL
     public static class HookTarget
     {
         public static int OriginalCalls;
+        public static readonly List<string> Order = new List<string>();
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static int Ping(int value)
@@ -1821,8 +1881,19 @@ namespace PCL
             var pad = "harness.hooktarget." + value;
             var scaled = value * 2;
             OriginalCalls += pad.Length > 0 ? 1 : 0;
+            Order.Add("original:" + value);
             if (scaled > 1000) scaled -= 3;
             return scaled;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static string Echo(string value)
+        {
+            var text = value ?? string.Empty;
+            var builder = new System.Text.StringBuilder();
+            builder.Append("harness:");
+            builder.Append(text);
+            return builder.ToString();
         }
     }
 

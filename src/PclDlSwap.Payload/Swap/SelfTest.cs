@@ -178,7 +178,7 @@ namespace PclDlSwap.Payload.Swap
             };
 
             using (host.AttachAddonHook("test.sample", "PCL.ModBase", "ToUnixTimestampUtc",
-                       "selftest.scoped", handler))
+                       "selftest.scoped", HookMode.Replace, handler))
             {
                 var enabled = Convert.ToInt64(method.Invoke(null, new object[] { DateTime.UtcNow }));
                 SwapHost.Addons.SetEnabled("test.sample", false);

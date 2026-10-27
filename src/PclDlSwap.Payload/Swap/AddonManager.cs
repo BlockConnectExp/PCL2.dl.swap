@@ -418,7 +418,7 @@ namespace PclDlSwap.Payload.Swap
             {
                 if (_host == null)
                     return _inner.Attach(declaringType, methodName, hookId, handler, mode);
-                return _host.AttachAddonHook(_addonId, declaringType, methodName, hookId, handler);
+                return _host.AttachAddonHook(_addonId, declaringType, methodName, hookId, mode, handler);
             }
 
             public bool IsHooked(string declaringType, string methodName) =>

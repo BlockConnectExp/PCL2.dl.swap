@@ -55,8 +55,8 @@ namespace PclDlSwap.Payload.Swap
 
         /// <summary>Scoped attach used by <c>ScopedApi</c>: the hook belongs to one addon.</summary>
         internal IDisposable AttachAddonHook(string addonId, string declaringType, string methodName,
-            string hookId, Delegate handler) =>
-            _hooks.AttachScoped(addonId, declaringType, methodName, hookId, handler);
+            string hookId, HookMode mode, Delegate handler) =>
+            _hooks.AttachScoped(addonId, declaringType, methodName, hookId, mode, handler);
 
         public void Log(string message) => SwapLog.Info("[addon] " + message);
         public void LogWarning(string message) => SwapLog.Warn("[addon] " + message);
@@ -110,15 +110,15 @@ namespace PclDlSwap.Payload.Swap
             /// disposed token forwards to the original from then on.
             /// </summary>
             internal IDisposable AttachScoped(string addonId, string declaringType, string methodName,
-                string hookId, Delegate handler)
+                string hookId, HookMode mode, Delegate handler)
             {
                 if (handler == null) throw new ArgumentNullException(nameof(handler));
                 var target = ResolveTarget(declaringType, methodName);
-                var registration = ScopedHook.Register(addonId, hookId, handler);
+                var registration = ScopedHook.Register(addonId, hookId, mode, handler);
                 var gate = ScopedHook.BuildGate(target, registration);
                 var detour = DetourInstaller.Install(target, gate);
                 ScopedHook.Activate(registration, detour);
-                SwapLog.Info($"[hookbus] {declaringType}.{methodName} -> 模块 {addonId} 的 handler 已装载");
+                SwapLog.Info($"[hookbus] {declaringType}.{methodName} -> 模块 {addonId} 的 handler 已装载（{mode}）");
                 return new ScopedToken(registration);
             }
 

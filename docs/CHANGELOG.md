@@ -6,6 +6,28 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-05:25:00 Alpha 5: hook modes (Prefix / Postfix / Replace) are real
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\ScopedHook.cs            mode 语义 + 计数快照
+.\src\PclDlSwap.Payload\Swap\HostApi.cs                AttachScoped/AttachAddonHook 携带 mode
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs           ScopedHooks 透传 mode
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs               探针改用 Replace 显式声明
+.\src\PclDlSwap.ExLoaderHarness\Program.cs             Prefix/Postfix/实例委托/引用参数断言
+.\docs\swap-api.md                                     §8.1 补三种 mode 的语义表
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|HookMode|`IHooks.Attach` 的 mode 此前只被记录、不生效；现在三种模式都由平台实现：`Replace` 由 handler 独占（返回值即结果）；`Prefix` 先 handler 后原方法、返回原值；`Postfix` 先原方法后 handler、返回原值。Addon 不需要自己调用原方法，前后观察不再要求替换实现|2026.10.28-05:25:00|PCL2.dl.swap
+2|Harness|新增断言：prefix 顺序 `before:7 → original:7` 且返回原值、postfix 顺序 `original:7 → after:7` 且返回原值、实例委托可挂载、引用类型参数（`string`）可传递、释放句柄后宿主方法体恢复|2026.10.28-05:25:00|PCL2.dl.swap
+3|真机|自检保持 `ok=27 fail=0`（ScopedHook 探针显式使用 Replace），PCL 日志 0 异常|2026.10.28-05:25:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-05:10:00 Alpha 5: module-scoped hooks that follow the toggle
 
 GitCommitHash: (unreleased)

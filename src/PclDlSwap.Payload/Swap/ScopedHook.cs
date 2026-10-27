@@ -6,6 +6,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Threading;
+using PCL2Swap.Api;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
 
@@ -31,6 +32,7 @@ namespace PclDlSwap.Payload.Swap
             public int Id;
             public string AddonId;
             public string HookId;
+            public HookMode Mode;
             public Delegate Handler;
             public DetourInstaller Installer;
             public volatile bool Active = true;
@@ -44,13 +46,14 @@ namespace PclDlSwap.Payload.Swap
         private static ModuleBuilder _gateModule;
         private static int _nextId;
 
-        internal static Registration Register(string addonId, string hookId, Delegate handler)
+        internal static Registration Register(string addonId, string hookId, HookMode mode, Delegate handler)
         {
             var registration = new Registration
             {
                 Id = Interlocked.Increment(ref _nextId),
                 AddonId = addonId,
                 HookId = hookId,
+                Mode = mode,
                 Handler = handler
             };
             Registry[registration.Id] = registration;
@@ -60,7 +63,7 @@ namespace PclDlSwap.Payload.Swap
         internal static void Activate(Registration registration, DetourInstaller installer)
         {
             registration.Installer = installer;
-            SwapLog.Info($"[hookbus] 模块钩子已装载：{registration.AddonId} · " +
+            SwapLog.Info($"[hookbus] 模块钩子已装载：{registration.AddonId} · {registration.Mode} · " +
                          $"{(string.IsNullOrEmpty(registration.HookId) ? "(unnamed)" : registration.HookId)}" +
                          $"（当前{(SwapHost.AddonEnabled(registration.AddonId) ? "启用" : "禁用")}）");
         }
@@ -74,7 +77,7 @@ namespace PclDlSwap.Payload.Swap
         }
 
         internal static string Describe(Registration registration) =>
-            $"{registration.AddonId} · {registration.HookId}：命中 {registration.Calls} 次，" +
+            $"{registration.AddonId} · {registration.HookId} · {registration.Mode}：命中 {registration.Calls} 次，" +
             $"其中放行 {registration.Forwarded} 次";
 
         /// <summary>
@@ -98,8 +101,31 @@ namespace PclDlSwap.Payload.Swap
             var passthrough = new List<object>();
             if (self != null) passthrough.Add(self);
             if (args != null) passthrough.AddRange(args);
-            return registration.Handler.DynamicInvoke(passthrough.ToArray());
+            var arguments = passthrough.ToArray();
+            var installerRef = registration.Installer;
+
+            switch (registration.Mode)
+            {
+                case HookMode.Prefix:
+                    // Observe (or veto by throwing) before the host method runs; its own result wins.
+                    registration.Handler.DynamicInvoke(arguments);
+                    return installerRef == null ? null : installerRef.InvokeOriginal(self, args ?? new object[0]);
+
+                case HookMode.Postfix:
+                    // Let the host method run first, then hand the same call to the handler.
+                    var result = installerRef == null ? null : installerRef.InvokeOriginal(self, args ?? new object[0]);
+                    registration.Handler.DynamicInvoke(arguments);
+                    return result;
+
+                default:
+                    // Replace: the handler owns the call and its return value is the result.
+                    return registration.Handler.DynamicInvoke(arguments);
+            }
         }
+
+        /// <summary>Handler hits per registration - used by the self-check and diagnostics.</summary>
+        internal static IReadOnlyCollection<string> Snapshot() =>
+            Registry.Values.Select(Describe).ToList();
 
         /// <summary>
         /// Builds the gate method for one target: same ABI (value parameters keep their type,

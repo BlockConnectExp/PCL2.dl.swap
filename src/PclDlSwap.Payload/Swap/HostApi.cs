@@ -25,6 +25,7 @@ namespace PclDlSwap.Payload.Swap
         private readonly UiImpl _ui;
         private readonly ReflectionImpl _reflect;
         private readonly SurfaceIndex _surface = new SurfaceIndex();
+        private readonly PclAccess _pcl;
 
         public HostApi(SwapShape shape, Assembly host)
         {
@@ -33,6 +34,7 @@ namespace PclDlSwap.Payload.Swap
             _hooks = new HookBusImpl(_host);
             _ui = new UiImpl();
             _reflect = new ReflectionImpl(_host);
+            _pcl = new PclAccess(_host);
         }
 
         public IHostInfo Host { get; }
@@ -40,6 +42,7 @@ namespace PclDlSwap.Payload.Swap
         public IUi Ui => _ui;
         public IReflection Reflect => _reflect;
         public ISwapSurface Surface => _surface;
+        public IPclAccess Pcl => _pcl;
 
         public IData Data { get; private set; }
 

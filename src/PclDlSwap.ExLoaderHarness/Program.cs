@@ -236,6 +236,7 @@ namespace PclDlSwap.ExLoaderHarness
             if (args.Length >= 2 && args[0] == "--loaderhooktest") return RunLoaderHookTest(args[1]);
             if (args.Length >= 2 && args[0] == "--addontest") return RunAddonPlatformTest(args[1]);
             if (args.Length >= 2 && args[0] == "--surfacetest") return RunSurfaceTest(args[1]);
+            if (args.Length >= 2 && args[0] == "--pcltest") return RunPclAccessTest(args[1]);
 
             var reversedOta = args.Contains("--reversed-ota");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
@@ -252,6 +253,7 @@ namespace PclDlSwap.ExLoaderHarness
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --loaderhooktest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --addontest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --surfacetest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --pcltest <payload.dll>");
                 return 2;
             }
 
@@ -588,6 +590,55 @@ namespace PclDlSwap.ExLoaderHarness
             }
 
             Console.WriteLine(failures == 0 ? "[manifest] RESULT: PASS" : "[manifest] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Regression test for the typed PCL access families: Secret.UpdateStart and
+        /// Net.DownloadByClient must reach the real host methods (the harness stubs count calls).
+        /// </summary>
+        private static int RunPclAccessTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var failures = 0;
+            void Expect(string label, bool ok)
+            {
+                Console.WriteLine((ok ? "[pcl] ok   " : "[pcl] FAIL ") + label);
+                if (!ok) failures++;
+            }
+
+            var payload = Assembly.LoadFrom(full);
+            var hostType = payload.GetType("PclDlSwap.Payload.Swap.SwapHost", throwOnError: true);
+            hostType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static)
+                .Invoke(null, new object[] { PCL2Swap.Api.SwapShape.Injected, typeof(PCL.ModMain).Assembly });
+
+            var api = hostType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+            var pcl = api?.GetType().GetProperty("Pcl")?.GetValue(api);
+            Expect("typed PCL access exposed on ISwapApi", pcl != null);
+
+            var secret = pcl?.GetType().GetProperty("Secret")?.GetValue(pcl);
+            Expect("Secret family exposed", secret != null);
+            var before = Probes.UpdateStartCalls;
+            secret?.GetType().GetMethod("UpdateStart")?.Invoke(secret, new object[] { false, null });
+            var after = Probes.UpdateStartCalls;
+            Console.WriteLine("[pcl] Secret.UpdateStart calls: " + before + " -> " + after);
+            Expect("Secret.UpdateStart reached the host method", after == before + 1);
+
+            var net = pcl?.GetType().GetProperty("Net")?.GetValue(pcl);
+            Expect("Net family exposed", net != null);
+            var clientBefore = Probes.DownloadByClientCalls;
+            net?.GetType().GetMethod("DownloadByClient")?.Invoke(net,
+                new object[] { "https://example.com/a.bin", @"C:\Temp\a.bin", false });
+            var clientAfter = Probes.DownloadByClientCalls;
+            Console.WriteLine("[pcl] Net.DownloadByClient calls: " + clientBefore + " -> " + clientAfter);
+            Expect("Net.DownloadByClient reached the host method", clientAfter == clientBefore + 1);
+
+            var animation = pcl?.GetType().GetProperty("Animation")?.GetValue(pcl);
+            Expect("Animation family exposed", animation != null);
+
+            Console.WriteLine(failures == 0 ? "[pcl] RESULT: PASS" : "[pcl] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
         }
 

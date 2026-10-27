@@ -77,6 +77,8 @@ namespace PCL2Swap.Api
         IReflection Reflect { get; }
         /// <summary>Machine-readable index of every callable host member (tools/PclSurface dump).</summary>
         ISwapSurface Surface { get; }
+        /// <summary>Readable wrappers over PCL's own subsystems (Secret / Net / Animation).</summary>
+        IPclAccess Pcl { get; }
         void Log(string message);
         void LogWarning(string message);
         void LogError(string message, Exception exception = null);

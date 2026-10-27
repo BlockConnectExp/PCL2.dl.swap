@@ -8,7 +8,7 @@
 ---
 ## 2026.10.28-05:45:00 Alpha 5: hook chains are visible in the UI
 
-GitCommitHash: (unreleased)
+GitCommitHash: tag v26.0-Alpha5（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha5.md）
 
 ChangedFiles:
 ```

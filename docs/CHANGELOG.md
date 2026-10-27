@@ -6,6 +6,29 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-06:20:00 Alpha 6: out-of-the-box module settings
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\AddonSettings.cs                  new（IData 的类型化读写 + 自动落盘）
+.\src\PCL2Swap.Api\ISwapApi.cs                       IUi + CheckBox / Combo
+.\src\PclDlSwap.Payload\Swap\Views\SwapUi.cs         MyCheckBox / MyComboBox 构建（含 WPF 回退）
+.\src\PclDlSwap.Payload\Swap\HostApi.cs              UiImpl 转发
+.\src\PCL2Swap.SampleAddon\SampleAddon.cs            演示模块新增「模块设置（自动持久化）」卡片
+.\src\PclDlSwap.ExLoaderHarness\Program.cs           UI 构建 + AddonSettings 断言
+.\docs\swap-api.md                                   §6.2 模块设置项
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|模块设置构件|`IUi` 新增 `CheckBox`（宿主 MyCheckBox，其 Change 事件回读控件状态）与 `Combo`（宿主 MyComboBox + MyComboBoxItem，回调回传索引）；宿主缺控件时退回标准 WPF，语义不变。两张卡片 + 两行代码就能得到与官方设置页一致的模块设置区|2026.10.28-06:20:00|PCL2.dl.swap
+2|AddonSettings|SDK 新增 `AddonSettings`：`Get/SetBool/Int/Double/String` 针对 `Api.Data` 的类型化读写，每次写入自动 `Save()` 到模块自己的 config.json|2026.10.28-06:20:00|PCL2.dl.swap
+3|真机验证|示例模块新增设置卡片：勾选框与下拉框都能改、立即生效并持久化——真机 2.99.0 实测 config.json 出现 `demo.countHook=false`、`demo.refreshIndex=1`，日志打印「示例模块设置：刷新频率 = 2 秒」；harness 断言 UI 构建器（STA）与 AddonSettings 往返全部通过|2026.10.28-06:20:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-06:00:00 Alpha 6: native-look page builders in the SDK
 
 GitCommitHash: (unreleased)

@@ -32,16 +32,18 @@ namespace PCL2Swap.SampleAddon
         private IDisposable _hook;
         private DispatcherTimer _timer;
         private TextBlock _liveLabel;
+        private bool _countHook = true;
 
         public void OnLoad(SwapContext context)
         {
             LoadCalls++;
             _api = context?.Api;
             LastApiVersion = _api?.Host?.ApiVersion;
+            _countHook = AddonSettings.GetBool(_api?.Data, "demo.countHook", true);
             _api?.Data?.Set("loaded", "1");
             _api?.Data?.Save();
             _api?.Log($"示例模块已加载（API {LastApiVersion}，宿主 {_api?.Host?.SwapVersion}，" +
-                      $"数据目录 {_api?.Host?.AddonDirectory}）。");
+                      $"数据目录 {_api?.Host?.AddonDirectory}，记录钩子命中={_countHook}）。");
         }
 
         public void OnEnable()
@@ -113,7 +115,10 @@ namespace PCL2Swap.SampleAddon
             LastHookTarget = "(无可用目标)";
         }
 
-        private void Ping() => HookHits++;
+        private void Ping()
+        {
+            if (_countHook) HookHits++;
+        }
 
         private void OnDialogOpening(object sender, DialogEventArgs args)
         {
@@ -164,6 +169,17 @@ namespace PCL2Swap.SampleAddon
                 _api.Ui.Note("持久化数据、Reflect 直达宿主方法，以及下面这个原生外观按钮。"),
                 _api.Ui.Buttons(_api.Ui.Button("调用宿主方法并刷新", CallHostAndRefresh))));
 
+            page.Children.Add(_api.Ui.Card("模块设置（自动持久化）",
+                _api.Ui.CheckBox("记录 Prefix 钩子命中", _countHook, value =>
+                {
+                    _countHook = value;
+                    AddonSettings.SetBool(_api.Data, "demo.countHook", value);
+                    _api.Log($"示例模块设置：记录钩子命中 = {value}");
+                    RefreshLabel();
+                }),
+                _api.Ui.Combo("页面刷新频率", new[] { "1 秒", "2 秒", "5 秒" },
+                    AddonSettings.GetInt(_api.Data, "demo.refreshIndex", 0), ApplyRefreshInterval)));
+
             // Live view: the page is built once and cached, so a timer keeps the counters honest
             // while the user is looking at it.
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -171,6 +187,16 @@ namespace PCL2Swap.SampleAddon
             _timer.Start();
 
             return page;
+        }
+
+        /// <summary>Applies a persisted dropdown choice to the live timer.</summary>
+        private void ApplyRefreshInterval(int index)
+        {
+            AddonSettings.SetInt(_api.Data, "demo.refreshIndex", index);
+            var seconds = index <= 0 ? 1 : index == 1 ? 2 : 5;
+            if (_timer != null) _timer.Interval = TimeSpan.FromSeconds(seconds);
+            _api.Log($"示例模块设置：刷新频率 = {seconds} 秒");
+            RefreshLabel();
         }
 
         /// <summary>

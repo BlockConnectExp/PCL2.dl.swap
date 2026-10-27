@@ -213,6 +213,124 @@ namespace PclDlSwap.Payload.Swap.Views
 
         /// <summary>Short explanation line under a card title.</summary>
         internal static FrameworkElement Note(string text, bool secondary = true) => Text(text, 12, secondary);
+
+        /// <summary>
+        /// Labelled checkbox. PCL's own MyCheckBox already draws its caption, so it is returned
+        /// directly; the stock WPF fallback carries the caption as its content as well. Its Change
+        /// event only says "a user touched it", so the current value is read back from the control.
+        /// </summary>
+        internal static FrameworkElement CheckBox(string label, bool initial, Action<bool> onChange)
+        {
+            var checkType = HostType("PCL.MyCheckBox");
+            if (checkType != null)
+            {
+                try
+                {
+                    if (Activator.CreateInstance(checkType) is FrameworkElement box)
+                    {
+                        PclUi.SetMember(box, "Text", label);
+                        PclUi.SetMember(box, "Checked", initial);
+
+                        var relay = new CheckRelay { Action = onChange, Target = box };
+                        var changeEvent = checkType.GetEvent("Change",
+                            BindingFlags.Public | BindingFlags.Instance);
+                        var handler = changeEvent == null
+                            ? null
+                            : Delegate.CreateDelegate(changeEvent.EventHandlerType, relay,
+                                typeof(CheckRelay).GetMethod(nameof(CheckRelay.OnChange)));
+                        if (changeEvent != null && handler != null) changeEvent.AddEventHandler(box, handler);
+                        return box;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("SwapUi：MyCheckBox(\"" + label + "\") 构建失败，退回标准复选框：" + ex.Message);
+                }
+            }
+
+            var stock = new CheckBox { Content = label, IsChecked = initial, VerticalAlignment = VerticalAlignment.Center };
+            stock.Checked += (sender, args) => RelayBool(onChange, stock.IsChecked == true);
+            stock.Unchecked += (sender, args) => RelayBool(onChange, stock.IsChecked == true);
+            return stock;
+        }
+
+        /// <summary>
+        /// Labelled dropdown row (label + control, like the shipped settings rows). Uses the host's
+        /// MyComboBox/MyComboBoxItem when available, a stock ComboBox otherwise; either way the
+        /// callback receives the selected index.
+        /// </summary>
+        internal static FrameworkElement Combo(string label, IReadOnlyList<string> options,
+            int selectedIndex, Action<int> onChange)
+        {
+            ComboBox combo = null;
+            var comboType = HostType("PCL.MyComboBox");
+            if (comboType != null)
+            {
+                try { combo = Activator.CreateInstance(comboType) as ComboBox; }
+                catch (Exception ex) { SwapLog.Warn("SwapUi：MyComboBox 构建失败，退回标准下拉框：" + ex.Message); }
+            }
+            if (combo == null) combo = new ComboBox();
+
+            var itemType = HostType("PCL.MyComboBoxItem");
+            if (options != null)
+            {
+                foreach (var option in options)
+                {
+                    if (itemType != null)
+                    {
+                        try
+                        {
+                            var item = Activator.CreateInstance(itemType);
+                            PclUi.SetMember(item, "Content", option);
+                            combo.Items.Add(item);
+                            continue;
+                        }
+                        catch
+                        {
+                            // fall through to a plain string item
+                        }
+                    }
+                    combo.Items.Add(option);
+                }
+            }
+
+            if (selectedIndex >= 0 && selectedIndex < combo.Items.Count) combo.SelectedIndex = selectedIndex;
+            combo.HorizontalAlignment = HorizontalAlignment.Stretch;
+            combo.VerticalAlignment = VerticalAlignment.Center;
+            combo.SelectionChanged += (sender, args) => RelayInt(onChange, combo.SelectedIndex);
+            return Row(label, combo);
+        }
+
+        private sealed class CheckRelay
+        {
+            public Action<bool> Action;
+            public object Target;
+
+            // ReSharper disable once UnusedMember.Local - invoked through the host's delegate type
+            public void OnChange(object sender, bool user)
+            {
+                bool value;
+                try { value = Convert.ToBoolean(PclUi.GetMember(Target, "Checked") ?? false); }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("SwapUi：读取复选框状态失败：" + ex.Message);
+                    return;
+                }
+                RelayBool(Action, value);
+            }
+        }
+
+        private static void RelayBool(Action<bool> action, bool value)
+        {
+            try { action?.Invoke(value); }
+            catch (Exception ex) { SwapLog.Warn("SwapUi：复选框回调失败：" + ex.Message); }
+        }
+
+        private static void RelayInt(Action<int> action, int value)
+        {
+            try { action?.Invoke(value); }
+            catch (Exception ex) { SwapLog.Warn("SwapUi：下拉框回调失败：" + ex.Message); }
+        }
     }
 }
 

@@ -194,6 +194,29 @@ Api.Ui.RegisterSettingsPage("my.page", "我的模块", () => page);
 在真机里它们与内置的 Swap Addon / Swap Settings 页面外观一致（示例模块用的就是这套）。
 注意：页面工厂在宿主 UI 线程（STA）调用，不要在自己的后台线程里构建控件。
 
+### 6.2 模块设置项（Alpha 6 起）
+
+两组构件 + 一个小助手，就能写出「开箱即用、自动持久化」的模块设置：
+
+```csharp
+page.Children.Add(Api.Ui.Card("我的模块设置",
+    Api.Ui.CheckBox("记录钩子命中", AddonSettings.GetBool(Api.Data, "my.flag", true), value =>
+    {
+        AddonSettings.SetBool(Api.Data, "my.flag", value);   // 写入 + 落盘
+        Api.Log("设置已保存：" + value);
+    }),
+    Api.Ui.Combo("刷新频率", new[] { "1 秒", "2 秒", "5 秒" },
+        AddonSettings.GetInt(Api.Data, "my.refresh", 0),
+        index => { AddonSettings.SetInt(Api.Data, "my.refresh", index); ApplyInterval(index); })));
+```
+
+- `CheckBox` 用宿主的 `PCL.MyCheckBox`（其 `Change` 事件会回读控件状态），`Combo` 用 `PCL.MyComboBox`
+  + `MyComboBoxItem`；宿主缺少这些控件时自动退回标准 WPF，回调语义不变（下拉框回传索引）。
+- `AddonSettings.GetBool/SetBool/GetInt/SetInt/GetDouble/SetDouble/GetString/SetString`
+  是针对 `Api.Data` 的类型化读写，每次写入都会 `Save()` 到模块自己的 `config.json`。
+- 真机验证（2.99.0）：勾选框与下拉框都能改、立即生效，`config.json` 同时出现
+  `demo.countHook=false`、`demo.refreshIndex=1`，日志打印「示例模块设置：刷新频率 = 2 秒」。
+
 - 开关状态写在 **`%APPDATA%\PCL2Swap\modules.json`**：`{"<addon id>":{"enabled":true}}`，
   重启后保持；未知 id 视为启用（配置损坏不会误关功能）。
 - 被禁用的模块在启动阶段**直接跳过**（不调用 `OnLoad`/`OnEnable`），

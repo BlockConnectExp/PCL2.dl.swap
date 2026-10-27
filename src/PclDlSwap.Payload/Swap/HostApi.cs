@@ -251,6 +251,13 @@ namespace PclDlSwap.Payload.Swap
                 params System.Windows.FrameworkElement[] buttons) => Views.SwapUi.Buttons(buttons);
 
             public System.Windows.FrameworkElement Note(string text) => Views.SwapUi.Note(text);
+
+            public System.Windows.FrameworkElement CheckBox(string label, bool initial,
+                Action<bool> onChange) => Views.SwapUi.CheckBox(label, initial, onChange);
+
+            public System.Windows.FrameworkElement Combo(string label,
+                System.Collections.Generic.IReadOnlyList<string> options, int selectedIndex,
+                Action<int> onChange) => Views.SwapUi.Combo(label, options, selectedIndex, onChange);
         }
 
         private sealed class ReflectionImpl : IReflection

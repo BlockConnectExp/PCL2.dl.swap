@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 
 namespace PCL2Swap.Api
@@ -72,6 +73,19 @@ namespace PCL2Swap.Api
 
         /// <summary>Secondary explanation line.</summary>
         FrameworkElement Note(string text);
+
+        /// <summary>
+        /// A labelled checkbox row matching PCL's own setting rows (falls back to a stock
+        /// WPF CheckBox when the host build lacks MyCheckBox).
+        /// </summary>
+        FrameworkElement CheckBox(string label, bool initial, Action<bool> onChange);
+
+        /// <summary>
+        /// A labelled dropdown row; <paramref name="onChange"/> receives the selected index.
+        /// Uses the host's MyComboBox when available, a stock ComboBox otherwise.
+        /// </summary>
+        FrameworkElement Combo(string label, IReadOnlyList<string> options, int selectedIndex,
+            Action<int> onChange);
     }
 
     /// <summary>Per-addon persisted key/value store.</summary>

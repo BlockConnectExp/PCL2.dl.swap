@@ -218,6 +218,23 @@ namespace PclDlSwap.ExLoaderHarness
         public static void After(int value) => PCL.HookTarget.Order.Add("after:" + value);
     }
 
+    /// <summary>In-memory IData used by the AddonSettings round-trip assertion.</summary>
+    public sealed class MemoryData : PCL2Swap.Api.IData
+    {
+        private readonly Dictionary<string, string> _values = new Dictionary<string, string>();
+        public bool Saved;
+
+        public string Get(string key, string fallback = null) =>
+            key != null && _values.TryGetValue(key, out var value) ? value : fallback;
+
+        public void Set(string key, string value)
+        {
+            if (!string.IsNullOrEmpty(key)) _values[key] = value;
+        }
+
+        public void Save() => Saved = true;
+    }
+
     /// <summary>Instance-delegate handler with a reference-typed parameter.</summary>
     public sealed class InstanceHookHandler
     {
@@ -1123,7 +1140,16 @@ namespace PclDlSwap.ExLoaderHarness
                         {
                             "标签", "值"
                         }) as System.Windows.FrameworkElement;
-                        uiBuildOk = card != null && uiButton != null && infoRow != null;
+                        var checkBox = ui?.GetType().GetMethod("CheckBox")?.Invoke(ui, new object[]
+                        {
+                            "选项", true, (Action<bool>)(_ => { })
+                        }) as System.Windows.FrameworkElement;
+                        var combo = ui?.GetType().GetMethod("Combo")?.Invoke(ui, new object[]
+                        {
+                            "选择", new[] { "A", "B" }, 0, (Action<int>)(_ => { })
+                        }) as System.Windows.FrameworkElement;
+                        uiBuildOk = card != null && uiButton != null && infoRow != null &&
+                                    checkBox != null && combo != null;
                     }
                     catch (Exception ex)
                     {
@@ -1136,6 +1162,15 @@ namespace PclDlSwap.ExLoaderHarness
                 uiThread.Join();
                 Expect("ui builders return renderable elements",
                     uiBuildOk);
+
+                var store = new MemoryData();
+                PCL2Swap.Api.AddonSettings.SetBool(store, "flag", true);
+                PCL2Swap.Api.AddonSettings.SetInt(store, "count", 7);
+                Expect("AddonSettings round-trips values",
+                    PCL2Swap.Api.AddonSettings.GetBool(store, "flag") &&
+                    PCL2Swap.Api.AddonSettings.GetInt(store, "count") == 7 &&
+                    PCL2Swap.Api.AddonSettings.GetBool(store, "missing", true) &&
+                    store.Saved);
             }
             finally
             {

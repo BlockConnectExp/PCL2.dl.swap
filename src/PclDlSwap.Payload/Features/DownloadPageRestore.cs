@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
+using PclDlSwap.Payload.Swap;
 
 namespace PclDlSwap.Payload.Features
 {
@@ -61,6 +62,12 @@ namespace PclDlSwap.Payload.Features
                 var lastAttempt = DateTime.MinValue;
                 while (!_realLoaderSeen && DateTime.UtcNow < deadline)
                 {
+                    if (!SwapHost.AddonEnabled("swap.download-mc"))
+                    {
+                        SwapLog.Info("下载页重驱：Download MC 模块已禁用，看门结束。");
+                        return;
+                    }
+
                     try
                     {
                         var modMain = host.GetType("PCL.ModMain", throwOnError: false);
@@ -181,6 +188,12 @@ namespace PclDlSwap.Payload.Features
             var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(30);
             while (!_sidebarFixed && DateTime.UtcNow < deadline)
             {
+                if (!SwapHost.AddonEnabled("swap.download-mc"))
+                {
+                    SwapLog.Info("下载侧栏恢复：Download MC 模块已禁用，轮询结束。");
+                    return;
+                }
+
                 try
                 {
                     var modMain = host.GetType("PCL.ModMain", throwOnError: false);
@@ -320,6 +333,13 @@ namespace PclDlSwap.Payload.Features
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static void HookLoaderInit(object self)
         {
+            // Download MC module off -> leave the build's own (gated) loader in place.
+            if (!SwapHost.AddonEnabled("swap.download-mc"))
+            {
+                InvokeOriginal(self);
+                return;
+            }
+
             try
             {
                 if (self == null)

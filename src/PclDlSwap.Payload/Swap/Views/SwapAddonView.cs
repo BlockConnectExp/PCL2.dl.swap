@@ -31,13 +31,14 @@ namespace PclDlSwap.Payload.Swap.Views
                 for (var index = 0; index < records.Count; index++)
                 {
                     if (index > 0) list.Add(Separator());
-                    list.Add(Row(records[index]));
+                    list.Add(Row(records[index], addons));
                 }
             }
 
             page.Children.Add(SwapUi.Card("已安装的 Addon", list.ToArray()));
             page.Children.Add(SwapUi.Card("说明",
-                SwapUi.Note("内置 Addon 由宿主装配阶段启用，开关编辑将在后续版本接入。"),
+                SwapUi.Note("开关立即生效并写入 modules.json（内置功能的钩子按开关放行/拦截）；" +
+                            "模块状态、配置与已安装的 Addon 都放在数据目录里，可在 Swap Settings 打开。"),
                 SwapUi.Buttons(SwapUi.Button("打开 Addon 目录",
                     () => OpenFolder(api?.Host.AddonDirectory)))));
 
@@ -46,10 +47,11 @@ namespace PclDlSwap.Payload.Swap.Views
 
         // ------------------------------------------------------------------ rows
 
-        private static FrameworkElement Row(AddonManager.AddonRecord record)
+        private static FrameworkElement Row(AddonManager.AddonRecord record, AddonManager addons)
         {
             var grid = new Grid { Margin = new Thickness(0, 2, 0, 6) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var left = new StackPanel();
@@ -88,6 +90,22 @@ namespace PclDlSwap.Payload.Swap.Views
             status.Margin = new Thickness(16, 2, 0, 0);
             Grid.SetColumn(status, 1);
             grid.Children.Add(status);
+
+            if (addons != null)
+            {
+                var id = record.Id;
+                var toggle = SwapUi.Button(record.Enabled ? "禁用" : "启用", () =>
+                {
+                    if (!addons.SetEnabled(id, !record.Enabled)) return;
+                    PageRegistry.InvalidatePage("swap-addons");
+                });
+                PclUi.SetMember(toggle, "Height", 28.0);
+                PclUi.SetMember(toggle, "MinWidth", 76.0);
+                PclUi.SetMember(toggle, "Margin", new Thickness(16, 0, 0, 0));
+                toggle.VerticalAlignment = VerticalAlignment.Top;
+                Grid.SetColumn(toggle, 2);
+                grid.Children.Add(toggle);
+            }
             return grid;
         }
 
@@ -108,6 +126,7 @@ namespace PclDlSwap.Payload.Swap.Views
             switch (record.Status)
             {
                 case "enabled": return "已启用";
+                case "disabled": return "已禁用";
                 case "failed": return "启动失败";
                 case "unpacked": return "已解包（待启用）";
                 default: return record.Status ?? string.Empty;

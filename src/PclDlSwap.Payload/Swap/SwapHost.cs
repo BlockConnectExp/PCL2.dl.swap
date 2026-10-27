@@ -45,6 +45,7 @@ namespace PclDlSwap.Payload.Swap
                     Addons.EnableAll();                       // third-party pages register from 102 on
 
                     PageRegistry.Install(HostAssembly);
+                    SelfTest.RunIfRequested(Api);
                     SwapLog.Info("SwapHost 就绪。");
                 }
             }
@@ -53,6 +54,14 @@ namespace PclDlSwap.Payload.Swap
                 SwapLog.Error("SwapHost 启动失败：" + ex);
             }
         }
+
+        /// <summary>
+        /// True when the named built-in addon is enabled. Hooks stay installed (nothing hot-unloads
+        /// yet) but consult this before acting, so switching a module off behaves like removing it.
+        /// Missing manager or unknown id keeps the feature on - a broken config must never disable
+        /// the launcher's safety nets by accident.
+        /// </summary>
+        public static bool AddonEnabled(string addonId) => Addons?.IsEnabled(addonId) ?? true;
     }
 }
 

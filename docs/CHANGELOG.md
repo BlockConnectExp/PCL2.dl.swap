@@ -6,6 +6,31 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-04:05:00 Alpha 4 repack 4: module state that means something + real-host self-check
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\SwapPaths.cs                        + DataRoot (%APPDATA%, PCL2SWAP_DATA 可覆盖) / ModulesFile
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs           + 模块状态读写、IsEnabled/SetEnabled、禁用跳过
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs               new（PCL2SWAP_SELFTEST=1 只读自检）
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs    + 每行启用/禁用按钮、状态文案、原生卡片
+.\src\PclDlSwap.Payload\Swap\PageRegistry.cs           + InvalidatePage（开关后重建并重进当前页）
+.\src\PclDlSwap.Payload\Features\* + Host\CoreInstaller.cs  三处钩子按模块开关放行/拦截
+.\docs\local-e2e.zh.md                                 new（无需 ExLoader 的真机 E2E 方法）
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|模块启停|开关不再只是显示：`modules.json` 持久化模块状态（默认 `%APPDATA%\PCL2Swap`，可用 `PCL2SWAP_DATA` 覆盖），禁用的模块在启动阶段直接跳过，内置功能的钩子按开关放行/拦截（Download MC 的 LoaderInit 与两个看门线程、OTA 的 UpdateStart、Cancel Button 的 MyMsgBox）。Swap Addon 页面每行带「启用/禁用」按钮，点击后立即重建并重进页面|2026.10.28-04:05:00|PCL2.dl.swap
+2|SwapPaths|持久数据根与临时根分离：Addon 安装目录、每 Addon 配置、模块状态放 `%APPDATA%\PCL2Swap`（不再随 %TEMP% 被清掉）；日志与 payload 解包仍在 %TEMP%|2026.10.28-04:05:00|PCL2.dl.swap
+3|SelfTest|`PCL2SWAP_SELFTEST=1` 时启动 5 秒后在宿主 UI 线程跑只读自检：Host/Surface/Reflect/Secret/Animation/Settings/Base/Instance/Download/Launch 加上模块状态逐项记日志（不发起下载、不触发更新、不启动游戏）。真机 2.99.0 实测 `ok=24 fail=0`|2026.10.28-04:05:00|PCL2.dl.swap
+4|本地 E2E|新增 `docs/local-e2e.zh.md`：`tools/PclInject` 注入 + 测试副本改名 `PCL_SingletonMutex` 绕过单实例（可与 owner 的 PCL 并行）+ 隔离 TEMP/PCL2SWAP_DATA + 坐标表与判定标准|2026.10.28-04:05:00|PCL2.dl.swap
+5|Harness|`--addontest` 扩到 17 项断言：模块状态可持久化、禁用即翻转运行时门、再启用恢复，Addon 存储落在持久根（测试用 PCL2SWAP_DATA 隔离）|2026.10.28-04:05:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-03:05:00 Alpha 4 repack 3: settings sub-page resolution + native card pages
 
 GitCommitHash: (unreleased)

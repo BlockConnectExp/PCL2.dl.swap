@@ -7,8 +7,38 @@ namespace PCL2Swap.Api
     /// <summary>Canonical on-disk locations shared by the host and the addon SDK.</summary>
     public static class SwapPaths
     {
+        /// <summary>Ephemeral working root (payload extraction, logs) - the shim owns this layout.</summary>
         public static string Root => Path.Combine(Path.GetTempPath(), "PCL2Swap");
-        public static string AddonsDirectory => Path.Combine(Root, "addons");
+
+        /// <summary>
+        /// Durable root for everything a user expects to survive a restart: installed addons,
+        /// per-addon config and the module state file. Override with PCL2SWAP_DATA (tests use it
+        /// to stay out of the real profile); falls back to the temp root when the profile folder
+        /// is unavailable.
+        /// </summary>
+        public static string DataRoot
+        {
+            get
+            {
+                try
+                {
+                    var overridden = Environment.GetEnvironmentVariable("PCL2SWAP_DATA");
+                    if (!string.IsNullOrWhiteSpace(overridden)) return overridden;
+                    var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                    if (!string.IsNullOrWhiteSpace(roaming)) return Path.Combine(roaming, "PCL2Swap");
+                }
+                catch
+                {
+                    // fall through to the temp root
+                }
+                return Root;
+            }
+        }
+
+        /// <summary>Module enable/disable state, keyed by addon id.</summary>
+        public static string ModulesFile => Path.Combine(DataRoot, "modules.json");
+
+        public static string AddonsDirectory => Path.Combine(DataRoot, "addons");
         public static string LogsDirectory => Path.Combine(Root, "logs");
         public static string AddonDirectory(string id) => Path.Combine(AddonsDirectory, Sanitize(id ?? "unnamed"));
         public static string AddonConfigFile(string id) =>

@@ -68,6 +68,37 @@ namespace PclDlSwap.Payload.Swap
             }
         }
 
+        /// <summary>
+        /// Drops the cached page instance so the next visit rebuilds its view, and re-enters the
+        /// page right away when the user is looking at it. Used by the module toggles so the list
+        /// reflects the new state without a restart.
+        /// </summary>
+        public static void InvalidatePage(string logicalId)
+        {
+            PageEntry entry;
+            lock (Gate) entry = Pages.Values.FirstOrDefault(candidate => candidate.LogicalId == logicalId);
+            if (entry == null) return;
+
+            lock (Gate) entry.Instance = null;
+
+            try
+            {
+                var modMain = _host?.GetType("PCL.ModMain", throwOnError: false);
+                var pageLeft = PclUi.GetMember(modMain, "FrmSetupLeft");
+                if (pageLeft == null) return;
+
+                var current = Convert.ToInt32(PclUi.GetMember(pageLeft, "PageID") ?? -1);
+                if (current != entry.Id) return;
+
+                SwapLog.Info($"[page] 模块状态变化：重建并重新进入 {entry.LogicalId}（id={entry.Id}）");
+                SwitchToPage(pageLeft, entry.Id);
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("[page] 页面刷新失败：" + ex.Message);
+            }
+        }
+
         public static void Install(Assembly host)
         {
             lock (Gate)

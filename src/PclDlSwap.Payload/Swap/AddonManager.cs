@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Web.Script.Serialization;
 using PCL2Swap.Api;
 using PclDlSwap.Payload.Host;
 
@@ -35,10 +36,137 @@ namespace PclDlSwap.Payload.Swap
 
         private readonly ISwapApi _api;
         private readonly List<AddonRecord> _records = new List<AddonRecord>();
+        private readonly Dictionary<string, bool> _savedState =
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        private bool _stateLoaded;
 
         public AddonManager(ISwapApi api) => _api = api ?? throw new ArgumentNullException(nameof(api));
 
         public IReadOnlyList<AddonRecord> Records => _records;
+
+        /// <summary>
+        /// The user's enable state for an addon. Hooks installed by the host keep their detours
+        /// (nothing hot-unloads yet) but consult this flag before acting, so a disabled addon
+        /// behaves exactly like an absent one. Unknown ids stay enabled.
+        /// </summary>
+        public bool IsEnabled(string addonId)
+        {
+            var record = Find(addonId);
+            return record == null || record.Enabled;
+        }
+
+        public AddonRecord Find(string addonId) =>
+            string.IsNullOrEmpty(addonId)
+                ? null
+                : _records.FirstOrDefault(record =>
+                    string.Equals(record.Id, addonId, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>Flips an addon on or off and persists the choice; drives the built-in features.</summary>
+        public bool SetEnabled(string addonId, bool enabled)
+        {
+            var record = Find(addonId);
+            if (record == null)
+            {
+                SwapLog.Warn("Addon 开关：未找到 " + addonId);
+                return false;
+            }
+            if (record.Enabled == enabled) return true;
+
+            try
+            {
+                if (enabled)
+                {
+                    if (record.Instance == null) record.Instance = CreateInstance(record);
+                    var scoped = new ScopedApi(_api, new AddonDataStore(record.Id));
+                    var context = new SwapContext(scoped, record.Manifest,
+                        record.Directory ?? AppDomain.CurrentDomain.BaseDirectory);
+                    record.Instance?.OnLoad(context);
+                    record.Instance?.OnEnable();
+                    record.Status = "enabled";
+                    record.Failure = null;
+                }
+                else
+                {
+                    try { record.Instance?.OnDisable(); }
+                    catch (Exception ex) { SwapLog.Warn($"Addon {record.Id} OnDisable 抛错：" + ex.Message); }
+                    record.Status = "disabled";
+                }
+
+                record.Enabled = enabled;
+                SaveState();
+                SwapLog.Info($"Addon 已{(enabled ? "启用" : "禁用")}：{record.Id}" +
+                             (record.BuiltIn ? "（内置功能随开关放行/拦截）" : string.Empty));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                record.Status = "failed";
+                record.Failure = ex;
+                SwapLog.Error($"Addon {(enabled ? "启用" : "禁用")}失败：{record.Id}", ex);
+                return false;
+            }
+        }
+
+        // ------------------------------------------------------------------ module state
+
+        private void LoadState()
+        {
+            if (_stateLoaded) return;
+            _stateLoaded = true;
+            try
+            {
+                if (!File.Exists(SwapPaths.ModulesFile)) return;
+                var serializer = new JavaScriptSerializer();
+                var map = serializer.Deserialize<Dictionary<string, object>>(
+                    File.ReadAllText(SwapPaths.ModulesFile));
+                if (map == null) return;
+
+                foreach (var pair in map)
+                {
+                    if (pair.Value is Dictionary<string, object> entry &&
+                        entry.TryGetValue("enabled", out var enabled))
+                        _savedState[pair.Key] = Convert.ToBoolean(enabled);
+                    else
+                        _savedState[pair.Key] = Convert.ToBoolean(pair.Value);
+                }
+                SwapLog.Info($"模块状态已读取：{SwapPaths.ModulesFile}（{_savedState.Count} 条）");
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("模块状态读取失败：" + ex.Message);
+            }
+        }
+
+        private void SaveState()
+        {
+            try
+            {
+                var map = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                foreach (var record in _records)
+                {
+                    if (string.IsNullOrEmpty(record.Id)) continue;
+                    map[record.Id] = new Dictionary<string, object> { { "enabled", record.Enabled } };
+                }
+
+                Directory.CreateDirectory(SwapPaths.DataRoot);
+                File.WriteAllText(SwapPaths.ModulesFile,
+                    new JavaScriptSerializer().Serialize(map), new UTF8Encoding(false));
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("模块状态写入失败：" + ex.Message);
+            }
+        }
+
+        private void ApplySavedState()
+        {
+            LoadState();
+            foreach (var record in _records)
+            {
+                if (record.Id != null && _savedState.TryGetValue(record.Id, out var enabled))
+                    record.Enabled = enabled;
+            }
+        }
 
         // ------------------------------------------------------------------ built-ins
 
@@ -166,9 +294,15 @@ namespace PclDlSwap.Payload.Swap
 
         public void EnableAll()
         {
+            ApplySavedState();
             foreach (var record in _records.ToList())
             {
-                if (!record.Enabled) continue;
+                if (!record.Enabled)
+                {
+                    record.Status = "disabled";
+                    SwapLog.Info($"Addon 已跳过（用户禁用）：{record.Id}");
+                    continue;
+                }
                 if (record.Instance == null && string.IsNullOrEmpty(record.Directory)) continue;
                 try
                 {

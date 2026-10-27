@@ -827,7 +827,11 @@ namespace PclDlSwap.ExLoaderHarness
                 if (!ok) failures++;
             }
 
-            var addonRoot = Path.Combine(Path.GetTempPath(), "PCL2Swap", "addons");
+            // Keep the test out of the real profile: the module state and addon store now live in
+            // SwapPaths.DataRoot, which PCL2SWAP_DATA overrides.
+            var dataRoot = Path.Combine(Path.GetTempPath(), "PCL2SwapTest-" + Guid.NewGuid().ToString("N"));
+            Environment.SetEnvironmentVariable("PCL2SWAP_DATA", dataRoot);
+            var addonRoot = PCL2Swap.Api.SwapPaths.AddonsDirectory;
             Directory.CreateDirectory(addonRoot);
             var archive = Path.Combine(addonRoot, "test.sample.swapaddon");
             var unpacked = Path.Combine(addonRoot, "test.sample");
@@ -889,12 +893,38 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
                 Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.0.0");
+
+                // ---- module state: persisted, and it gates the built-in features ----
+                var isEnabled = manager?.GetType().GetMethod("IsEnabled");
+                var setEnabled = manager?.GetType().GetMethod("SetEnabled");
+                Expect("module state exposes IsEnabled/SetEnabled", isEnabled != null && setEnabled != null);
+
+                var modulesFile = PCL2Swap.Api.SwapPaths.ModulesFile;
+                Expect("OTA Protector starts enabled",
+                    Convert.ToBoolean(isEnabled?.Invoke(manager, new object[] { "swap.ota-protector" })));
+
+                var disabled = Convert.ToBoolean(setEnabled?.Invoke(manager,
+                    new object[] { "swap.ota-protector", false }));
+                var stateAfterDisable = File.Exists(modulesFile) ? File.ReadAllText(modulesFile) : string.Empty;
+                Expect("disabling a module flips the runtime gate", disabled &&
+                    !Convert.ToBoolean(isEnabled?.Invoke(manager, new object[] { "swap.ota-protector" })));
+                Expect("module state persists to modules.json",
+                    stateAfterDisable.Contains("swap.ota-protector") && stateAfterDisable.Contains("false"));
+
+                var reEnabled = Convert.ToBoolean(setEnabled?.Invoke(manager,
+                    new object[] { "swap.ota-protector", true }));
+                Expect("re-enabling restores the gate", reEnabled &&
+                    Convert.ToBoolean(isEnabled?.Invoke(manager, new object[] { "swap.ota-protector" })));
+                Expect("addon store lives under the durable root",
+                    Directory.Exists(Path.Combine(dataRoot, "addons")));
             }
             finally
             {
                 // Leave the real addon directory exactly as found.
                 try { if (File.Exists(archive)) File.Delete(archive); } catch { }
                 try { if (Directory.Exists(unpacked)) Directory.Delete(unpacked, true); } catch { }
+                try { if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, true); } catch { }
+                Environment.SetEnvironmentVariable("PCL2SWAP_DATA", null);
             }
 
             Console.WriteLine(failures == 0 ? "[addon] RESULT: PASS" : "[addon] RESULT: FAIL (" + failures + ")");

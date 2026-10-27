@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
+using PclDlSwap.Payload.Swap;
 
 namespace PclDlSwap.Payload.Features
 {
@@ -55,6 +56,13 @@ namespace PclDlSwap.Payload.Features
             string button3, bool isWarn, bool highLight, bool forceWait,
             object button1Action, object button2Action, object button3Action)
         {
+            // Cancel Button module off -> behave exactly like the untouched launcher.
+            if (!SwapHost.AddonEnabled("swap.cancel-button"))
+                return _detour != null
+                    ? _detour.InvokeOriginal<int>(null, caption, title, button1, button2, button3,
+                        isWarn, highLight, forceWait, button1Action, button2Action, button3Action)
+                    : 1;
+
             try
             {
                 if (_detour != null &&

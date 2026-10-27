@@ -412,6 +412,13 @@ namespace PclDlSwap.Payload.Host
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static void HookUpdateStart(bool silent, object urlsOverride)
         {
+            // OTA Protector module off -> straight to the launcher's own update flow.
+            if (!SwapHost.AddonEnabled("swap.ota-protector"))
+            {
+                _updateStart.InvokeOriginal(null, silent, urlsOverride);
+                return;
+            }
+
             try
             {
                 if (AnnouncementGuard.ConsumeCancelledUpdate())

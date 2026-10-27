@@ -289,6 +289,7 @@ namespace PclDlSwap.Payload.Swap
                         var item = Activator.CreateInstance(itemType);
                         PclUi.SetProperty(item, "Title", entry.Title);
                         PclUi.SetProperty(item, "Info", BuildItemInfo(entry));
+                        DisableHoverScale(item);
                         if (checkType != null)
                             PclUi.SetProperty(item, "Type", Enum.Parse(checkType, "RadioBox"));
                         PclUi.SetMember(item, "Tag", entry.Id.ToString());
@@ -298,7 +299,8 @@ namespace PclDlSwap.Payload.Swap
                     }
 
                     _sidebarDone = true;
-                    SwapLog.Info($"Swap 页面：已在设置侧栏插入 {added} 个条目。");
+                    SwapLog.Info($"Swap 页面：已在设置侧栏插入 {added} 个条目（悬停缩放动画已关闭，" +
+                                 "与 PCL 自带设置项一致）。");
                 }
                 catch (Exception ex)
                 {
@@ -315,6 +317,29 @@ namespace PclDlSwap.Payload.Swap
             if (entry.LogicalId == "swap-settings")
                 return "宿主信息与 Swap 设置";
             return "Swap 扩展页面";
+        }
+
+        /// <summary>
+        /// PCL's own 设置 rows turn the hover-scale animation off in XAML; a MyListItem created
+        /// through reflection keeps the default <c>true</c>. MyListItem.RefreshColor then casts
+        /// RenderTransform to ScaleTransform, while MyPageLeft.TriggerShowAnimation parks a
+        /// TranslateTransform on every row it animates - so the first hover (or the animation's own
+        /// RefreshColor callback, which fires while the pointer may already rest on the new row)
+        /// throws InvalidCastException, which PCL reports as "程序出现未知错误" and then exits.
+        /// Measured on 2.99.0: field log 01:40:39 PCL.MyListItem.RefreshColor
+        /// "无法将类型为 TranslateTransform 的对象强制转换为类型 ScaleTransform".
+        /// </summary>
+        private static void DisableHoverScale(object item)
+        {
+            try
+            {
+                PclUi.SetMember(item, "IsScaleAnimationEnabled", false);
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("Swap 页面：未能关闭侧栏项的悬停缩放动画（" + ex.Message +
+                             "）——悬停可能触发宿主 InvalidCastException。");
+            }
         }
 
         private static void SubscribeCheck(object item, Type itemType)

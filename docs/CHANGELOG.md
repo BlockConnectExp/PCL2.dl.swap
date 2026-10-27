@@ -6,6 +6,52 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-02:05:00 Alpha 4: Swap API base (surface index + typed PCL families) and the settings-sidebar crash fix
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\IPclAccess.cs                        + Settings / Base families (Instance / Download / Launch / Loader next)
+.\src\PclDlSwap.Payload\Swap\SurfaceIndex.cs            new (embedded pcl-surface-2.99.0 / 2.99.0.1)
+.\src\PclDlSwap.Payload\Swap\PclAccess.cs               new (Secret / Net / Animation / Settings / Base)
+.\src\PclDlSwap.Payload\Hook\DetourInstaller.cs         + entry-byte hex dump (前/后 16 字节)
+.\src\PclDlSwap.Payload\Features\DownloadPageRestore.cs + redrive watcher for a pre-existing download page
+.\src\PclDlSwap.Payload\Swap\PageRegistry.cs            FIX: sidebar rows must disable IsScaleAnimationEnabled
+.\tools\PclInject\                                      new (local LoadLibraryW injector for E2E without ExLoader)
+.\data\pcl-surface-2.99.0.json                          new (308 types / 2450 methods)
+.\data\pcl-surface-2.99.0.1.json                        new
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|PageRegistry|修复“设置板块加载完很快报错然后崩溃”：反射创建的 `MyListItem` 默认 `IsScaleAnimationEnabled=true`，而 `MyListItem.RefreshColor` 在该开关为真时把 `RenderTransform` 强转成 `ScaleTransform`；`MyPageLeft.TriggerShowAnimation` 恰好给被动画的行设置 `TranslateTransform`，于是首次悬停（或动画收尾的 RefreshColor 回调，此时指针可能已经停在新行上）抛 `InvalidCastException`，被 PCL 当成未知错误后退出。现在插入前按 XAML 行为关闭该开关|2026.10.28-02:05:00|PCL2.dl.swap
+2|DownloadPageRestore|注入前若“原版游戏”页已经存在（报错页），看门线程会用真实装载器重驱一次，不再保持报错|2026.10.28-01:00:00|PCL2.dl.swap
+3|SurfaceIndex / PclAccess|`ISwapApi.Surface` 暴露全量可调用面索引；`ISwapApi.Pcl` 暴露 Secret / Net / Animation / Settings / Base 五个强类型族，调用直达宿主方法|2026.10.28-01:25:00|PCL2.dl.swap
+4|DetourInstaller|每次安装 detour 记录目标入口前 16 字节（安装前/后），字段级证据随日志落地|2026.10.28-01:25:00|PCL2.dl.swap
+5|tools/PclInject|新增本地注入器：`--exe/--pid` + `--dll`，用 LoadLibraryW 装载 shim，使注入形状无需 ExLoader 也能端到端复现|2026.10.28-02:05:00|PCL2.dl.swap
+
+### 证据（本次修复）
+```
+字段现场（owner 01:40 运行，%TEMP%\PCL2Swap\v26.0-Alpha4\pcl2swap.log 末尾）：
+  01:40:37.975 [page] PageCheck 钩子进入（tag=(null)，sender=MyListItem，线程 1）
+  01:40:38.154 Swap 页面：已在设置侧栏插入 2 个条目。
+  01:40:38.214 [page] PageCheck 钩子进入（tag=0，sender=MyListItem，线程 1）   ← 日志到此为止
+PCL 自身日志（...\正式版 2.99.0\PCL\Log1.txt）：
+  01:40:39.944 E 程序出现未知错误：无法将类型为"System.Windows.Media.TranslateTransform"的对象
+                       强制转换为类型"System.Windows.Media.ScaleTransform"。
+                  在 PCL.MyListItem.RefreshColor
+  01:40:42.847 I 程序已退出，返回值：Exception
+
+本地复现（tools/PclInject 注入 dist\exloader\Pcl2Swap.Shim.x64.dll 到 test\2.99.0\Plain Craft Launcher 2.exe，
+该 exe 与现场 2.99.0 构建 SHA-256 完全一致 6B6E1260...）：
+  修复前：同样在插入后悬停即抛 InvalidCastException（现场日志一致）
+  修复后：设置页正常显示 Swap Addon / Swap Settings；在侧栏整列反复悬停 ≥10 秒，
+         进程存活，PCL Log1.txt 中 "程序出现未知错误|InvalidCastException" 计数 = 0
+```
+
+---
 ## 2026.10.27-19:30:00 Alpha 3: Swap API platform - SDK, addon packages and settings pages
 
 GitCommitHash: (unreleased)

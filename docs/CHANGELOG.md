@@ -6,6 +6,23 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-05:45:00 Alpha 5: hook chains are visible in the UI
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\ScopedHook.cs        + CountFor/HitsFor（按模块统计）
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs 模块行显示钩子数/命中数 + 钩子链卡片 + 刷新按钮
+.\docs\swap-api.md                                 模块页面观测说明
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|钩子可观测性|Swap Addon 页面每个模块行显示「钩子 N（命中 M）」，并新增「钩子链（模块作用域）」卡片列出 目标方法 · 模块 · 模式 · 命中/跳过次数；「刷新」按钮重建页面取实时值。真机验证：示例模块显示 `钩子 1（命中 1）`，卡片列出 `ModBase.ToUnixTimestampUtc · test.sample · Prefix：命中 1 次`|2026.10.28-05:45:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-05:35:00 Alpha 5: hook chains, handler shape validation, addon packer, demo module
 
 GitCommitHash: (unreleased)

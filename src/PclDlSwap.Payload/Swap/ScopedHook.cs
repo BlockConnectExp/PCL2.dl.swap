@@ -140,6 +140,23 @@ namespace PclDlSwap.Payload.Swap
                     $"{registration.Mode}：命中 {registration.Calls} 次，跳过 {registration.Skipped} 次"))
                 .ToList();
 
+        /// <summary>How many hooks one module currently has on the chains (for the module list).</summary>
+        internal static int CountFor(string addonId) =>
+            string.IsNullOrEmpty(addonId)
+                ? 0
+                : ChainsById.Values.Sum(chain => chain.Snapshot()
+                    .Count(registration => string.Equals(registration.AddonId, addonId,
+                        StringComparison.OrdinalIgnoreCase)));
+
+        /// <summary>Total handler hits one module accumulated (for the module list).</summary>
+        internal static long HitsFor(string addonId) =>
+            string.IsNullOrEmpty(addonId)
+                ? 0
+                : ChainsById.Values.Sum(chain => chain.Snapshot()
+                    .Where(registration => string.Equals(registration.AddonId, addonId,
+                        StringComparison.OrdinalIgnoreCase))
+                    .Sum(registration => registration.Calls));
+
         /// <summary>Entry point of every generated gate (called with the target's ABI arguments).</summary>
         public static object InvokeChain(int chainId, object self, object[] args)
         {

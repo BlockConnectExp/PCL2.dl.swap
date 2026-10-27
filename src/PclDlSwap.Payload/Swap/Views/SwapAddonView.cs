@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -36,13 +37,24 @@ namespace PclDlSwap.Payload.Swap.Views
             }
 
             page.Children.Add(SwapUi.Card("已安装的 Addon", list.ToArray()));
+
+            var chains = ScopedHook.Snapshot();
+            if (chains.Count > 0)
+            {
+                var lines = chains.Select(chain => (FrameworkElement)SwapUi.Note("· " + chain)).ToList();
+                lines.Add(SwapUi.Note("同一个宿主方法只有一条链：第一个钩子负责装 gate，后续模块加入这条链；" +
+                                      "链上 handler 全部失效时调用直通原方法。"));
+                page.Children.Add(SwapUi.Card("钩子链（模块作用域）", lines.ToArray()));
+            }
+
             page.Children.Add(SwapUi.Card("说明",
                 SwapUi.Note("开关立即生效并写入 modules.json（内置功能的钩子按开关放行/拦截）；" +
                             "模块状态、配置与已安装的 Addon 都放在数据目录里，可在 Swap Settings 打开。"),
                 SwapUi.Note("注意：结构类修复（原版游戏页 / 下载侧栏）是启动时对宿主对象的一次性修复，" +
                             "关闭模块后要重启 PCL 才会完全回退；OTA、弹窗类拦截则立即停用。"),
-                SwapUi.Buttons(SwapUi.Button("打开 Addon 目录",
-                    () => OpenFolder(api?.Host.AddonDirectory)))));
+                SwapUi.Buttons(
+                    SwapUi.Button("打开 Addon 目录", () => OpenFolder(api?.Host.AddonDirectory)),
+                    SwapUi.Button("刷新", () => PageRegistry.InvalidatePage("swap-addons")))));
 
             return Wrap(page);
         }
@@ -61,6 +73,9 @@ namespace PclDlSwap.Payload.Swap.Views
             var headline = new StackPanel { Orientation = Orientation.Horizontal };
             headline.Children.Add(SwapUi.Text(record.Name ?? record.Id, 13, false, false, FontWeights.SemiBold));
             var meta = (record.Version ?? string.Empty) + (record.BuiltIn ? "  ·  内置" : string.Empty);
+            var hookCount = ScopedHook.CountFor(record.Id);
+            if (hookCount > 0)
+                meta += $"  ·  钩子 {hookCount}（命中 {ScopedHook.HitsFor(record.Id)}）";
             if (meta.Trim().Length > 0)
             {
                 var version = SwapUi.Text(meta, 11.5, true, false);

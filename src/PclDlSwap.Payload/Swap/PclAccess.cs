@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -23,6 +24,9 @@ namespace PclDlSwap.Payload.Swap
             Animation = new AnimationAccess(host);
             Settings = new SettingsAccess(host);
             Base = new BaseAccess(host);
+            Instance = new InstanceAccess(host);
+            Download = new DownloadAccess(host);
+            Launch = new LaunchAccess(host);
         }
 
         public IPclSecretAccess Secret { get; }
@@ -30,6 +34,9 @@ namespace PclDlSwap.Payload.Swap
         public IPclAnimationAccess Animation { get; }
         public IPclSettingsAccess Settings { get; }
         public IPclBaseAccess Base { get; }
+        public IPclInstanceAccess Instance { get; }
+        public IPclDownloadAccess Download { get; }
+        public IPclLaunchAccess Launch { get; }
 
         // ------------------------------------------------------------------ helpers
 
@@ -40,6 +47,54 @@ namespace PclDlSwap.Payload.Swap
             return type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
                 .Where(method => method.Name == methodName)
                 .FirstOrDefault(method => filter == null || filter(method));
+        }
+
+        /// <summary>Reads a static field or property (PCL mixes both shapes).</summary>
+        internal static object GetStatic(Assembly host, string typeName, string memberName)
+        {
+            var type = host?.GetType(typeName, throwOnError: false);
+            if (type == null) throw new MissingMemberException(typeName);
+
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+            var field = type.GetField(memberName, flags);
+            if (field != null) return field.GetValue(null);
+            var property = type.GetProperty(memberName, flags);
+            if (property != null && property.CanRead) return property.GetValue(null, null);
+            throw new MissingMemberException(typeName, memberName);
+        }
+
+        internal static void SetStatic(Assembly host, string typeName, string memberName, object value)
+        {
+            var type = host?.GetType(typeName, throwOnError: false);
+            if (type == null) throw new MissingMemberException(typeName);
+
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+            var field = type.GetField(memberName, flags);
+            if (field != null) { field.SetValue(null, value); return; }
+            var property = type.GetProperty(memberName, flags);
+            if (property != null && property.CanWrite) { property.SetValue(null, value, null); return; }
+            throw new MissingMemberException(typeName, memberName);
+        }
+
+        /// <summary>
+        /// Reads an instance member by name across the shapes PCL uses: plain fields, VB.NET
+        /// properties and parameterless methods (McInstance exposes both GetJsonPath() and
+        /// VersionDisplayName()).
+        /// </summary>
+        internal static object ReadMember(object instance, string name)
+        {
+            if (instance == null) throw new ArgumentNullException(nameof(instance));
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var type = instance.GetType();
+
+            var field = type.GetField(name, flags);
+            if (field != null) return field.GetValue(instance);
+            var property = type.GetProperty(name, flags);
+            if (property != null && property.CanRead) return property.GetValue(instance, null);
+            var method = type.GetMethods(flags)
+                .FirstOrDefault(candidate => candidate.Name == name && candidate.GetParameters().Length == 0);
+            if (method != null) return method.Invoke(instance, null);
+            throw new MissingMemberException(type.FullName, name);
         }
 
         internal static void InvokeWithDefaults(MethodInfo method, object[] provided)
@@ -282,6 +337,157 @@ namespace PclDlSwap.Payload.Swap
                                                  candidate.GetParameters().Length == args.Length);
                 if (method == null) throw new MissingMethodException("PCL.ModBase." + name);
                 return method.Invoke(null, args);
+            }
+        }
+
+        private sealed class InstanceAccess : IPclInstanceAccess
+        {
+            private readonly Assembly _host;
+
+            public InstanceAccess(Assembly host) => _host = host;
+
+            public string FolderSelected
+            {
+                get => Convert.ToString(GetStatic(_host, "PCL.ModMinecraft", "McFolderSelected"));
+                set => SetStatic(_host, "PCL.ModMinecraft", "McFolderSelected", value);
+            }
+
+            public object InstanceSelected
+            {
+                get => GetStatic(_host, "PCL.ModMinecraft", "McInstanceSelected");
+                set => SetStatic(_host, "PCL.ModMinecraft", "McInstanceSelected", value);
+            }
+
+            public string GetFriendlyName(string folderName)
+            {
+                var method = FindMethod(_host, "PCL.ModMinecraft", "GetMcFoolName",
+                    m => m.GetParameters().Length == 1);
+                if (method == null) throw new MissingMethodException("PCL.ModMinecraft.GetMcFoolName");
+                return Convert.ToString(method.Invoke(null, new object[] { folderName }));
+            }
+
+            public IReadOnlyList<object> List(string folder = null)
+            {
+                var target = string.IsNullOrEmpty(folder)
+                    ? Convert.ToString(GetStatic(_host, "PCL.ModMinecraft", "McFolderSelected"))
+                    : folder;
+
+                var method = FindMethod(_host, "PCL.ModMinecraft", "InitMcInstanceListWithCache",
+                                 m => m.GetParameters().Length == 1)
+                             ?? FindMethod(_host, "PCL.ModMinecraft", "McFolderListLoadSub",
+                                 m => m.GetParameters().Length == 0);
+                if (method == null)
+                    throw new MissingMethodException("PCL.ModMinecraft.InitMcInstanceListWithCache");
+
+                var result = method.Invoke(null, method.GetParameters().Length == 0
+                    ? new object[0]
+                    : new object[] { target });
+
+                var instances = new List<object>();
+                if (result is IDictionary grouped)
+                {
+                    foreach (var value in grouped.Values)
+                    {
+                        if (!(value is IEnumerable items)) continue;
+                        foreach (var item in items) instances.Add(item);
+                    }
+                }
+                return instances;
+            }
+
+            public string GetName(object instance) => Convert.ToString(ReadMember(instance, "Name"));
+            public string GetVersion(object instance) => Convert.ToString(ReadMember(instance, "Version"));
+            public string GetPathIndie(object instance) => Convert.ToString(ReadMember(instance, "PathIndie"));
+            public bool IsModable(object instance) =>
+                Convert.ToBoolean(ReadMember(instance, "Modable") ?? false);
+            public string GetJsonPath(object instance) => Convert.ToString(ReadMember(instance, "GetJsonPath"));
+            public string GetVersionDisplayName(object instance) =>
+                Convert.ToString(ReadMember(instance, "VersionDisplayName"));
+
+            public string GetNativesFolder(object instance)
+            {
+                var method = FindMethod(_host, "PCL.ModLaunch", "GetNativesFolder",
+                    m => m.GetParameters().Length == 1);
+                if (method == null) throw new MissingMethodException("PCL.ModLaunch.GetNativesFolder");
+                return Convert.ToString(method.Invoke(null, new[] { instance }));
+            }
+        }
+
+        private sealed class DownloadAccess : IPclDownloadAccess
+        {
+            private readonly Assembly _host;
+
+            public DownloadAccess(Assembly host) => _host = host;
+
+            public bool PreferMojang =>
+                Convert.ToBoolean(GetStatic(_host, "PCL.ModDownload", "DlSourcePreferMojang") ?? false);
+
+            public bool PreferMojangVersionList =>
+                Convert.ToBoolean(GetStatic(_host, "PCL.ModDownload", "DlVersionListPreferMojang") ?? false);
+
+            public object ClientListGet(string source) => Call("DlClientListGet", source);
+            public IReadOnlyList<string> SourceAssetsGet(string version) => Strings("DlSourceAssetsGet", version);
+            public IReadOnlyList<string> SourceLibraryGet(string version) => Strings("DlSourceLibraryGet", version);
+            public IReadOnlyList<string> SourceLauncherOrMetaGet(string version) =>
+                Strings("DlSourceLauncherOrMetaGet", version);
+
+            public string SourceModGet(string project) =>
+                Convert.ToString(Call("DlSourceModGet", project));
+
+            public object ModRequest(string url, string method = "GET", string body = null,
+                string contentType = null)
+            {
+                var info = FindMethod(_host, "PCL.ModDownload", "DlModRequest",
+                    m => m.GetParameters().Length == 4);
+                if (info == null) throw new MissingMethodException("PCL.ModDownload.DlModRequest");
+
+                var httpMethodType = info.GetParameters()[1].ParameterType;
+                var httpMethod = string.IsNullOrEmpty(method)
+                    ? null
+                    : Activator.CreateInstance(httpMethodType, new object[] { method });
+                return info.Invoke(null, new[] { url, httpMethod, body, contentType });
+            }
+
+            private object Call(string name, string argument)
+            {
+                var method = FindMethod(_host, "PCL.ModDownload", name, m => m.GetParameters().Length == 1);
+                if (method == null) throw new MissingMethodException("PCL.ModDownload." + name);
+                return method.Invoke(null, new object[] { argument });
+            }
+
+            private IReadOnlyList<string> Strings(string name, string argument)
+            {
+                var list = new List<string>();
+                if (Call(name, argument) is IEnumerable items)
+                {
+                    foreach (var item in items) list.Add(Convert.ToString(item));
+                }
+                return list;
+            }
+        }
+
+        private sealed class LaunchAccess : IPclLaunchAccess
+        {
+            private readonly Assembly _host;
+
+            public LaunchAccess(Assembly host) => _host = host;
+
+            public bool Start(object launchOptions)
+            {
+                var method = FindMethod(_host, "PCL.ModLaunch", "McLaunchStart",
+                    m => m.GetParameters().Length == 1 && m.ReturnType == typeof(bool));
+                if (method == null) throw new MissingMethodException("PCL.ModLaunch.McLaunchStart");
+                return Convert.ToBoolean(method.Invoke(null, new[] { launchOptions }) ?? false);
+            }
+
+            public string LoginName() => Convert.ToString(Call("McLoginName"));
+            public string LoginAble() => Convert.ToString(Call("McLoginAble"));
+
+            private object Call(string name)
+            {
+                var method = FindMethod(_host, "PCL.ModLaunch", name, m => m.GetParameters().Length == 0);
+                if (method == null) throw new MissingMethodException("PCL.ModLaunch." + name);
+                return method.Invoke(null, null);
             }
         }
     }

@@ -14,6 +14,63 @@ namespace PCL2Swap.Api
         IPclAnimationAccess Animation { get; }
         IPclSettingsAccess Settings { get; }
         IPclBaseAccess Base { get; }
+        IPclInstanceAccess Instance { get; }
+        IPclDownloadAccess Download { get; }
+        IPclLaunchAccess Launch { get; }
+    }
+
+    /// <summary>PCL.ModMinecraft - instance folders and the selected instance.</summary>
+    public interface IPclInstanceAccess
+    {
+        string FolderSelected { get; set; }
+
+        /// <summary>The selected PCL.ModMinecraft.McInstance object (shape lives in the host).</summary>
+        object InstanceSelected { get; set; }
+
+        string GetFriendlyName(string folderName);
+
+        /// <summary>Enumerates the instances the host sees in the selected folder.</summary>
+        IReadOnlyList<object> List(string folder = null);
+
+        string GetName(object instance);
+        string GetVersion(object instance);
+        string GetPathIndie(object instance);
+        bool IsModable(object instance);
+        string GetJsonPath(object instance);
+        string GetVersionDisplayName(object instance);
+
+        /// <summary>ModLaunch.GetNativesFolder - where the host extracts the instance's natives.</summary>
+        string GetNativesFolder(object instance);
+    }
+
+    /// <summary>PCL.ModDownload - the launcher's own download source plumbing.</summary>
+    public interface IPclDownloadAccess
+    {
+        bool PreferMojang { get; }
+        bool PreferMojangVersionList { get; }
+
+        /// <summary>DlClientListGet(source) - the version list the host builds per source.</summary>
+        object ClientListGet(string source);
+
+        IReadOnlyList<string> SourceAssetsGet(string version);
+        IReadOnlyList<string> SourceLibraryGet(string version);
+        IReadOnlyList<string> SourceLauncherOrMetaGet(string version);
+        string SourceModGet(string project);
+
+        /// <summary>DlModRequest - the host's own signed request helper.</summary>
+        object ModRequest(string url, string method = "GET", string body = null, string contentType = null);
+    }
+
+    /// <summary>PCL.ModLaunch - launching the selected instance and login facts.</summary>
+    public interface IPclLaunchAccess
+    {
+        /// <summary>McLaunchStart(options) - starts the launcher's real launch pipeline.</summary>
+        bool Start(object launchOptions);
+
+        string LoginName();
+
+        /// <summary>Empty when the current login data is usable, otherwise the reason.</summary>
+        string LoginAble();
     }
 
     /// <summary>PCL.Settings - the launcher's settings storage (global and per-instance).</summary>

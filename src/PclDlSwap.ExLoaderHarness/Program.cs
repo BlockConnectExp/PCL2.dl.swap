@@ -701,6 +701,64 @@ namespace PclDlSwap.ExLoaderHarness
             var animation = pcl?.GetType().GetProperty("Animation")?.GetValue(pcl);
             Expect("Animation family exposed", animation != null);
 
+            // ---- typed families: Instance / Download / Launch ----
+            var instance = pcl?.GetType().GetProperty("Instance")?.GetValue(pcl);
+            Expect("Instance family exposed", instance != null);
+            if (instance != null)
+            {
+                var instanceType = instance.GetType();
+                instanceType.GetProperty("FolderSelected")?.SetValue(instance, @"C:\instances2");
+                Expect("Instance.FolderSelected writes through to the host",
+                    PCL.ModMinecraft.McFolderSelected == @"C:\instances2");
+                Expect("Instance.GetFriendlyName reaches the host method",
+                    Convert.ToString(instanceType.GetMethod("GetFriendlyName")
+                        ?.Invoke(instance, new object[] { "X" })) == "友好名称:X");
+
+                var list = instanceType.GetMethod("List")?.Invoke(instance, new object[] { null })
+                           as IReadOnlyList<object>;
+                Expect("Instance.List flattens the host's cached list", list != null && list.Count == 1);
+                var first = list != null && list.Count > 0 ? list[0] : null;
+                Expect("Instance helpers read McInstance members",
+                    Convert.ToString(instanceType.GetMethod("GetName")?.Invoke(instance, new[] { first })) == "Demo" &&
+                    Convert.ToString(instanceType.GetMethod("GetVersionDisplayName")
+                        ?.Invoke(instance, new[] { first })) == "Demo (1.21.4)");
+                Expect("Instance.GetNativesFolder reaches ModLaunch",
+                    Convert.ToString(instanceType.GetMethod("GetNativesFolder")
+                        ?.Invoke(instance, new[] { first })) == @"C:\temp\natives");
+            }
+
+            var download = pcl?.GetType().GetProperty("Download")?.GetValue(pcl);
+            Expect("Download family exposed", download != null);
+            if (download != null)
+            {
+                var downloadType = download.GetType();
+                Expect("Download.PreferMojang reads the host flag",
+                    Convert.ToBoolean(downloadType.GetProperty("PreferMojang")?.GetValue(download) ?? false));
+                Expect("Download.SourceModGet reaches the host",
+                    Convert.ToString(downloadType.GetMethod("SourceModGet")
+                        ?.Invoke(download, new object[] { "sodium" })) == "mod-sodium");
+                Expect("Download.ClientListGet returns the host payload",
+                    downloadType.GetMethod("ClientListGet")?.Invoke(download, new object[] { "mojang" }) != null);
+                var request = downloadType.GetMethod("ModRequest")
+                    ?.Invoke(download, new object[] { "https://example.com/api", "POST", null, null });
+                Expect("Download.ModRequest posts through the host helper",
+                    PCL.ModDownload.ModRequestCalls == 1 &&
+                    Convert.ToString(request) == "POST https://example.com/api");
+            }
+
+            var launch = pcl?.GetType().GetProperty("Launch")?.GetValue(pcl);
+            Expect("Launch family exposed", launch != null);
+            if (launch != null)
+            {
+                var launchType = launch.GetType();
+                Expect("Launch.LoginName reaches the host",
+                    Convert.ToString(launchType.GetMethod("LoginName")?.Invoke(launch, null)) == "Dissociate");
+                Expect("Launch.Start drives the host launcher pipeline",
+                    Convert.ToBoolean(launchType.GetMethod("Start")
+                        ?.Invoke(launch, new object[] { null }) ?? false) &&
+                    PCL.ModLaunch.StartCalls == 1);
+            }
+
             Console.WriteLine(failures == 0 ? "[pcl] RESULT: PASS" : "[pcl] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
         }
@@ -1519,6 +1577,8 @@ namespace PCL
     {
         public static object DlClientListLoader = new LoaderTask<string, object>();
         public static int DlClientListMainCalls;
+        public static int ModRequestCalls;
+        public static string LastModRequest;
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static void DlClientListMain(object context)
@@ -1526,6 +1586,90 @@ namespace PCL
             var pad = "harness.dlclientlist." + (context == null ? 0 : 1);
             DlClientListMainCalls += pad.Length > 0 ? 1 : 0;
         }
+
+        // ---- typed download family (ModDownload) ----
+        public static bool DlSourcePreferMojang => true;
+        public static bool DlVersionListPreferMojang => false;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static object DlClientListGet(string source) => new[] { "1.21.4", "1.21.3" };
+
+        public static IEnumerable<string> DlSourceAssetsGet(string version) => new[] { "assets-" + version };
+        public static IEnumerable<string> DlSourceLibraryGet(string version) => new[] { "libs-" + version };
+        public static IEnumerable<string> DlSourceLauncherOrMetaGet(string version) => new[] { "meta-" + version };
+        public static string DlSourceModGet(string project) => "mod-" + project;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static object DlModRequest(string url, System.Net.Http.HttpMethod method, string body,
+            string contentType)
+        {
+            ModRequestCalls++;
+            LastModRequest = (method == null ? "?" : method.Method) + " " + url;
+            return LastModRequest;
+        }
+    }
+
+    /// <summary>Stand-in for PCL.ModMinecraft and its nested McInstance.</summary>
+    public static class ModMinecraft
+    {
+        public static int ListCalls;
+        public static string McFolderSelected { get; set; } = @"C:\instances";
+        public static McInstance McInstanceSelected { get; set; }
+
+        public static string GetMcFoolName(string folder)
+        {
+            var pad = "harness.foolname." + (folder ?? string.Empty).Length;
+            return pad.Length > 0 ? "友好名称:" + folder : null;
+        }
+
+        // Mirrors PCL's private static InitMcInstanceListWithCache(folder).
+        private static Dictionary<object, List<McInstance>> InitMcInstanceListWithCache(string folder)
+        {
+            ListCalls++;
+            return new Dictionary<object, List<McInstance>>
+            {
+                { "Card", new List<McInstance> { new McInstance("Demo", "1.21.4", true) } }
+            };
+        }
+
+        public class McInstance
+        {
+            public McInstance() { }
+
+            public McInstance(string name, string version, bool modable)
+            {
+                Name = name;
+                Version = version;
+                Modable = modable;
+            }
+
+            public string Name { get; set; }
+            public string Version { get; set; }
+            public bool Modable { get; set; }
+            public string PathIndie => @"C:\instances\" + Name;
+            public string GetJsonPath() => PathIndie + "\\" + Name + ".json";
+            public string VersionDisplayName() => Name + " (" + Version + ")";
+        }
+    }
+
+    /// <summary>Stand-in for PCL.ModLaunch (launch pipeline + login facts).</summary>
+    public static class ModLaunch
+    {
+        public static int StartCalls;
+        public static object LastOptions;
+        public static string LoginNameValue = "Dissociate";
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static bool McLaunchStart(object options)
+        {
+            StartCalls++;
+            LastOptions = options;
+            return true;
+        }
+
+        public static string GetNativesFolder(object instance) => @"C:\temp\natives";
+        public static string McLoginName() => LoginNameValue;
+        public static string McLoginAble() => string.Empty;
     }
 
     /// <summary>Stand-in for PCL.PageDownloadInstall.</summary>

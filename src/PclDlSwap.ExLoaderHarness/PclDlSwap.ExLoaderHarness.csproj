@@ -26,6 +26,7 @@
     <Reference Include="System.Xaml" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
   <ItemGroup>
     <!-- addontest packs the sample addon into a real .swapaddon and drives the swap host. -->

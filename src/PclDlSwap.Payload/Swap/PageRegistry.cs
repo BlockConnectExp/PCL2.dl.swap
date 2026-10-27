@@ -156,8 +156,18 @@ namespace PclDlSwap.Payload.Swap
                     object aniBefore = null;
                     if (aniType != null)
                     {
-                        aniBefore = PclUi.GetMember(aniType, "AniControlEnabled");
-                        if (aniBefore is int value) PclUi.SetMember(aniType, "AniControlEnabled", value + 1);
+                        // The animation gate raises while the switch is in flight; a failure here
+                        // must degrade to "no gate" instead of aborting the whole page change.
+                        try
+                        {
+                            aniBefore = PclUi.GetMember(aniType, "AniControlEnabled");
+                            if (aniBefore is int value) PclUi.SetMember(aniType, "AniControlEnabled", value + 1);
+                        }
+                        catch (Exception ex)
+                        {
+                            aniBefore = null;
+                            SwapLog.Warn("[page] 动画门控加减失败（继续切换）：" + ex.Message);
+                        }
                     }
 
                     try

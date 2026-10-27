@@ -323,18 +323,27 @@ namespace PclDlSwap.Payload.Host
         /// <summary>Writes a member by name: plain fields first, then writable properties.</summary>
         public static void SetMember(object instance, string name, object value)
         {
-            var type = instance.GetType();
+            if (instance == null) throw new ArgumentNullException(nameof(instance));
+
+            // A Type target means "static member on that type" - reading already worked that way,
+            // writing used to look the member up on RuntimeType itself and threw
+            // MissingMemberException("System.RuntimeType.AniControlEnabled"), which aborted the
+            // whole settings-page switch (field log 02:03:04, [page] SwitchToPage 失败 id=101).
+            var isStatic = instance is Type;
+            var type = isStatic ? (Type)instance : instance.GetType();
+            var target = isStatic ? null : instance;
+
             var field = type.GetField(name, AnyMember);
             if (field != null)
             {
-                field.SetValue(instance, value);
+                field.SetValue(target, value);
                 return;
             }
 
             var property = type.GetProperty(name, AnyMember);
             if (property != null && property.CanWrite)
             {
-                property.SetValue(instance, value, null);
+                property.SetValue(target, value, null);
                 return;
             }
 
@@ -343,10 +352,11 @@ namespace PclDlSwap.Payload.Host
 
         public static void SetProperty(object instance, string name, object value)
         {
-            var type = instance.GetType();
+            var isStatic = instance is Type;
+            var type = isStatic ? (Type)instance : instance.GetType();
             var property = type.GetProperty(name, AnyMember);
             if (property == null || !property.CanWrite) throw new MissingMemberException(type.FullName, name);
-            property.SetValue(instance, value, null);
+            property.SetValue(isStatic ? null : instance, value, null);
         }
 
         public static object Invoke(object instance, string name, params object[] args)

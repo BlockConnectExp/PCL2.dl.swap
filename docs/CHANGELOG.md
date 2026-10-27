@@ -31,6 +31,7 @@ Num|File Name|Change Description|Change Time|Changer
 3|SurfaceIndex / PclAccess|`ISwapApi.Surface` 暴露全量可调用面索引；`ISwapApi.Pcl` 暴露 Secret / Net / Animation / Settings / Base 五个强类型族，调用直达宿主方法|2026.10.28-01:25:00|PCL2.dl.swap
 4|DetourInstaller|每次安装 detour 记录目标入口前 16 字节（安装前/后），字段级证据随日志落地|2026.10.28-01:25:00|PCL2.dl.swap
 5|tools/PclInject|新增本地注入器：`--exe/--pid` + `--dll`，用 LoadLibraryW 装载 shim，使注入形状无需 ExLoader 也能端到端复现|2026.10.28-02:05:00|PCL2.dl.swap
+6|PclUi.SetMember|修复“点击 Swap 页没有反应”：`SetMember` 对 `Type` 目标不支持静态成员（改成在 `RuntimeType` 上查找 `AniControlEnabled`），抛 `MissingMemberException` 并中断整次页面切换。现在与 `GetMember`/`Invoke` 一致地处理静态成员；`PageRegistry` 的动画门控加减同时降级为“失败不阻断切换”|2026.10.28-02:08:00|PCL2.dl.swap
 
 ### 证据（本次修复）
 ```
@@ -49,6 +50,11 @@ PCL 自身日志（...\正式版 2.99.0\PCL\Log1.txt）：
   修复前：同样在插入后悬停即抛 InvalidCastException（现场日志一致）
   修复后：设置页正常显示 Swap Addon / Swap Settings；在侧栏整列反复悬停 ≥10 秒，
          进程存活，PCL Log1.txt 中 "程序出现未知错误|InvalidCastException" 计数 = 0
+
+本地 E2E（第二处修复后，同一注入形状）：
+  点击 Swap Addon   → [page] 调用宿主的 PageChangeRun → 同步部分完成（id=100）→ 页面渲染 3 个内置 Addon
+  点击 Swap Settings → 同步部分完成（id=101）→ 页面渲染宿主版本/形状/API/日志目录与查毒策略
+  两次切换后进程均存活，PCL 日志 0 异常
 ```
 
 ---

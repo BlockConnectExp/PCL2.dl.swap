@@ -21,11 +21,15 @@ namespace PclDlSwap.Payload.Swap
             Secret = new SecretAccess(host);
             Net = new NetAccess(host);
             Animation = new AnimationAccess(host);
+            Settings = new SettingsAccess(host);
+            Base = new BaseAccess(host);
         }
 
         public IPclSecretAccess Secret { get; }
         public IPclNetAccess Net { get; }
         public IPclAnimationAccess Animation { get; }
+        public IPclSettingsAccess Settings { get; }
+        public IPclBaseAccess Base { get; }
 
         // ------------------------------------------------------------------ helpers
 
@@ -174,6 +178,110 @@ namespace PclDlSwap.Payload.Swap
                          m.GetParameters()[1].ParameterType == typeof(string));
                 if (method == null) throw new MissingMethodException("PCL.ModAnimation.AniStart");
                 InvokeWithDefaults(method, new object[] { animationData, id });
+            }
+        }
+
+        private sealed class SettingsAccess : IPclSettingsAccess
+        {
+            private const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+            private readonly Assembly _host;
+
+            public SettingsAccess(Assembly host) => _host = host;
+
+            public string Get(string key)
+            {
+                var type = HostType();
+                var plain = type.GetMethods(Flags).FirstOrDefault(method =>
+                    method.Name == "Get" && !method.IsGenericMethodDefinition &&
+                    method.GetParameters().Length == 2 &&
+                    method.GetParameters()[0].ParameterType == typeof(string));
+                if (plain != null) return Convert.ToString(plain.Invoke(null, new object[] { key, null }));
+
+                var generic = type.GetMethods(Flags).FirstOrDefault(method =>
+                    method.Name == "Get" && method.IsGenericMethodDefinition &&
+                    method.GetParameters().Length == 2 &&
+                    method.GetParameters()[0].ParameterType == typeof(string));
+                if (generic == null) throw new MissingMethodException("PCL.Settings.Get");
+                return Convert.ToString(generic.MakeGenericMethod(typeof(string))
+                    .Invoke(null, new object[] { key, null }));
+            }
+
+            public void Set(string key, object value)
+            {
+                var type = HostType();
+                var plain = type.GetMethods(Flags).FirstOrDefault(method =>
+                    method.Name == "Set" && !method.IsGenericMethodDefinition &&
+                    method.GetParameters().Length == 3 &&
+                    method.GetParameters()[0].ParameterType == typeof(string));
+                if (plain != null)
+                {
+                    plain.Invoke(null, new[] { (object)key, value, null });
+                    return;
+                }
+
+                var generic = type.GetMethods(Flags).FirstOrDefault(method =>
+                    method.Name == "Set" && method.IsGenericMethodDefinition &&
+                    method.GetParameters().Length == 3 &&
+                    method.GetParameters()[0].ParameterType == typeof(string));
+                if (generic == null) throw new MissingMethodException("PCL.Settings.Set");
+                generic.MakeGenericMethod(value?.GetType() ?? typeof(string))
+                    .Invoke(null, new[] { (object)key, value, null });
+            }
+
+            public bool HasSaved(string key) => Convert.ToBoolean(InvokeWithKey("HasSaved", key) ?? false);
+            public void Reset(string key) => InvokeWithKey("Reset", key);
+            public object GetDefault(string key) => InvokeWithKey("GetDefault", key);
+
+            private object InvokeWithKey(string name, string key)
+            {
+                var method = HostType().GetMethods(Flags).FirstOrDefault(candidate =>
+                    candidate.Name == name && candidate.GetParameters().Length >= 1 &&
+                    candidate.GetParameters()[0].ParameterType == typeof(string));
+                if (method == null) throw new MissingMethodException("PCL.Settings." + name);
+
+                var parameters = method.GetParameters();
+                var args = new object[parameters.Length];
+                args[0] = key;
+                for (var i = 1; i < args.Length; i++) args[i] = DefaultFor(parameters[i]);
+                return method.Invoke(null, args);
+            }
+
+            private Type HostType()
+            {
+                var type = _host?.GetType("PCL.Settings", throwOnError: false);
+                if (type == null) throw new MissingMethodException("PCL.Settings");
+                return type;
+            }
+        }
+
+        private sealed class BaseAccess : IPclBaseAccess
+        {
+            private readonly Assembly _host;
+
+            public BaseAccess(Assembly host) => _host = host;
+
+            public string GetUuid() => Convert.ToString(Invoke("GetUuid", new object[0]));
+
+            public string ReadIni(string file, string section, string key) =>
+                Convert.ToString(Invoke("ReadIni", new object[] { file, section, key }));
+
+            public void WriteIni(string file, string section, string key, string value) =>
+                Invoke("WriteIni", new object[] { file, section, key, value });
+
+            public bool HasIniKey(string file, string section, string key) =>
+                Convert.ToBoolean(Invoke("HasIniKey", new object[] { file, section, key }) ?? false);
+
+            public void DeleteIniKey(string file, string section, string key) =>
+                Invoke("DeleteIniKey", new object[] { file, section, key });
+
+            private object Invoke(string name, object[] args)
+            {
+                var type = _host?.GetType("PCL.ModBase", throwOnError: false);
+                var method = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    .FirstOrDefault(candidate => candidate.Name == name &&
+                                                 candidate.GetParameters().Length == args.Length);
+                if (method == null) throw new MissingMethodException("PCL.ModBase." + name);
+                return method.Invoke(null, args);
             }
         }
     }

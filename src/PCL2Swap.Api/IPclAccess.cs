@@ -12,6 +12,28 @@ namespace PCL2Swap.Api
         IPclSecretAccess Secret { get; }
         IPclNetAccess Net { get; }
         IPclAnimationAccess Animation { get; }
+        IPclSettingsAccess Settings { get; }
+        IPclBaseAccess Base { get; }
+    }
+
+    /// <summary>PCL.Settings - the launcher's settings storage (global and per-instance).</summary>
+    public interface IPclSettingsAccess
+    {
+        string Get(string key);
+        void Set(string key, object value);
+        bool HasSaved(string key);
+        void Reset(string key);
+        object GetDefault(string key);
+    }
+
+    /// <summary>PCL.ModBase - small host utilities (uuid, ini files).</summary>
+    public interface IPclBaseAccess
+    {
+        string GetUuid();
+        string ReadIni(string file, string section, string key);
+        void WriteIni(string file, string section, string key, string value);
+        bool HasIniKey(string file, string section, string key);
+        void DeleteIniKey(string file, string section, string key);
     }
 
     /// <summary>PCL.ModSecret - launcher update entry points.</summary>

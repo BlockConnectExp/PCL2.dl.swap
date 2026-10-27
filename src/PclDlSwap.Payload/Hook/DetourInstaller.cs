@@ -68,6 +68,7 @@ namespace PclDlSwap.Payload.Hook
 
             var originalCopy = OriginalFactory.CreateCopy(method);
             var isInstance = !method.IsStatic;
+            SwapLog.Info($"[detour] 目标入口字节（前 16，安装前）：{HexDump(target)}");
 
             DetourInstaller result;
             if (IntPtr.Size == 8)
@@ -80,6 +81,7 @@ namespace PclDlSwap.Payload.Hook
                 var detour = X86Detour.Install(target, hook);
                 result = new DetourInstaller(detour, originalCopy, isInstance);
             }
+            SwapLog.Info($"[detour] 目标入口字节（前 16，安装后）：{HexDump(target)}");
 
             result.Method = method;
             result.HookMethod = hookMethod;
@@ -87,6 +89,21 @@ namespace PclDlSwap.Payload.Hook
                          $"{hookMethod.DeclaringType?.Name}.{hookMethod.Name}" +
                          $"（原始方法副本文档：" + (originalCopy == null ? "无" : originalCopy.Name) + "）");
             return result;
+        }
+
+        /// <summary>Byte-level evidence for hook diagnosis: the first 16 entry bytes as hex.</summary>
+        private static string HexDump(IntPtr address)
+        {
+            try
+            {
+                var bytes = new byte[16];
+                Marshal.Copy(address, bytes, 0, bytes.Length);
+                return BitConverter.ToString(bytes).Replace("-", " ");
+            }
+            catch (Exception ex)
+            {
+                return "(dump failed: " + ex.Message + ")";
+            }
         }
 
         /// <summary>

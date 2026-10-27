@@ -8,7 +8,7 @@
 ---
 ## 2026.10.28-04:20:00 Alpha 4 repack 5/6: the hook event bus is live
 
-GitCommitHash: (unreleased)
+GitCommitHash: tag v26.0-Alpha4（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha4.md）
 
 ChangedFiles:
 ```

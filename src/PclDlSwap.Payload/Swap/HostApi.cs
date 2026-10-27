@@ -233,6 +233,24 @@ namespace PclDlSwap.Payload.Swap
 
             public int MsgBox(string caption, string title, string button1 = "确定", string button2 = "") =>
                 PclUi.MsgBox(caption, title, button1, button2);
+
+            // Native-look builders shared with the built-in pages (Views.SwapUi owns the details).
+            public System.Windows.FrameworkElement Card(string title,
+                params System.Windows.FrameworkElement[] content) => Views.SwapUi.Card(title, content);
+
+            public System.Windows.FrameworkElement Text(string text, double size = 12.5, bool secondary = false) =>
+                Views.SwapUi.Text(text, size, secondary);
+
+            public System.Windows.FrameworkElement Button(string text, Action onClick, string colorType = null) =>
+                Views.SwapUi.Button(text, onClick, colorType);
+
+            public System.Windows.FrameworkElement InfoRow(string label, string value) =>
+                Views.SwapUi.InfoRow(label, value);
+
+            public System.Windows.FrameworkElement Buttons(
+                params System.Windows.FrameworkElement[] buttons) => Views.SwapUi.Buttons(buttons);
+
+            public System.Windows.FrameworkElement Note(string text) => Views.SwapUi.Note(text);
         }
 
         private sealed class ReflectionImpl : IReflection

@@ -151,25 +151,18 @@ namespace PCL2Swap.SampleAddon
 
         private FrameworkElement BuildView()
         {
-            var panel = new StackPanel { Margin = new Thickness(25, 25, 25, 10) };
-            panel.Children.Add(new TextBlock
-            {
-                Text = "示例模块（Sample Addon）",
-                FontSize = 15,
-                FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, 0, 0, 6)
-            });
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"API {LastApiVersion} · 钩子目标 {LastHookTarget ?? "(未挂载)"}",
-                Opacity = 0.7,
-                FontSize = 12,
-                Margin = new Thickness(0, 0, 0, 12)
-            });
-
+            var page = new StackPanel { Margin = new Thickness(25, 25, 25, 10) };
             _liveLabel = new TextBlock { FontSize = 12.5, TextWrapping = TextWrapping.Wrap };
-            panel.Children.Add(_liveLabel);
             RefreshLabel();
+
+            page.Children.Add(_api.Ui.Card("示例模块（Sample Addon）",
+                _api.Ui.Text($"API {LastApiVersion} · 钩子目标 {LastHookTarget ?? "(未挂载)"}", 12, true),
+                _liveLabel));
+
+            page.Children.Add(_api.Ui.Card("这个模块用到了什么",
+                _api.Ui.Note("事件总线（弹窗 / 更新请求 / 下载完成）、模块作用域 Prefix 钩子、"),
+                _api.Ui.Note("持久化数据、Reflect 直达宿主方法，以及下面这个原生外观按钮。"),
+                _api.Ui.Buttons(_api.Ui.Button("调用宿主方法并刷新", CallHostAndRefresh))));
 
             // Live view: the page is built once and cached, so a timer keeps the counters honest
             // while the user is looking at it.
@@ -177,32 +170,25 @@ namespace PCL2Swap.SampleAddon
             _timer.Tick += (sender, args) => RefreshLabel();
             _timer.Start();
 
-            var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 16, 0, 0) };
-            var button = new Button
-            {
-                Content = "调用宿主方法并刷新",
-                Padding = new Thickness(12, 4, 12, 4),
-                MinWidth = 150
-            };
-            button.Click += (sender, args) =>
-            {
-                // Two SDK features in one click: the reflection escape hatch reaches any host member
-                // (here the method our Prefix hook observes), and the hook counter below goes up.
-                try
-                {
-                    _api.Reflect.Call(_api.Reflect.HostType("PCL.ModBase"), "ToUnixTimestampUtc",
-                        DateTime.UtcNow);
-                }
-                catch (Exception ex)
-                {
-                    _api.LogWarning("调用宿主方法失败：" + ex.Message);
-                }
-                RefreshLabel();
-            };
-            actions.Children.Add(button);
-            panel.Children.Add(actions);
+            return page;
+        }
 
-            return panel;
+        /// <summary>
+        /// Two SDK features in one click: the reflection escape hatch reaches any host member (here
+        /// the method our Prefix hook observes) and the hook counter on the page goes up.
+        /// </summary>
+        private void CallHostAndRefresh()
+        {
+            try
+            {
+                _api.Reflect.Call(_api.Reflect.HostType("PCL.ModBase"), "ToUnixTimestampUtc",
+                    DateTime.UtcNow);
+            }
+            catch (Exception ex)
+            {
+                _api.LogWarning("调用宿主方法失败：" + ex.Message);
+            }
+            RefreshLabel();
         }
 
         private void RefreshLabel()

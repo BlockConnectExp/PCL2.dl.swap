@@ -1101,6 +1101,41 @@ namespace PclDlSwap.ExLoaderHarness
                     Expect("mismatched handler shape is rejected with a readable error",
                         ex.InnerException.Message.Contains("参数个数不匹配"));
                 }
+
+                // ---- SDK ui builders: native controls when the host has them, plain WPF otherwise ----
+                var ui = api?.GetType().GetProperty("Ui")?.GetValue(api);
+                var uiBuildOk = false;
+                var uiThread = new System.Threading.Thread(() =>
+                {
+                    try
+                    {
+                        // WPF demands an STA thread: in the launcher the page factory already runs on
+                        // the UI thread, so the test builds the elements the same way.
+                        var card = ui?.GetType().GetMethod("Card")?.Invoke(ui, new object[]
+                        {
+                            "harness card", new System.Windows.FrameworkElement[0]
+                        }) as System.Windows.FrameworkElement;
+                        var uiButton = ui?.GetType().GetMethod("Button")?.Invoke(ui, new object[]
+                        {
+                            "harness button", (Action)(() => { }), null
+                        }) as System.Windows.FrameworkElement;
+                        var infoRow = ui?.GetType().GetMethod("InfoRow")?.Invoke(ui, new object[]
+                        {
+                            "标签", "值"
+                        }) as System.Windows.FrameworkElement;
+                        uiBuildOk = card != null && uiButton != null && infoRow != null;
+                    }
+                    catch (Exception ex)
+                    {
+                        var inner = ex.InnerException ?? ex;
+                        Console.WriteLine("[addon] ui builder threw " + inner.GetType().Name + ": " + inner.Message);
+                    }
+                });
+                uiThread.SetApartmentState(System.Threading.ApartmentState.STA);
+                uiThread.Start();
+                uiThread.Join();
+                Expect("ui builders return renderable elements",
+                    uiBuildOk);
             }
             finally
             {

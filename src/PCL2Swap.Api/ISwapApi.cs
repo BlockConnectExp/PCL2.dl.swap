@@ -49,6 +49,29 @@ namespace PCL2Swap.Api
         void RegisterSettingsPage(string id, string title, Func<FrameworkElement> viewFactory);
         void Hint(string text);
         int MsgBox(string caption, string title, string button1 = "确定", string button2 = "");
+
+        // ---- native-look builders -------------------------------------------------------------
+        // PCL's own MyCard / MyButton with the launcher's theme brushes and spacing, so a module
+        // page reads like a shipped settings page. When the host build lacks the controls these
+        // degrade to plain WPF and the page still renders.
+
+        /// <summary>A settings card: rounded chrome, bold title, 25/40/25/25 body padding.</summary>
+        FrameworkElement Card(string title, params FrameworkElement[] content);
+
+        /// <summary>Themed text (secondary = dimmed).</summary>
+        FrameworkElement Text(string text, double size = 12.5, bool secondary = false);
+
+        /// <summary>Native PCL button; colorType is "Normal" / "Highlight" / "Red".</summary>
+        FrameworkElement Button(string text, Action onClick, string colorType = null);
+
+        /// <summary>Label/value row aligned like the shipped cards.</summary>
+        FrameworkElement InfoRow(string label, string value);
+
+        /// <summary>Horizontal 35px button strip.</summary>
+        FrameworkElement Buttons(params FrameworkElement[] buttons);
+
+        /// <summary>Secondary explanation line.</summary>
+        FrameworkElement Note(string text);
     }
 
     /// <summary>Per-addon persisted key/value store.</summary>

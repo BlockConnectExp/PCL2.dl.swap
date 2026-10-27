@@ -174,6 +174,26 @@ Addon 的用法：
 
 ## 7. 模块状态与启停（Alpha 4 repack 4 起）
 
+### 6.1 原生外观页面（`Api.Ui` 构建器，Alpha 6 起）
+
+模块页面不必从零拼 WPF：`IUi` 提供了一组构建器，内部就是 PCL 自己的 `MyCard` / `MyButton`
+与主题画笔（宿主缺少这些控件时自动退回普通 WPF，页面不会渲染失败）——
+
+```csharp
+var page = new StackPanel { Margin = new Thickness(25, 25, 25, 10) };   // 与官方设置页同一边距
+page.Children.Add(Api.Ui.Card("我的模块",
+    Api.Ui.Text($"API {Api.Host.ApiVersion}", 12, secondary: true),
+    Api.Ui.InfoRow("状态", "已启用"),
+    Api.Ui.Note("说明文字。"),
+    Api.Ui.Buttons(Api.Ui.Button("执行一次", DoSomething))));
+Api.Ui.RegisterSettingsPage("my.page", "我的模块", () => page);
+```
+
+`Card / Text / InfoRow / Note / Buttons / Button` 全部返回 `FrameworkElement`；
+按钮的 `colorType` 取 `"Normal" / "Highlight" / "Red"`。
+在真机里它们与内置的 Swap Addon / Swap Settings 页面外观一致（示例模块用的就是这套）。
+注意：页面工厂在宿主 UI 线程（STA）调用，不要在自己的后台线程里构建控件。
+
 - 开关状态写在 **`%APPDATA%\PCL2Swap\modules.json`**：`{"<addon id>":{"enabled":true}}`，
   重启后保持；未知 id 视为启用（配置损坏不会误关功能）。
 - 被禁用的模块在启动阶段**直接跳过**（不调用 `OnLoad`/`OnEnable`），

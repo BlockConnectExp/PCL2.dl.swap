@@ -6,6 +6,28 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-06:00:00 Alpha 6: native-look page builders in the SDK
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\ISwapApi.cs                        IUi 增加 Card/Text/Button/InfoRow/Buttons/Note
+.\src\PclDlSwap.Payload\Swap\HostApi.cs               UiImpl 转发到 Views.SwapUi（与内置页面同一实现）
+.\src\PCL2Swap.SampleAddon\SampleAddon.cs             演示页改用 SDK 原生构建器
+.\src\PclDlSwap.ExLoaderHarness\Program.cs            ui 构建器断言（STA 线程）
+.\src\Pcl2Swap.Shim\Shim.cpp + SwapLog.cs + Loader    版本号升 v26.0-Alpha 6
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|原生外观 SDK|`IUi` 新增 `Card / Text / Button / InfoRow / Buttons / Note`：第三方模块无需拼 WPF 就能得到与官方设置页一致的卡片/按钮外观；宿主缺少 MyCard/MyButton 时退回普通 WPF。harness 断言构建器在 STA 线程返回可渲染元素|2026.10.28-06:00:00|PCL2.dl.swap
+2|示例模块|演示页改用 SDK 原生构建器，真机截图确认与内置页面同款卡片外观（两张 MyCard + MyButton，含实时计数）|2026.10.28-06:00:00|PCL2.dl.swap
+3|踩坑记录|WPF 控件必须在 STA 线程创建：harness 的 addon 测试原本跑在 MTA 主线程，调用构建器直接 InvalidOperationException（InputManager 要求 STA）。测试改为 STA 线程执行，SDK 文档也注明页面工厂在宿主 UI 线程调用|2026.10.28-06:00:00|PCL2.dl.swap
+4|版本|工作构建升到 `v26.0-Alpha 6`（`%TEMP%\PCL2Swap\v26.0-Alpha6\`），与已发布的 Alpha 5 资产区分；真机自检 `ok=27 fail=0`|2026.10.28-06:00:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-05:45:00 Alpha 5: hook chains are visible in the UI
 
 GitCommitHash: tag v26.0-Alpha5（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha5.md）

@@ -24,6 +24,7 @@ namespace PclDlSwap.Payload.Swap
         private readonly HookBusImpl _hooks;
         private readonly UiImpl _ui;
         private readonly ReflectionImpl _reflect;
+        private readonly SurfaceIndex _surface = new SurfaceIndex();
 
         public HostApi(SwapShape shape, Assembly host)
         {
@@ -38,6 +39,7 @@ namespace PclDlSwap.Payload.Swap
         public IHooks Hooks => _hooks;
         public IUi Ui => _ui;
         public IReflection Reflect => _reflect;
+        public ISwapSurface Surface => _surface;
 
         public IData Data { get; private set; }
 

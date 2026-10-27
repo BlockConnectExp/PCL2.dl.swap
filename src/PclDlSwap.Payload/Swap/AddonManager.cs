@@ -231,6 +231,7 @@ namespace PclDlSwap.Payload.Swap
             public IUi Ui => _inner.Ui;
             public IData Data { get; }
             public IReflection Reflect => _inner.Reflect;
+            public ISwapSurface Surface => _inner.Surface;
             public void Log(string message) => _inner.Log(message);
             public void LogWarning(string message) => _inner.LogWarning(message);
             public void LogError(string message, Exception exception = null) => _inner.LogError(message, exception);

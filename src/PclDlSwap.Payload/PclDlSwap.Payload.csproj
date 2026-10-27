@@ -31,6 +31,9 @@
     <EmbeddedResource Include="Resources\pcl2swap-org-icon.png" />
     <!-- The ExLoader shape ships the payload alone, so the token manifest travels with it. -->
     <EmbeddedResource Include="..\..\data\offset-manifest.json" LogicalName="PclDlSwap.Payload.data.offset-manifest.json" />
+    <!-- The PclSurface dumps travel with the payload so addons can query the host surface. -->
+    <EmbeddedResource Include="..\..\data\pcl-surface-2.99.0.json" LogicalName="PclDlSwap.Payload.data.pcl-surface-2.99.0.json" />
+    <EmbeddedResource Include="..\..\data\pcl-surface-2.99.0.1.json" LogicalName="PclDlSwap.Payload.data.pcl-surface-2.99.0.1.json" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Web.Extensions" />

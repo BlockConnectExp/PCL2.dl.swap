@@ -235,6 +235,7 @@ namespace PclDlSwap.ExLoaderHarness
             if (args.Length >= 2 && args[0] == "--scantest") return RunScanPolicyTest(args[1]);
             if (args.Length >= 2 && args[0] == "--loaderhooktest") return RunLoaderHookTest(args[1]);
             if (args.Length >= 2 && args[0] == "--addontest") return RunAddonPlatformTest(args[1]);
+            if (args.Length >= 2 && args[0] == "--surfacetest") return RunSurfaceTest(args[1]);
 
             var reversedOta = args.Contains("--reversed-ota");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
@@ -250,6 +251,7 @@ namespace PclDlSwap.ExLoaderHarness
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --scantest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --loaderhooktest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --addontest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --surfacetest <payload.dll>");
                 return 2;
             }
 
@@ -586,6 +588,52 @@ namespace PclDlSwap.ExLoaderHarness
             }
 
             Console.WriteLine(failures == 0 ? "[manifest] RESULT: PASS" : "[manifest] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Regression test for the surface index: the payload must expose the embedded PclSurface
+        /// dump through ISwapApi.Surface and resolve known members with their metadata tokens.
+        /// </summary>
+        private static int RunSurfaceTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var failures = 0;
+            void Expect(string label, bool ok)
+            {
+                Console.WriteLine((ok ? "[surface] ok   " : "[surface] FAIL ") + label);
+                if (!ok) failures++;
+            }
+
+            var payload = Assembly.LoadFrom(full);
+            var hostType = payload.GetType("PclDlSwap.Payload.Swap.SwapHost", throwOnError: true);
+            hostType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static)
+                .Invoke(null, new object[] { PCL2Swap.Api.SwapShape.Injected, typeof(PCL.ModMain).Assembly });
+
+            var api = hostType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+            var surface = api?.GetType().GetProperty("Surface")?.GetValue(api);
+            Expect("surface exposed on ISwapApi", surface != null);
+
+            var findMethod = surface?.GetType().GetMethod("FindMethod");
+            var updateStart = findMethod?.Invoke(surface, new object[] { "PCL.ModSecret", "UpdateStart", 2 });
+            Expect("PCL.ModSecret.UpdateStart(bool, IEnumerable<string>) found", updateStart != null);
+            var token = Convert.ToString(updateStart?.GetType().GetProperty("Token")?.GetValue(updateStart));
+            Console.WriteLine("[surface] UpdateStart token=" + token);
+            Expect("token is 0x0600041F", token == "0x0600041F");
+
+            var typeCount = Convert.ToInt32(surface?.GetType().GetProperty("TypeCount")?.GetValue(surface) ?? 0);
+            Console.WriteLine("[surface] type count=" + typeCount);
+            Expect("index carries at least 200 types", typeCount > 200);
+
+            var search = surface?.GetType().GetMethod("Search")
+                ?.Invoke(surface, new object[] { "DlClientList", 20 }) as System.Collections.IEnumerable;
+            var hits = search?.Cast<object>().Count() ?? 0;
+            Console.WriteLine("[surface] search(DlClientList) hits=" + hits);
+            Expect("search finds the download loader family", hits > 0);
+
+            Console.WriteLine(failures == 0 ? "[surface] RESULT: PASS" : "[surface] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
         }
 

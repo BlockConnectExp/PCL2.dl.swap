@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
@@ -9,88 +10,97 @@ using PclDlSwap.Payload.Host;
 namespace PclDlSwap.Payload.Swap.Views
 {
     /// <summary>
-    /// "Swap Addon" settings page: lists built-in and installed addons with their live status.
-    /// Editing (enable/disable, import) arrives with the P1 addon manager work.
+    /// "Swap Addon" settings page: the installed addons with their live status, laid out with
+    /// PCL's own MyCard / MyButton so it reads like a shipped settings page. Editing (enable /
+    /// disable, import) arrives with the P1 addon manager work.
     /// </summary>
     internal static class SwapAddonView
     {
         public static FrameworkElement Build(ISwapApi api, AddonManager addons)
         {
-            var panel = new StackPanel { Margin = new Thickness(24, 18, 24, 24) };
-            panel.Children.Add(Header("Swap Addon"));
-            panel.Children.Add(Sub(
-                $"宿主 {api?.Host.SwapVersion ?? "?"} · 形状 {api?.Host.Shape.ToString() ?? "?"} · " +
-                $"API {api?.Host.ApiVersion ?? "?"} · 共 {addons?.Records.Count ?? 0} 个 Addon"));
+            var page = SwapUi.Page();
+            var records = addons?.Records;
 
-            if (addons != null)
+            var list = new List<FrameworkElement>();
+            if (records == null || records.Count == 0)
             {
-                foreach (var record in addons.Records)
-                    panel.Children.Add(Row(record));
+                list.Add(SwapUi.Note("尚未发现任何 Addon。把 .swapaddon 包放进 Addon 目录后重启 PCL 即可加载。"));
+            }
+            else
+            {
+                for (var index = 0; index < records.Count; index++)
+                {
+                    if (index > 0) list.Add(Separator());
+                    list.Add(Row(records[index]));
+                }
             }
 
-            panel.Children.Add(NewButton("打开 Addon 目录", () => OpenFolder(api?.Host.AddonDirectory)));
-            return Wrap(panel);
+            page.Children.Add(SwapUi.Card("已安装的 Addon", list.ToArray()));
+            page.Children.Add(SwapUi.Card("说明",
+                SwapUi.Note("内置 Addon 由宿主装配阶段启用，开关编辑将在后续版本接入。"),
+                SwapUi.Buttons(SwapUi.Button("打开 Addon 目录",
+                    () => OpenFolder(api?.Host.AddonDirectory)))));
+
+            return Wrap(page);
         }
 
         // ------------------------------------------------------------------ rows
 
         private static FrameworkElement Row(AddonManager.AddonRecord record)
         {
-            var panel = new StackPanel { Margin = new Thickness(0, 10, 0, 10) };
+            var grid = new Grid { Margin = new Thickness(0, 2, 0, 6) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var line = new StackPanel { Orientation = Orientation.Horizontal };
-            line.Children.Add(new TextBlock
+            var left = new StackPanel();
+
+            var headline = new StackPanel { Orientation = Orientation.Horizontal };
+            headline.Children.Add(SwapUi.Text(record.Name ?? record.Id, 13, false, false, FontWeights.SemiBold));
+            var meta = (record.Version ?? string.Empty) + (record.BuiltIn ? "  ·  内置" : string.Empty);
+            if (meta.Trim().Length > 0)
             {
-                Text = record.Name ?? record.Id,
-                FontWeight = FontWeights.SemiBold,
-                FontSize = 14
-            });
-            line.Children.Add(new TextBlock
-            {
-                Text = " " + (record.Version ?? string.Empty) + (record.BuiltIn ? "  ·  内置" : string.Empty),
-                Opacity = 0.6,
-                FontSize = 12,
-                Margin = new Thickness(4, 2, 0, 0)
-            });
-            line.Children.Add(new TextBlock
-            {
-                Text = StatusText(record),
-                Foreground = StatusBrush(record),
-                FontSize = 12,
-                Margin = new Thickness(12, 2, 0, 0)
-            });
-            panel.Children.Add(line);
+                var version = SwapUi.Text(meta, 11.5, true, false);
+                version.Margin = new Thickness(8, 3, 0, 0);
+                headline.Children.Add(version);
+            }
+            left.Children.Add(headline);
 
             if (!string.IsNullOrEmpty(record.Description))
             {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = record.Description,
-                    Opacity = 0.65,
-                    FontSize = 12,
-                    Margin = new Thickness(0, 3, 0, 0),
-                    TextWrapping = TextWrapping.Wrap
-                });
+                var description = SwapUi.Text(record.Description, 11.5, true);
+                description.Margin = new Thickness(0, 3, 12, 0);
+                left.Children.Add(description);
             }
 
             if (record.Failure != null)
             {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = "错误：" + record.Failure.Message,
-                    Foreground = Brushes.IndianRed,
-                    FontSize = 11,
-                    Margin = new Thickness(0, 3, 0, 0),
-                    TextWrapping = TextWrapping.Wrap
-                });
+                var failure = SwapUi.Text("错误：" + record.Failure.Message, 11.5, false);
+                failure.Foreground = Brushes.IndianRed;
+                failure.Margin = new Thickness(0, 3, 12, 0);
+                left.Children.Add(failure);
             }
 
-            return new Border
+            Grid.SetColumn(left, 0);
+            grid.Children.Add(left);
+
+            var status = SwapUi.Text(StatusText(record), 11.5, record.Status != "enabled", false);
+            status.VerticalAlignment = VerticalAlignment.Top;
+            status.Margin = new Thickness(16, 2, 0, 0);
+            Grid.SetColumn(status, 1);
+            grid.Children.Add(status);
+            return grid;
+        }
+
+        private static FrameworkElement Separator()
+        {
+            var line = new Border
             {
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0xE6, 0xE6, 0xE6)),
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Child = panel
+                Margin = new Thickness(0, 0, 0, 8)
             };
+            SwapUi.UseBrush(line, Border.BorderBrushProperty, "ColorBrush6");
+            line.Opacity = 0.6;
+            return line;
         }
 
         private static string StatusText(AddonManager.AddonRecord record)
@@ -104,70 +114,27 @@ namespace PclDlSwap.Payload.Swap.Views
             }
         }
 
-        private static Brush StatusBrush(AddonManager.AddonRecord record)
-        {
-            switch (record.Status)
-            {
-                case "enabled": return Brushes.SeaGreen;
-                case "failed": return Brushes.IndianRed;
-                default: return Brushes.Gray;
-            }
-        }
-
         // ------------------------------------------------------------------ chrome
 
-        internal static TextBlock Header(string text) => new TextBlock
-        {
-            Text = text,
-            FontSize = 20,
-            FontWeight = FontWeights.SemiBold
-        };
-
-        internal static TextBlock Sub(string text) => new TextBlock
-        {
-            Text = text,
-            Opacity = 0.65,
-            FontSize = 12,
-            Margin = new Thickness(0, 4, 0, 10),
-            TextWrapping = TextWrapping.Wrap
-        };
-
-        internal static Button NewButton(string text, Action onClick)
-        {
-            var button = new Button
-            {
-                Content = text,
-                Padding = new Thickness(12, 4, 12, 4),
-                Margin = new Thickness(0, 14, 0, 0),
-                HorizontalAlignment = HorizontalAlignment.Left
-            };
-            button.Click += (sender, args) =>
-            {
-                try { onClick(); }
-                catch (Exception ex) { Trace.WriteLine("[PCL2Swap] button failed: " + ex.Message); }
-            };
-            return button;
-        }
-
+        /// <summary>
+        /// PCL's animation helpers only recognise its own MyScrollViewer for the scroll-bar
+        /// flourish. Build one through the host type when possible; a stock ScrollViewer remains
+        /// the fallback so the page can never fail to render.
+        /// </summary>
         internal static FrameworkElement Wrap(FrameworkElement content)
         {
-            // PCL's animation helpers only recognise its own MyScrollViewer for the scroll-bar
-            // flourish. Build one through the host type when possible; a stock ScrollViewer
-            // remains the fallback so the page can never fail to render.
             try
             {
-                var host = SwapHost.HostAssembly;
-                var scrollType = host?.GetType("PCL.MyScrollViewer", throwOnError: false);
+                var scrollType = SwapUi.HostType("PCL.MyScrollViewer");
                 if (scrollType != null)
                 {
-                    var viewer = Activator.CreateInstance(scrollType);
-                    if (viewer is ScrollViewer stock)
+                    if (Activator.CreateInstance(scrollType) is ScrollViewer viewer)
                     {
-                        stock.Content = content;
-                        stock.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-                        stock.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+                        viewer.Content = content;
+                        viewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+                        viewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
                         SwapLog.Info("[page] 使用宿主 MyScrollViewer 承载视图。");
-                        return stock;
+                        return viewer;
                     }
                 }
             }
@@ -192,6 +159,5 @@ namespace PclDlSwap.Payload.Swap.Views
         }
     }
 }
-
 
 // GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

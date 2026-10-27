@@ -29,6 +29,7 @@ namespace PclDlSwap.Payload.Swap
         private static int _nextPageId = FirstPageId;
         private static Assembly _host;
         private static DetourInstaller _pageCheckDetour;
+        private static DetourInstaller _pageGetDetour;
         private static volatile bool _installed;
         private static volatile bool _sidebarDone;
 
@@ -83,6 +84,7 @@ namespace PclDlSwap.Payload.Swap
             }
 
             InstallPageCheckDetour();
+            InstallPageGetDetour();
             StartSidebarWatcher();
         }
 
@@ -113,6 +115,41 @@ namespace PclDlSwap.Payload.Swap
             }
         }
 
+        /// <summary>
+        /// PCL resolves the settings sub-page through PageGet whenever the user re-enters 设置
+        /// (FormMain.PageChangeActual -> FrmSetupLeft.PageGet(SubType = -1)), and PageGet's own
+        /// switch throws for any id it does not know. Without this hook the leftover PageID
+        /// 100/101 from our switch surfaces as "未知的设置子页面种类：101" the moment the user
+        /// leaves 设置 and comes back (field log 02:32:50). Returning the cached page keeps the
+        /// launcher's own导航 semantics intact and restores the Swap page on re-entry.
+        /// The enum parameter travels as int32; the original needs the boxed enum from the
+        /// target signature, so it is rebuilt before the fallthrough call.
+        /// </summary>
+        private static void InstallPageGetDetour()
+        {
+            try
+            {
+                var type = _host.GetType("PCL.PageSetupLeft", throwOnError: false);
+                var method = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .FirstOrDefault(candidate => candidate.Name == "PageGet" &&
+                                                 candidate.GetParameters().Length == 1);
+                if (method == null)
+                {
+                    SwapLog.Warn("Swap 页面：未找到 PageSetupLeft.PageGet，重进设置页可能报未知子页面。");
+                    return;
+                }
+
+                var hook = typeof(PageRegistry).GetMethod(nameof(HookPageGet),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                _pageGetDetour = DetourInstaller.Install(method, hook);
+                SwapLog.Info("Swap 页面：PageGet 钩子已安装（" + _pageGetDetour.Verify() + "）");
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Error("Swap 页面：PageGet 钩子安装失败：" + ex);
+            }
+        }
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static void HookPageCheck(object self, object sender, object eventArgs)
         {
@@ -133,6 +170,35 @@ namespace PclDlSwap.Payload.Swap
             }
 
             _pageCheckDetour.InvokeOriginal(self, sender, eventArgs);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static object HookPageGet(object self, int id)
+        {
+            try
+            {
+                var pageId = id;
+                if (pageId < 0)
+                    pageId = Convert.ToInt32(PclUi.GetMember(self, "PageID") ?? -1);
+
+                if (IsOurPage(pageId))
+                {
+                    SwapLog.Info($"[page] PageGet 命中 Swap 页（id={pageId}），返回已缓存的页面实例。");
+                    var page = GetOrCreatePage(pageId);
+                    if (page != null) return page;
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Error("[page] PageGet 钩子异常：" + ex);
+            }
+
+            var parameters = _pageGetDetour?.Method?.GetParameters();
+            var parameterType = parameters != null && parameters.Length > 0 ? parameters[0].ParameterType : null;
+            var original = parameterType != null && parameterType.IsEnum
+                ? Enum.ToObject(parameterType, id)
+                : (object)id;
+            return _pageGetDetour.InvokeOriginal(self, original);
         }
 
         // ------------------------------------------------------------------ navigation

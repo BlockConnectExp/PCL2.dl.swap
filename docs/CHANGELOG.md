@@ -6,6 +6,27 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-03:05:00 Alpha 4 repack 3: settings sub-page resolution + native card pages
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\PageRegistry.cs            + PageGet detour (host sub-page resolution)
+.\src\PclDlSwap.Payload\Swap\Views\SwapUi.cs            new (MyCard / MyButton / theme-brush builders)
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs     rewritten on the native card layout
+.\src\PclDlSwap.Payload\Swap\Views\SwapSettingsView.cs  rewritten on the native card layout
+.\src\PclDlSwap.ExLoaderHarness\Program.cs              + PCL.PageSetupLeft stub and --pagetest
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|PageRegistry|修复“切换主要页面失败（ID Setup）：未知的设置子页面种类：101”：宿主的 FormMain.PageChangeActual 会用残留的 PageID 调 PageSetupLeft.PageGet()，而 PageGet 的 switch 对 100/101 直接抛异常。现在对 PageGet 也装 detour：命中 Swap id 返回缓存页实例，真实 id 仍走宿主原实现（枚举参数以 int32 传递，回填原实现时按签名装箱）|2026.10.28-03:05:00|PCL2.dl.swap
+2|SwapUi / SwapAddonView / SwapSettingsView|两个 Swap 页面改用 PCL 原生外观：MyCard 卡片（标题行 + 25/40/25/25 内边距，与 Pages/PageSetup/PageSetupLaunch.xaml 一致）、MyButton 按钮（35 高、ColorType）、ColorBrush1 主题画笔、行式信息布局；宿主控件缺失时自动退回普通 WPF 布局|2026.10.28-03:05:00|PCL2.dl.swap
+3|Harness|新增 `--pagetest`：在真实 JIT 的 PCL.PageSetupLeft 桩上验证 PageCheck 放行/接管、PageGet(100/101) 返回缓存页、真实 id 仍走原实现（同时覆盖 enum→int 钩子 ABI）|2026.10.28-03:05:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-02:05:00 Alpha 4: Swap API base (surface index + typed PCL families) and the settings-sidebar crash fix
 
 GitCommitHash: (unreleased)

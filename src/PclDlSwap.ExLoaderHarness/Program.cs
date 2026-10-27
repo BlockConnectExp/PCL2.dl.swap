@@ -237,6 +237,7 @@ namespace PclDlSwap.ExLoaderHarness
             if (args.Length >= 2 && args[0] == "--addontest") return RunAddonPlatformTest(args[1]);
             if (args.Length >= 2 && args[0] == "--surfacetest") return RunSurfaceTest(args[1]);
             if (args.Length >= 2 && args[0] == "--pcltest") return RunPclAccessTest(args[1]);
+            if (args.Length >= 2 && args[0] == "--pagetest") return RunPageRegistryTest(args[1]);
 
             var reversedOta = args.Contains("--reversed-ota");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
@@ -254,6 +255,7 @@ namespace PclDlSwap.ExLoaderHarness
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --addontest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --surfacetest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --pcltest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --pagetest <payload.dll>");
                 return 2;
             }
 
@@ -590,6 +592,67 @@ namespace PclDlSwap.ExLoaderHarness
             }
 
             Console.WriteLine(failures == 0 ? "[manifest] RESULT: PASS" : "[manifest] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Regression test for the settings-page registry. Covers both detours:
+        ///   - PageCheck keeps routing PCL's own ids to the original body,
+        ///   - PageCheck takes over our ids (100/101) instead of letting the host throw,
+        ///   - PageGet (FormMain.PageChangeActual calls it with the leftover PageID when the user
+        ///     re-enters 设置) returns the cached swap page instead of "未知的设置子页面种类",
+        ///   - real ids still fall through to the host body.
+        /// The stub declares the same FormMain.PageSubType parameter shape as PCL, so the
+        /// enum/int hook ABI is exercised by a genuinely JIT-compiled method.
+        /// </summary>
+        private static int RunPageRegistryTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var failures = 0;
+            void Expect(string label, bool ok)
+            {
+                Console.WriteLine((ok ? "[page] ok   " : "[page] FAIL ") + label);
+                if (!ok) failures++;
+            }
+
+            var payload = Assembly.LoadFrom(full);
+            var hostType = payload.GetType("PclDlSwap.Payload.Swap.SwapHost", throwOnError: true);
+            hostType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static)
+                .Invoke(null, new object[] { PCL2Swap.Api.SwapShape.Injected, typeof(PCL.ModMain).Assembly });
+
+            var left = new PCL.PageSetupLeft();
+
+            // PCL's own entry: the hook must hand the call to the original body (which switches).
+            left.PageID = PCL.FormMain.PageSubType.Mod;
+            left.PageCheck(new PCL.MyListItem { Tag = "0" }, EventArgs.Empty);
+            Expect("PageCheck falls through for PCL's own ids",
+                PCL.PageSetupLeft.PageChangeRunCalls == 1 && left.PageID == PCL.FormMain.PageSubType.Default);
+
+            // Our sidebar ids: the host would throw "未知的设置子页面种类"; the swap must take over.
+            var before = PCL.PageSetupLeft.PageChangeRunCalls;
+            left.PageCheck(new PCL.MyListItem { Tag = "100" }, EventArgs.Empty);
+            Expect("PageCheck intercepts id 100 and drives the host switch",
+                PCL.PageSetupLeft.PageChangeRunCalls == before + 1);
+            Expect("the swap id is written back to PageID", Convert.ToInt32(left.PageID) == 100);
+            var page100 = left.PageGet((PCL.FormMain.PageSubType)(-1));
+            Expect("PageGet(-1) resolves the swap page from PageID", page100 is PCL.MyPageRight);
+
+            left.PageCheck(new PCL.MyListItem { Tag = "101" }, EventArgs.Empty);
+            Expect("the second swap page is registered the same way", Convert.ToInt32(left.PageID) == 101);
+            var page101 = left.PageGet((PCL.FormMain.PageSubType)101);
+            Expect("PageGet(101) returns the cached page instead of throwing", page101 is PCL.MyPageRight);
+            Expect("each swap id keeps its own page instance", !ReferenceEquals(page100, page101));
+            Expect("PageGet(-1) follows the current PageID (101)",
+                ReferenceEquals(left.PageGet((PCL.FormMain.PageSubType)(-1)), page101));
+
+            // Real ids keep the host behaviour.
+            var hostPage = left.PageGet(PCL.FormMain.PageSubType.Default);
+            Expect("PageGet(Default) still reaches the host body",
+                hostPage is PCL.MyPageRight && !ReferenceEquals(hostPage, page101));
+
+            Console.WriteLine(failures == 0 ? "[page] RESULT: PASS" : "[page] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
         }
 
@@ -1431,6 +1494,12 @@ namespace PCL
         public static object LastPanContent;
         public static object LastRealLoader;
 
+        // The swap registry moves a page between the host's panels; keep the three members it
+        // touches so the harness can exercise GetOrCreatePage for real.
+        public object Child;
+        public object PanContent;
+        public object PanAlways;
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         public void PageLoaderInit<TIn, TOut>(object loaderUi, object panLoader, object panContent, object panAlways,
             LoaderTask<TIn, TOut> realLoader, Action<LoaderTask<TIn, TOut>> finished, Func<TIn> input, bool autoRun)
@@ -1516,6 +1585,60 @@ namespace PCL
         public string Title { get; set; }
         public string Info { get; set; }
         public string Logo { get; set; }
+        /// <summary>PCL stores the settings sub-page id here; the swap registry reads it back.</summary>
+        public object Tag { get; set; }
+    }
+
+    /// <summary>
+    /// Stand-in for PCL.PageSetupLeft. The swap registry detours both PageCheck and PageGet, so the
+    /// harness can reproduce the field bug where the leftover PageID 100/101 reached
+    /// FormMain.PageChangeActual -> PageGet and blew up with "未知的设置子页面种类：101".
+    /// PageChange/PageGet mirror PCL's own semantics: known ids switch, unknown ids throw.
+    /// </summary>
+    public class PageSetupLeft
+    {
+        public static int PageChangeRunCalls;
+        public static object LastChangedPage;
+
+        public FormMain.PageSubType PageID = FormMain.PageSubType.Default;
+        public bool IsPageSwitched;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void PageCheck(MyListItem sender, EventArgs e)
+        {
+            if (sender.Tag != null)
+                PageChange((FormMain.PageSubType)Convert.ToInt32(sender.Tag));
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void PageChange(FormMain.PageSubType id)
+        {
+            if (PageID == id) return;
+            switch (id)
+            {
+                case FormMain.PageSubType.Default:
+                    PageChangeRun(new MyPageRight());
+                    break;
+                default:
+                    throw new Exception("未知的设置子页面种类：" + Convert.ToInt32(id));
+            }
+            PageID = id;
+        }
+
+        // The registry replays the host's navigation through this private static method.
+        private static void PageChangeRun(object page)
+        {
+            PageChangeRunCalls++;
+            LastChangedPage = page;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public object PageGet(FormMain.PageSubType id = (FormMain.PageSubType)(-1))
+        {
+            if (id == (FormMain.PageSubType)(-1)) id = PageID;
+            if (id == FormMain.PageSubType.Default) return new MyPageRight();
+            throw new Exception("未知的设置子页面种类：" + Convert.ToInt32(id));
+        }
     }
 
     /// <summary>Stand-in for PCL.FormMain carrying the PageSubType enum.</summary>

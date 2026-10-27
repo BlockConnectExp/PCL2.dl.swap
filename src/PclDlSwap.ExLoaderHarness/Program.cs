@@ -285,6 +285,12 @@ namespace PclDlSwap.ExLoaderHarness
             DumpPrologue("PageOtherAbout..ctor",
                 typeof(PCL.PageOtherAbout).GetConstructors().First());
 
+            // Simulate the field case "download page is already open when the payload arrives":
+            // seed FrmDownloadInstall before injection so the redrive watcher has to repair it.
+            var preseeded = new PCL.PageDownloadInstall();
+            PCL.ModMain.FrmDownloadInstall = preseeded;
+            Console.WriteLine("[harness] preseeded FrmDownloadInstall (pre-injection)");
+
             var module = LoadLibraryW(shim);
             Console.WriteLine("[harness] LoadLibrary -> 0x" + module.ToInt64().ToString("X") +
                               " (win32=" + Marshal.GetLastWin32Error() + ")");
@@ -369,13 +375,13 @@ namespace PclDlSwap.ExLoaderHarness
             checks.Add(("feedback routing asks the host dialog first", feedbackRouted,
                 "msgBoxCalls=" + PCL.ModMain.MsgBoxCalls + " originalCalls=" + Probes.FeedbackCalls));
 
-            // -- LoaderInit: the real download loader must be re-driven with live page controls --
-            Console.WriteLine("[step] LoaderInit re-drive ...");
-            PCL.MyPageRight.LoaderInitCalls = 0;
-            PCL.PageDownloadInstall.ControlInitCalls = 0;
-            PCL.PageDownloadInstall.OnFinishCalls = 0;
-            var installer = new PCL.PageDownloadInstall();
-            installer.LoaderInit();
+            // -- LoaderInit: the redrive watcher must re-run it on the pre-existing page, and the
+            //    hook must feed the real loader with the live page controls. Counters are NOT reset
+            //    here: the watcher may already have completed during the earlier steps.
+            Console.WriteLine("[step] LoaderInit re-drive (via redrive watcher) ...");
+            var loaderDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+            while (DateTime.UtcNow < loaderDeadline && PCL.MyPageRight.LoaderInitCalls == 0)
+                Thread.Sleep(200);
             var loaderOk = PCL.MyPageRight.LoaderInitCalls == 1 &&
                            PCL.MyPageRight.LastLoaderUi != null &&
                            PCL.MyPageRight.LastPanLoader != null &&
@@ -444,7 +450,7 @@ namespace PclDlSwap.ExLoaderHarness
             // keep the instances alive past the checks (the JIT must not see them as dead stores)
             GC.KeepAlive(sidebar);
             GC.KeepAlive(about);
-            GC.KeepAlive(installer);
+            GC.KeepAlive(preseeded);
 
             Console.WriteLine();
             var failed = 0;

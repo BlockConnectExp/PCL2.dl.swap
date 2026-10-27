@@ -23,6 +23,7 @@ namespace PclDlSwap.Payload.Features
     {
         private static DetourInstaller _loaderDetour;
         private static volatile bool _sidebarFixed;
+        private static volatile bool _realLoaderSeen;
         private static int _sidebarAttempts;
 
         /// <summary>
@@ -42,6 +43,55 @@ namespace PclDlSwap.Payload.Features
         {
             InstallLoader(host);
             InstallSidebar(host);
+            StartRedriveWatcher(host);
+        }
+
+        /// <summary>
+        /// The loader detour only fires when LoaderInit runs. If the download page already exists by
+        /// the time the payload is injected ("open the page first, inject later"), its gate-era
+        /// loader has already failed and nothing would ever re-run it. This watcher re-drives
+        /// LoaderInit on such a page - but only while our real-loader path has never completed, so a
+        /// healthy page is left alone.
+        /// </summary>
+        private static void StartRedriveWatcher(Assembly host)
+        {
+            var watcher = new Thread(() =>
+            {
+                var deadline = DateTime.UtcNow.AddMinutes(30);
+                var lastAttempt = DateTime.MinValue;
+                while (!_realLoaderSeen && DateTime.UtcNow < deadline)
+                {
+                    try
+                    {
+                        var modMain = host.GetType("PCL.ModMain", throwOnError: false);
+                        var page = PclUi.GetMember(modMain, "FrmDownloadInstall");
+                        if (page != null && (DateTime.UtcNow - lastAttempt).TotalSeconds >= 5)
+                        {
+                            lastAttempt = DateTime.UtcNow;
+                            SwapLog.Info("下载页重驱：检测到既有页面且真实装载器未运行，重跑 LoaderInit。");
+                            PclUi.OnUiThread(() =>
+                            {
+                                try { PclUi.Invoke(page, "LoaderInit"); }
+                                catch (Exception ex) { SwapLog.Error("下载页重驱失败：" + ex); }
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        SwapLog.Warn("下载页重驱探测异常：" + ex.Message);
+                    }
+
+                    Thread.Sleep(300);
+                }
+
+                if (_realLoaderSeen) SwapLog.Info("下载页重驱：真实装载器已在运行，看门结束。");
+                else SwapLog.Warn("下载页重驱：等待超时（30 分钟），未捕获到既有页面。");
+            })
+            {
+                IsBackground = true,
+                Name = "PCL2Swap.DownloadRedrive"
+            };
+            watcher.Start();
         }
 
         private static void InstallLoader(Assembly host)
@@ -342,6 +392,7 @@ namespace PclDlSwap.Payload.Features
                 }
 
                 closed.Invoke(self, new[] { loadMinecraft, panLoad, panAllBack, null, realLoader, finish, null, true });
+                _realLoaderSeen = true;
                 SwapLog.Info("下载页已使用真实装载器初始化（DlClientListLoader）。");
             }
             catch (Exception ex)

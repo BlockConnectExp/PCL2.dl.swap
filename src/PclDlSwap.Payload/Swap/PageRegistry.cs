@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Windows;
+using System.Windows.Controls;
 using PCL2Swap.Api;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
@@ -118,6 +119,8 @@ namespace PclDlSwap.Payload.Swap
             try
             {
                 var tag = PclUi.GetMember(sender, "Tag");
+                SwapLog.Info($"[page] PageCheck 钩子进入（tag={tag ?? "(null)"}，" +
+                             $"sender={sender?.GetType().Name ?? "null"}，线程 {Thread.CurrentThread.ManagedThreadId}）");
                 if (tag != null && int.TryParse(Convert.ToString(tag), out var id) && IsOurPage(id))
                 {
                     SwitchToPage(self, id);
@@ -143,6 +146,7 @@ namespace PclDlSwap.Payload.Swap
         {
             lock (Gate)
             {
+                SwapLog.Info($"[page] SwitchToPage 进入（id={id}，线程 {Thread.CurrentThread.ManagedThreadId}）");
                 try
                 {
                     var page = GetOrCreatePage(id);
@@ -162,6 +166,7 @@ namespace PclDlSwap.Payload.Swap
                         // (the switch would throw on our ids - this is the same class of bug as
                         // the 2.99.0.1 sidebar crash fixed in Alpha 2).
                         PclUi.SetMember(pageLeft, "IsPageSwitched", true);
+                        SwapLog.Info("[page] 调用宿主的 PageChangeRun（含 130ms 动画序列）");
                         var run = pageLeft.GetType().GetMethod("PageChangeRun",
                             BindingFlags.NonPublic | BindingFlags.Static);
                         run?.Invoke(null, new[] { page });
@@ -177,11 +182,11 @@ namespace PclDlSwap.Payload.Swap
                             PclUi.SetMember(aniType, "AniControlEnabled", original);
                     }
 
-                    SwapLog.Info($"Swap 页面：已切换到 PageID {id}。");
+                    SwapLog.Info($"[page] SwitchToPage 同步部分完成（id={id}）。");
                 }
                 catch (Exception ex)
                 {
-                    SwapLog.Error("Swap 页面：切换失败：" + ex);
+                    SwapLog.Error($"[page] SwitchToPage 失败（id={id}）：" + ex);
                 }
             }
         }
@@ -204,9 +209,22 @@ namespace PclDlSwap.Payload.Swap
 
             var page = Activator.CreateInstance(pageType);
             FrameworkElement view = null;
-            try { view = entry.Factory(); }
+            try
+            {
+                SwapLog.Info($"[page] 构建视图（id={id}，{entry.LogicalId}）");
+                view = entry.Factory();
+            }
             catch (Exception ex) { SwapLog.Error("Swap 页面：视图构建失败：" + ex); }
-            if (view != null) PclUi.SetMember(page, "Child", view);
+            if (view != null)
+            {
+                // Mirror the shape of PCL's own pages: PanContent carries the view (animations use
+                // "PanContent ?? Child") and PanAlways gets an empty container so no host helper
+                // ever has to reason about a null field.
+                try { PclUi.SetMember(page, "PanAlways", new Grid()); } catch { }
+                try { PclUi.SetMember(page, "PanContent", view); } catch { }
+                PclUi.SetMember(page, "Child", view);
+            }
+            SwapLog.Info($"[page] 页面实例已创建（id={id}，view={view?.GetType().FullName ?? "null"}）");
 
             lock (Gate) { entry.Instance = page; }
             return page;
@@ -321,11 +339,17 @@ namespace PclDlSwap.Payload.Swap
             try
             {
                 var tag = PclUi.GetMember(sender, "Tag");
+                SwapLog.Info($"[page] 侧栏项点击（tag={tag ?? "(null)"}，线程 {Thread.CurrentThread.ManagedThreadId}）");
                 if (tag == null || !int.TryParse(Convert.ToString(tag), out var id) || !IsOurPage(id)) return;
 
                 var modMain = _host.GetType("PCL.ModMain", throwOnError: false);
                 var pageSetupLeft = PclUi.GetMember(modMain, "FrmSetupLeft");
-                if (pageSetupLeft != null) SwitchToPage(pageSetupLeft, id);
+                if (pageSetupLeft == null)
+                {
+                    SwapLog.Warn("[page] 侧栏点击：FrmSetupLeft 为空，无法切换。");
+                    return;
+                }
+                SwitchToPage(pageSetupLeft, id);
             }
             catch (Exception ex)
             {

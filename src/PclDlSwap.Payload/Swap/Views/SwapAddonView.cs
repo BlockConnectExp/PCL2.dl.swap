@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using PCL2Swap.Api;
+using PclDlSwap.Payload.Host;
 
 namespace PclDlSwap.Payload.Swap.Views
 {
@@ -148,12 +149,40 @@ namespace PclDlSwap.Payload.Swap.Views
             return button;
         }
 
-        internal static ScrollViewer Wrap(FrameworkElement content) => new ScrollViewer
+        internal static FrameworkElement Wrap(FrameworkElement content)
         {
-            Content = content,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
-        };
+            // PCL's animation helpers only recognise its own MyScrollViewer for the scroll-bar
+            // flourish. Build one through the host type when possible; a stock ScrollViewer
+            // remains the fallback so the page can never fail to render.
+            try
+            {
+                var host = SwapHost.HostAssembly;
+                var scrollType = host?.GetType("PCL.MyScrollViewer", throwOnError: false);
+                if (scrollType != null)
+                {
+                    var viewer = Activator.CreateInstance(scrollType);
+                    if (viewer is ScrollViewer stock)
+                    {
+                        stock.Content = content;
+                        stock.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+                        stock.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+                        SwapLog.Info("[page] 使用宿主 MyScrollViewer 承载视图。");
+                        return stock;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("[page] MyScrollViewer 构建失败，退回标准 ScrollViewer：" + ex.Message);
+            }
+
+            return new ScrollViewer
+            {
+                Content = content,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+            };
+        }
 
         internal static void OpenFolder(string path)
         {

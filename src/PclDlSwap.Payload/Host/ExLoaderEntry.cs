@@ -92,7 +92,7 @@ namespace PclDlSwap.Payload.Host
                 }
             };
 
-            SwapLog.Info("依赖解析器已安装（Gee.External.Capstone / MonoMod.Utils / Mono.Cecil → 解包目录）。");
+            SwapLog.Info("依赖解析器已安装（PCL2Swap.Api / Gee.External.Capstone / MonoMod.Utils / Mono.Cecil → 解包目录）。");
         }
 
         private static Assembly WaitForHostAssembly(TimeSpan timeout)

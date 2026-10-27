@@ -13,10 +13,10 @@ namespace PclDlSwap.Payload.Host
         private static bool _hostLoggerProbed;
 
         /// <summary>Displayed version of the tool, reused by the About page entry.</summary>
-        public const string ToolVersion = "v26.0-Alpha 2";
+        public const string ToolVersion = "v26.0-Alpha 3";
 
         /// <summary>File-system friendly form of <see cref="ToolVersion"/>.</summary>
-        public const string ToolVersionCompact = "v26.0-Alpha2";
+        public const string ToolVersionCompact = "v26.0-Alpha3";
 
         /// <summary>
         /// Primary log lives under %TEMP% so the injected form always has a writable, predictable
@@ -29,6 +29,8 @@ namespace PclDlSwap.Payload.Host
         public static void Info(string message) => Write("info", message);
         public static void Warn(string message) => Write("warn", message);
         public static void Error(string message) => Write("error", message);
+        public static void Error(string message, Exception exception) =>
+            Write("error", exception == null ? message : message + " | " + exception);
 
         private static void Write(string level, string message)
         {

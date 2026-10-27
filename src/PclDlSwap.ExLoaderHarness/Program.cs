@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -233,6 +234,7 @@ namespace PclDlSwap.ExLoaderHarness
             if (args.Length >= 3 && args[0] == "--manifest") return RunManifestTest(args[1], args[2]);
             if (args.Length >= 2 && args[0] == "--scantest") return RunScanPolicyTest(args[1]);
             if (args.Length >= 2 && args[0] == "--loaderhooktest") return RunLoaderHookTest(args[1]);
+            if (args.Length >= 2 && args[0] == "--addontest") return RunAddonPlatformTest(args[1]);
 
             var reversedOta = args.Contains("--reversed-ota");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
@@ -247,6 +249,7 @@ namespace PclDlSwap.ExLoaderHarness
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --manifest <payload.dll> <host.exe>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --scantest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --loaderhooktest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --addontest <payload.dll>");
                 return 2;
             }
 
@@ -577,6 +580,98 @@ namespace PclDlSwap.ExLoaderHarness
             }
 
             Console.WriteLine(failures == 0 ? "[manifest] RESULT: PASS" : "[manifest] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// End-to-end test for the Swap API platform: packs the sample addon into a real
+        /// .swapaddon archive (manifest + net48 dll), starts SwapHost against the harness
+        /// stand-in host and asserts that the three built-ins plus the packed addon load,
+        /// validate and enable - i.e. the addon package format works end to end.
+        /// </summary>
+        private static int RunAddonPlatformTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var failures = 0;
+            void Expect(string label, bool ok)
+            {
+                Console.WriteLine((ok ? "[addon] ok   " : "[addon] FAIL ") + label);
+                if (!ok) failures++;
+            }
+
+            var addonRoot = Path.Combine(Path.GetTempPath(), "PCL2Swap", "addons");
+            Directory.CreateDirectory(addonRoot);
+            var archive = Path.Combine(addonRoot, "test.sample.swapaddon");
+            var unpacked = Path.Combine(addonRoot, "test.sample");
+            var payload = Assembly.LoadFrom(full);
+
+            try
+            {
+                if (File.Exists(archive)) File.Delete(archive);
+                using (var zip = new ZipArchive(File.Create(archive), ZipArchiveMode.Create))
+                {
+                    var manifest = zip.CreateEntry("manifest.json");
+                    using (var writer = new StreamWriter(manifest.Open(), new UTF8Encoding(false)))
+                    {
+                        writer.Write("{\"schema\":1,\"id\":\"test.sample\",\"name\":\"Sample Addon\"," +
+                                     "\"version\":\"1.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
+                                     "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\"," +
+                                     "\"description\":\"harness sample\"}");
+                    }
+                    var dllEntry = zip.CreateEntry("PCL2Swap.SampleAddon.dll");
+                    using (var target = dllEntry.Open())
+                    using (var source = File.OpenRead(typeof(PCL2Swap.SampleAddon.SampleAddon).Assembly.Location))
+                        source.CopyTo(target);
+                }
+                Console.WriteLine("[addon] packed " + archive);
+
+                var hostType = payload.GetType("PclDlSwap.Payload.Swap.SwapHost", throwOnError: true);
+                var start = hostType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static);
+                start.Invoke(null, new object[] { PCL2Swap.Api.SwapShape.Injected, typeof(PCL.ModMain).Assembly });
+
+                var manager = hostType.GetProperty("Addons", BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null);
+                var records = (manager?.GetType().GetProperty("Records")?.GetValue(manager) as System.Collections.IEnumerable)
+                    ?.Cast<object>().ToList() ?? new List<object>();
+                Console.WriteLine("[addon] records: " + records.Count);
+                foreach (var record in records)
+                {
+                    var recordType = record.GetType();
+                    Console.WriteLine("  - " + recordType.GetProperty("Id").GetValue(record) +
+                                      " status=" + recordType.GetProperty("Status").GetValue(record));
+                }
+
+                Expect("host started with three built-ins plus the packed addon", records.Count == 4);
+                var sample = records.FirstOrDefault(record => Convert.ToString(
+                    record.GetType().GetProperty("Id").GetValue(record)) == "test.sample");
+                Expect("sample addon discovered", sample != null);
+                Expect("sample addon enabled",
+                    sample != null && Convert.ToString(sample.GetType().GetProperty("Status").GetValue(sample)) == "enabled");
+
+                // The loader unpacks the dll and loads it from its own directory, so the counters
+                // must be read from that instance, not from the copy this process references.
+                var instance = sample?.GetType().GetProperty("Instance")?.GetValue(sample);
+                var instanceType = instance?.GetType();
+                int StaticInt(string name) => instanceType == null
+                    ? -1
+                    : Convert.ToInt32(instanceType.GetField(name, BindingFlags.Public | BindingFlags.Static)?.GetValue(null) ?? -1);
+                string StaticString(string name) => instanceType == null
+                    ? null
+                    : Convert.ToString(instanceType.GetField(name, BindingFlags.Public | BindingFlags.Static)?.GetValue(null));
+
+                Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
+                Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.0.0");
+            }
+            finally
+            {
+                // Leave the real addon directory exactly as found.
+                try { if (File.Exists(archive)) File.Delete(archive); } catch { }
+                try { if (Directory.Exists(unpacked)) Directory.Delete(unpacked, true); } catch { }
+            }
+
+            Console.WriteLine(failures == 0 ? "[addon] RESULT: PASS" : "[addon] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
         }
 

@@ -5,6 +5,9 @@
       101  PclDlSwap.Payload.dll        managed payload
       102  Gee.External.Capstone.dll    managed Capstone wrapper
       103  capstone.dll                 native Capstone (win-x64)
+      104  MonoMod.Utils.dll            IL-copy engine
+      105  Mono.Cecil.dll               IL reading/writing
+      106  PCL2Swap.Api.dll             addon SDK surface
 
     Outputs (under dist\exloader\):
       Pcl2Swap.Shim.x64.dll   upload this file to the ExLoader injector card
@@ -30,6 +33,7 @@ $wrapperDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\Gee.Exte
 $capstoneX64 = Join-Path $env:USERPROFILE ".nuget\packages\gee.external.capstone\2.3.0\runtimes\win-x64\native\capstone.dll"
 $monoModDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\MonoMod.Utils.dll"
 $cecilDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\Mono.Cecil.dll"
+$apiDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\PCL2Swap.Api.dll"
 
 if (-not $SkipPayloadBuild) {
     Write-Host "[shim] building payload ($Configuration)"
@@ -37,7 +41,7 @@ if (-not $SkipPayloadBuild) {
     if ($LASTEXITCODE -ne 0) { throw 'payload build failed' }
 }
 
-foreach ($input in @($payloadDll, $wrapperDll, $capstoneX64, $monoModDll, $cecilDll)) {
+foreach ($input in @($payloadDll, $wrapperDll, $capstoneX64, $monoModDll, $cecilDll, $apiDll)) {
     if (-not (Test-Path -LiteralPath $input)) { throw "missing input: $input" }
 }
 
@@ -58,6 +62,7 @@ $rc = @"
 103 RCDATA "$($capstoneX64 -replace '\\', '/')"
 104 RCDATA "$($monoModDll -replace '\\', '/')"
 105 RCDATA "$($cecilDll -replace '\\', '/')"
+106 RCDATA "$($apiDll -replace '\\', '/')"
 "@
 Set-Content -LiteralPath (Join-Path $workDir 'Pcl2Swap.Shim.rc') -Value $rc -Encoding ASCII
 

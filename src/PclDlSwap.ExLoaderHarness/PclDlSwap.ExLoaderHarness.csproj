@@ -24,6 +24,13 @@
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="System.Xaml" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- addontest packs the sample addon into a real .swapaddon and drives the swap host. -->
+    <ProjectReference Include="..\PCL2Swap.Api\PCL2Swap.Api.csproj" />
+    <ProjectReference Include="..\PCL2Swap.SampleAddon\PCL2Swap.SampleAddon.csproj" />
   </ItemGroup>
 </Project>
 

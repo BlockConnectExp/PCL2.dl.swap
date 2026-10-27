@@ -5,9 +5,11 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using PCL2Swap.Api;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Features;
 using PclDlSwap.Payload.Sandbox;
+using PclDlSwap.Payload.Swap;
 
 namespace PclDlSwap.Payload.Host
 {
@@ -102,6 +104,7 @@ namespace PclDlSwap.Payload.Host
                     InstallPermissionBlock(host, PclProfile);
                     InstallDownloadGate(host, PclProfile);
                     InstallUiFeatures(host);
+                    SwapHost.Start(SwapShape.Injected, host);
                     _installed = true;
                     SwapLog.Info("注入式装配完成。");
                 }

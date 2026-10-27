@@ -6,6 +6,43 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.27-19:30:00 Alpha 3: Swap API platform - SDK, addon packages and settings pages
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\                                     new (SDK 1.0.0)
+.\src\PCL2Swap.SampleAddon\                             new (reference addon)
+.\src\PclDlSwap.Payload\Swap\HostApi.cs                 new
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs            new
+.\src\PclDlSwap.Payload\Swap\AddonManifestReader.cs     new
+.\src\PclDlSwap.Payload\Swap\PageRegistry.cs            new
+.\src\PclDlSwap.Payload\Swap\SwapHost.cs                new
+.\src\PclDlSwap.Payload\Swap\BuiltInAddons.cs           new
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs     new
+.\src\PclDlSwap.Payload\Swap\Views\SwapSettingsView.cs  new
+.\src\PclDlSwap.Payload\Host\CoreInstaller.cs           + SwapHost.Start (injected)
+.\src\PclDlSwap.Payload\Host\Bootstrap.cs               + SwapHost.Start (patched, reserved)
+.\src\PclDlSwap.Payload\Host\SwapLog.cs                 + Error(msg, ex)
+.\src\Pcl2Swap.Shim\Shim.cpp                            + RCDATA 106 (PCL2Swap.Api.dll)
+.\src\Pcl2Swap.Shim\build.ps1                           + api assembly input
+.\src\PclDlSwap.ExLoaderHarness\Program.cs              + --addontest
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|PCL2Swap.Api|New addon SDK (1.0.0): `ISwapAddon` lifecycle, `ISwapApi` facade (Host/Hooks/Ui/Data/Reflect), semantic event args, `AddonManifest` model, `SwapPaths` and an `apiVersion` range check. Addons compile against this stable contract; the payload implements it|2026.10.27-19:30:00|PCL2.dl.swap
+2|SwapHost|The payload now hosts the platform: `HostApi` (readable wrappers over the reflection bridge, the v2 detour engine and SwapLog), `AddonManager` (.swapaddon unpack with zip-slip guard, manifest validation, `ISwapAddon` discovery, per-addon failure isolation) and three built-in addons - Download MC, OTA Protector, Cancel Button|2026.10.27-19:30:00|PCL2.dl.swap
+3|PageRegistry|Adds 设置 sidebar pages "Swap Addon" and "Swap Settings": detours `PageSetupLeft.PageCheck`, inserts two `MyListItem` entries (Tag=100/101, RadioBox) and replays the official navigation semantics (`AniControlEnabled` / `IsPageSwitched` / `PageChangeRun` / `PageID`) because `PageChange`'s switch throws on unknown ids. Pages are plain `MyPageRight` instances whose `Child` is the view (measured: the constructor builds no UI and animations follow `PanContent ?? Child`)|2026.10.27-19:30:00|PCL2.dl.swap
+4|Views|`SwapAddonView` lists built-in and installed addons with live status and errors; `SwapSettingsView` shows host facts and the scan policy verbatim|2026.10.27-19:30:00|PCL2.dl.swap
+5|Shim|Embeds `PCL2Swap.Api.dll` as RCDATA 106 and extracts it next to the payload so the dependency resolver finds it; `TOOL_VERSION` -> v26.0-Alpha3|2026.10.27-19:30:00|PCL2.dl.swap
+6|Harness|`--addontest` packs a real .swapaddon with the sample addon and asserts unpack -> manifest validation -> discovery -> OnLoad/OnEnable -> API version end to end. Full suite PASS: copytest, hooktest, uitest, scantest, loaderhooktest, addontest, manifest (2.99.0 + 2.99.0.1) and the 10/10 integration run|2026.10.27-19:30:00|PCL2.dl.swap
+
+version: v26.0-Alpha 3
+
+---
 ## 2026.10.26-22:40:00 Alpha 2 (release cut): download-path performance and sidebar crash fixes
 
 > 版本号规则（Owner，2026-10-26）：Alpha 号随**发布**递增。Alpha 1 是唯一已发布版本，因此本次

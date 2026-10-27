@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <AssemblyName>PCL2Swap.Api</AssemblyName>
+    <RootNamespace>PCL2Swap.Api</RootNamespace>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>1.0.0</Version>
+    <Company>OxygenAILab</Company>
+    <Product>PCL2Swap Addon SDK</Product>
+    <Description>Readable API surface for PCL2 Swap addons.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Addons build real WPF pages, so the SDK carries the desktop references. -->
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Xaml" />
+  </ItemGroup>
+</Project>

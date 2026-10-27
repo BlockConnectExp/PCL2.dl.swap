@@ -39,7 +39,7 @@ data/offset-manifest.json           per-build tokens and RVAs
 Expected output:
 
 ```
-PCL2 DLL-Swap loader (v26.0-Alpha 2)
+PCL2 DLL-Swap loader (v26.0-Alpha 3)
   目标    : D:\PCL\Plain Craft Launcher 2.exe
   原版哈希: 6b6e1260cb5a1d6a…
   PageDownloadInstall.LoaderInit -> 恢复 ModDownload.DlClientListLoader

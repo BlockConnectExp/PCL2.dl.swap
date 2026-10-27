@@ -25,6 +25,9 @@
     <PackageReference Include="MonoMod.Utils" Version="22.1.0" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\PCL2Swap.Api\PCL2Swap.Api.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="Resources\pcl2swap-org-icon.png" />
     <!-- The ExLoader shape ships the payload alone, so the token manifest travels with it. -->
     <EmbeddedResource Include="..\..\data\offset-manifest.json" LogicalName="PclDlSwap.Payload.data.offset-manifest.json" />
@@ -33,5 +36,14 @@
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Drawing" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Swap settings pages are real WPF content; the addon manager unpacks .swapaddon zips. -->
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
   </ItemGroup>
 </Project>

@@ -7,7 +7,9 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using PCL2Swap.Api;
 using PclDlSwap.Payload.Sandbox;
+using PclDlSwap.Payload.Swap;
 
 namespace PclDlSwap.Payload.Host
 {
@@ -41,6 +43,10 @@ namespace PclDlSwap.Payload.Host
                 SwapLog.Info("更新落地看门狗已启动。");
 
                 InstallDownloadGate();
+
+                // The platform layer starts for both shapes; the patch shape reaches this through
+                // the static bootstrap call once that wiring lands (research doc section 6.2).
+                SwapHost.Start(SwapShape.Patched, Assembly.GetEntryAssembly());
 
                 if (string.Equals(argument, "disk-patch", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(argument, "bootstrap-only", StringComparison.OrdinalIgnoreCase))

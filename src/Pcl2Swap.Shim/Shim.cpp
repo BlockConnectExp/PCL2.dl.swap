@@ -23,14 +23,16 @@
 #define CAPSTONE_RES_ID   103
 #define MONOMOD_RES_ID    104
 #define CECIL_RES_ID      105
+#define API_RES_ID        106
 #define PAYLOAD_ASM_NAME  L"PclDlSwap.Payload.dll"
 #define CLRWRAPPER_NAME   L"Gee.External.Capstone.dll"
 #define CAPSTONE_NAME     L"capstone.dll"
 #define MONOMOD_NAME      L"MonoMod.Utils.dll"
 #define CECIL_NAME        L"Mono.Cecil.dll"
+#define API_ASM_NAME      L"PCL2Swap.Api.dll"
 #define ENTRY_TYPE        L"PclDlSwap.Payload.Host.ExLoaderEntry"
 #define ENTRY_METHOD      L"Activate"
-#define TOOL_VERSION      L"v26.0-Alpha2"
+#define TOOL_VERSION      L"v26.0-Alpha3"
 
 // GUIDs from metahost.h, spelled out so no import library is needed.
 static const GUID kClsidClrMetaHost =
@@ -54,6 +56,7 @@ static wchar_t g_clrWrapperPath[MAX_PATH];
 static wchar_t g_capstonePath[MAX_PATH];
 static wchar_t g_monoModPath[MAX_PATH];
 static wchar_t g_cecilPath[MAX_PATH];
+static wchar_t g_apiPath[MAX_PATH];
 
 static void AppendLog(const wchar_t* text)
 {
@@ -228,12 +231,14 @@ static DWORD WINAPI WorkerThread(LPVOID parameter)
     lstrcpyW(g_capstonePath, directory);   lstrcatW(g_capstonePath, CAPSTONE_NAME);
     lstrcpyW(g_monoModPath, directory);    lstrcatW(g_monoModPath, MONOMOD_NAME);
     lstrcpyW(g_cecilPath, directory);      lstrcatW(g_cecilPath, CECIL_NAME);
+    lstrcpyW(g_apiPath, directory);        lstrcatW(g_apiPath, API_ASM_NAME);
 
     if (!ExtractResource(g_module, PAYLOAD_RES_ID, g_payloadPath) ||
         !ExtractResource(g_module, CLRWRAPPER_RES_ID, g_clrWrapperPath) ||
         !ExtractResource(g_module, CAPSTONE_RES_ID, g_capstonePath) ||
         !ExtractResource(g_module, MONOMOD_RES_ID, g_monoModPath) ||
-        !ExtractResource(g_module, CECIL_RES_ID, g_cecilPath))
+        !ExtractResource(g_module, CECIL_RES_ID, g_cecilPath) ||
+        !ExtractResource(g_module, API_RES_ID, g_apiPath))
     {
         LogStageCode(L"payload extraction failed", (long)GetLastError());
         return 1;

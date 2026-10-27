@@ -6,6 +6,28 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-05:10:00 Alpha 5: module-scoped hooks that follow the toggle
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\ScopedHook.cs            new（gate 生成 + 注册表 + 直通/命中计数）
+.\src\PclDlSwap.Payload\Swap\HostApi.cs               HookBusImpl.AttachScoped + HostApi.AttachAddonHook + ScopedToken
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs          ScopedApi 传入 addonId；Hooks 换成 ScopedHooks
+.\src\PclDlSwap.Payload\Hook\DetourInstaller.cs       安全阀：IL 体过小拒绝挂钩（实测崩溃点）
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs              + ScopedHook 真机探针（附着→禁用→再启用→释放）
+.\docs\swap-api.md                                    §8.1 模块作用域钩子
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|模块作用域钩子|Addon 通过 `Api.Hooks.Attach` 挂钩时，平台生成 ABI 同形的 gate：模块启用→走 Addon handler；模块禁用→直通宿主原方法；释放句柄→该钩子立即直通。实例委托也可用（不再限制静态方法）。这是 LSPosed「模块开关即生效」的核心语义，且不需要热卸载物理跳转|2026.10.28-05:10:00|PCL2.dl.swap
+2|DetourInstaller 安全阀|实测崩过一次：目标方法 JIT 体只有 11 字节，而 x64 跳转补丁要覆写 14 字节，trampoline 会落进 padding/相邻方法导致栈损坏。现在 IL 体小于阈值直接拒绝安装并抛 NotSupportedException 并记日志|2026.10.28-05:10:00|PCL2.dl.swap
+3|SelfTest|新增真机 ScopedHook 探针（仅测试模式 + 已装示例 Addon）：挂 `ModBase.ToUnixTimestampUtc`（值类型参数，验证 gate ABI），依次验证 命中/禁用直通/再启用命中，并打印 handler 命中数|2026.10.28-05:10:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-04:45:00 Alpha 5: Loader family, and the toggle explains its own scope
 
 GitCommitHash: (unreleased)

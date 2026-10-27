@@ -202,6 +202,18 @@ namespace PclDlSwap.ExLoaderHarness
         public static int FeedbackCalls;
     }
 
+    /// <summary>Static handler the module-scoped hook test attaches to PCL.HookTarget.Ping.</summary>
+    public static class HookHandlers
+    {
+        public static int SampleCalls;
+
+        public static int Sample(int value)
+        {
+            SampleCalls++;
+            return value + 100;
+        }
+    }
+
     /// <summary>
     /// x64 .NET Framework host that mimics PCL: it exposes the same PCL.* type surface, loads the
     /// ExLoader shim with LoadLibrary, and then proves that
@@ -979,6 +991,38 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("sample addon received DialogOpening", StaticInt("DialogEvents") == 1);
                 Expect("sample addon received UpdateRequested", StaticInt("UpdateEvents") == 1);
                 Expect("sample addon saw the dialog title", StaticString("LastDialogTitle") == "事件测试");
+
+                // ---- module-scoped hooks: the gate follows the module toggle ----
+                var attachScoped = api?.GetType().GetMethod("AttachAddonHook",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                Expect("host exposes the scoped attach", attachScoped != null);
+
+                var token = attachScoped?.Invoke(api, new object[]
+                {
+                    "test.sample", "PCL.HookTarget", "Ping", "sample.ping",
+                    (Func<int, int>)HookHandlers.Sample
+                }) as IDisposable;
+                Expect("scoped hook installed", token != null);
+
+                var handlerBefore = HookHandlers.SampleCalls;
+                var hooked = PCL.HookTarget.Ping(5);
+                Expect("enabled module's handler runs",
+                    HookHandlers.SampleCalls == handlerBefore + 1 && hooked == 105);
+
+                setEnabled?.Invoke(manager, new object[] { "test.sample", false });
+                var forwarded = PCL.HookTarget.Ping(5);
+                Expect("disabled module forwards to the original",
+                    HookHandlers.SampleCalls == handlerBefore + 1 && forwarded == 10);
+
+                setEnabled?.Invoke(manager, new object[] { "test.sample", true });
+                var again = PCL.HookTarget.Ping(5);
+                Expect("re-enabled module hooks again",
+                    HookHandlers.SampleCalls == handlerBefore + 2 && again == 105);
+
+                token?.Dispose();
+                var afterDispose = PCL.HookTarget.Ping(5);
+                Expect("disposed token forwards to the original",
+                    HookHandlers.SampleCalls == handlerBefore + 2 && afterDispose == 10);
             }
             finally
             {
@@ -1762,6 +1806,24 @@ namespace PCL
         public static string GetNativesFolder(object instance) => @"C:\temp\natives";
         public static string McLoginName() => LoginNameValue;
         public static string McLoginAble() => string.Empty;
+    }
+
+    /// <summary>Harmless target the harness detours to exercise module-scoped hooks.</summary>
+    public static class HookTarget
+    {
+        public static int OriginalCalls;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Ping(int value)
+        {
+            // Deliberately chunky: the detour engine rewrites the first bytes of the JIT'd body and
+            // refuses methods whose IL is too small (a one-liner would be rejected by that valve).
+            var pad = "harness.hooktarget." + value;
+            var scaled = value * 2;
+            OriginalCalls += pad.Length > 0 ? 1 : 0;
+            if (scaled > 1000) scaled -= 3;
+            return scaled;
+        }
     }
 
     /// <summary>Stand-in for PCL.ModLoader: taskbar helpers plus a LoaderBase instance.</summary>

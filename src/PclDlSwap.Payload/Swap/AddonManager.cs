@@ -77,7 +77,7 @@ namespace PclDlSwap.Payload.Swap
                 if (enabled)
                 {
                     if (record.Instance == null) record.Instance = CreateInstance(record);
-                    var scoped = new ScopedApi(_api, new AddonDataStore(record.Id));
+                    var scoped = new ScopedApi(_api, new AddonDataStore(record.Id), record.Id);
                     var context = new SwapContext(scoped, record.Manifest,
                         record.Directory ?? AppDomain.CurrentDomain.BaseDirectory);
                     record.Instance?.OnLoad(context);
@@ -313,7 +313,7 @@ namespace PclDlSwap.Payload.Swap
                     if (record.Instance == null) record.Instance = CreateInstance(record);
                     if (record.Instance == null) continue;
 
-                    var scoped = new ScopedApi(_api, new AddonDataStore(record.Id));
+                    var scoped = new ScopedApi(_api, new AddonDataStore(record.Id), record.Id);
                     var context = new SwapContext(scoped, record.Manifest,
                         record.Directory ?? AppDomain.CurrentDomain.BaseDirectory);
                     record.Instance.OnLoad(context);
@@ -358,14 +358,15 @@ namespace PclDlSwap.Payload.Swap
         {
             private readonly ISwapApi _inner;
 
-            public ScopedApi(ISwapApi inner, IData data)
+            public ScopedApi(ISwapApi inner, IData data, string addonId)
             {
                 _inner = inner;
                 Data = data;
+                Hooks = new ScopedHooks(inner.Hooks, inner as HostApi, addonId);
             }
 
             public IHostInfo Host => _inner.Host;
-            public IHooks Hooks => _inner.Hooks;
+            public IHooks Hooks { get; }
             public IUi Ui => _inner.Ui;
             public IData Data { get; }
             public IReflection Reflect => _inner.Reflect;
@@ -374,6 +375,54 @@ namespace PclDlSwap.Payload.Swap
             public void Log(string message) => _inner.Log(message);
             public void LogWarning(string message) => _inner.LogWarning(message);
             public void LogError(string message, Exception exception = null) => _inner.LogError(message, exception);
+        }
+
+        /// <summary>
+        /// Per-addon hook view. New hooks are installed behind a module gate, so switching the
+        /// module off - or disposing the attach token - stops them immediately (the gate forwards
+        /// to the original method from then on). Event subscriptions stay on the shared bus.
+        /// </summary>
+        private sealed class ScopedHooks : IHooks
+        {
+            private readonly IHooks _inner;
+            private readonly HostApi _host;
+            private readonly string _addonId;
+
+            public ScopedHooks(IHooks inner, HostApi host, string addonId)
+            {
+                _inner = inner;
+                _host = host;
+                _addonId = addonId;
+            }
+
+            public event EventHandler<DownloadEventArgs> DownloadCompleted
+            {
+                add => _inner.DownloadCompleted += value;
+                remove => _inner.DownloadCompleted -= value;
+            }
+
+            public event EventHandler<DialogEventArgs> DialogOpening
+            {
+                add => _inner.DialogOpening += value;
+                remove => _inner.DialogOpening -= value;
+            }
+
+            public event EventHandler<UpdateEventArgs> UpdateRequested
+            {
+                add => _inner.UpdateRequested += value;
+                remove => _inner.UpdateRequested -= value;
+            }
+
+            public IDisposable Attach(string declaringType, string methodName, string hookId,
+                Delegate handler, HookMode mode)
+            {
+                if (_host == null)
+                    return _inner.Attach(declaringType, methodName, hookId, handler, mode);
+                return _host.AttachAddonHook(_addonId, declaringType, methodName, hookId, handler);
+            }
+
+            public bool IsHooked(string declaringType, string methodName) =>
+                _inner.IsHooked(declaringType, methodName);
         }
     }
 }

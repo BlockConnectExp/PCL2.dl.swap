@@ -61,6 +61,23 @@ namespace PclDlSwap.Payload.Hook
                     $"钩子签名不匹配：{hookMethod.DeclaringType?.Name}.{hookMethod.Name} 有 " +
                     $"{hookMethod.GetParameters().Length} 个参数，目标需要 {expected} 个。");
 
+            // Safety valve learned the hard way: the engine rewrites the first 14 bytes (x64) /
+            // 5 bytes (x86) of the JIT'd body. A method whose IL is tiny JITs to a body shorter than
+            // the patch, and the trampoline then resumes inside padding (CC ...) or the neighbouring
+            // method - that corrupts execution instead of throwing. Refuse instead of crashing the
+            // launcher: see the harness case with a one-line PCL.HookTarget.Ping(int).
+            var ilBytes = -1;
+            try { ilBytes = method.GetMethodBody()?.GetILAsByteArray()?.Length ?? -1; }
+            catch { /* dynamic or trimmed bodies report -1 and keep the old behaviour */ }
+            var minimumIl = IntPtr.Size == 8 ? 12 : 8;
+            if (ilBytes >= 0 && ilBytes < minimumIl)
+            {
+                var message = $"目标方法体过小，无法安全挂钩（IL {ilBytes} 字节 < {minimumIl}）：" +
+                              $"{method.DeclaringType?.FullName}.{method.Name}";
+                SwapLog.Warn("[detour] " + message);
+                throw new NotSupportedException(message);
+            }
+
             RuntimeHelpers.PrepareMethod(method.MethodHandle);
             RuntimeHelpers.PrepareMethod(hookMethod.MethodHandle);
             var target = method.MethodHandle.GetFunctionPointer();

@@ -123,6 +123,9 @@ namespace PclDlSwap.Payload.Swap
                     api.Pcl.Secret.UpdateStart(true, null);
                     return "raised";
                 });
+
+                if (SwapHost.Addons?.Find("test.sample") != null)
+                    Probe("ScopedHook（模块钩子跟随开关）", () => RunScopedHookProbe(api));
             }
 
             try
@@ -149,6 +152,44 @@ namespace PclDlSwap.Payload.Swap
                 return "count=" + count;
             }
             return Convert.ToString(value);
+        }
+
+        /// <summary>
+        /// End-to-end proof of module-scoped hooks on the real host: attach to a pure ModBase helper
+        /// (value-type parameter, the ABI case the gate has to keep), watch the handler run, disable
+        /// the module and watch the gate forward to the original, re-enable, then dispose the token.
+        /// Only runs in test mode, and only when the sample addon is installed.
+        /// </summary>
+        private static string RunScopedHookProbe(ISwapApi api)
+        {
+            var host = api as HostApi;
+            if (host == null) return "API 不是 HostApi（跳过）";
+
+            var target = api.Reflect.HostType("PCL.ModBase");
+            var method = target?.GetMethod("ToUnixTimestampUtc",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (method == null) return "宿主缺少 ModBase.ToUnixTimestampUtc（跳过）";
+
+            var hits = 0;
+            Func<DateTime, long> handler = stamp =>
+            {
+                hits++;
+                return 42L;
+            };
+
+            using (host.AttachAddonHook("test.sample", "PCL.ModBase", "ToUnixTimestampUtc",
+                       "selftest.scoped", handler))
+            {
+                var enabled = Convert.ToInt64(method.Invoke(null, new object[] { DateTime.UtcNow }));
+                SwapHost.Addons.SetEnabled("test.sample", false);
+                var disabled = Convert.ToInt64(method.Invoke(null, new object[] { DateTime.UtcNow }));
+                SwapHost.Addons.SetEnabled("test.sample", true);
+                var reEnabled = Convert.ToInt64(method.Invoke(null, new object[] { DateTime.UtcNow }));
+
+                return $"enabled={(enabled == 42 ? "handler" : "original")}，" +
+                       $"disabled={(disabled == 42 ? "handler" : "original")}，" +
+                       $"reEnabled={(reEnabled == 42 ? "handler" : "original")}，handler 命中 {hits} 次";
+            }
         }
     }
 }

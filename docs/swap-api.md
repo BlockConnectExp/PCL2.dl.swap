@@ -193,6 +193,24 @@ public void OnEnable()
 
 ## 9. 兼容性自检与本地真机调试
 
+### 8.1 模块作用域钩子（`IHooks.Attach`）
+
+`Api.Hooks.Attach(declaringType, methodName, hookId, handler, mode)` 注册的是**模块作用域**钩子：
+平台为每个钩子生成一个 gate，行为跟随模块开关——
+
+- 模块启用：调用你的 handler，其返回值就是目标方法的返回值；
+- 模块关闭：gate 直通宿主原方法（等价于从未挂钩），**无需重启**；
+- 释放返回的 `IDisposable`：该钩子立刻变为直通（不撕物理跳转，但行为已还原）。
+
+handler 可以是实例委托（不再要求静态方法）；参数形状与宿主一致（引用类型可写 `object`，
+值类型必须精确类型），返回值类型需与目标相同。harness `--addontest` 用
+`PCL.HookTarget.Ping` 断言了「命中 → 禁用直通 → 再启用命中 → 释放直通」四态。
+
+**安全阀**：IL 体过小的方法（JIT 后比跳转补丁还短）会被拒绝安装并抛 `NotSupportedException`，
+而不是破坏相邻代码 —— 这是实测踩到过的崩溃点（11 字节方法 vs 14 字节补丁）。
+
+## 9. 兼容性自检与本地真机调试
+
 - `PCL2SWAP_SELFTEST=1`：启动 5 秒后在宿主 UI 线程跑一遍**只读**探针
   （Host / Surface / Reflect / Secret / Animation / Settings / Base / Instance /
   Download / Launch + 模块清单 + 事件总线），结果全部写入交换日志；

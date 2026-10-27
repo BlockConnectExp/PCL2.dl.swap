@@ -53,6 +53,11 @@ namespace PclDlSwap.Payload.Swap
         internal void RaiseUpdateRequested(UpdateEventArgs args) => _hooks.RaiseUpdateRequested(args);
         internal void RaiseDownloadCompleted(DownloadEventArgs args) => _hooks.RaiseDownloadCompleted(args);
 
+        /// <summary>Scoped attach used by <c>ScopedApi</c>: the hook belongs to one addon.</summary>
+        internal IDisposable AttachAddonHook(string addonId, string declaringType, string methodName,
+            string hookId, Delegate handler) =>
+            _hooks.AttachScoped(addonId, declaringType, methodName, hookId, handler);
+
         public void Log(string message) => SwapLog.Info("[addon] " + message);
         public void LogWarning(string message) => SwapLog.Warn("[addon] " + message);
         public void LogError(string message, Exception exception = null) =>
@@ -89,12 +94,7 @@ namespace PclDlSwap.Payload.Swap
                 Delegate handler, HookMode mode)
             {
                 if (handler == null) throw new ArgumentNullException(nameof(handler));
-                var type = _host?.GetType(declaringType, throwOnError: false);
-                var target = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
-                                              BindingFlags.Static | BindingFlags.Instance)
-                    .FirstOrDefault(m => m.Name == methodName);
-                if (target == null)
-                    throw new InvalidOperationException($"宿主方法不存在：{declaringType}.{methodName}");
+                var target = ResolveTarget(declaringType, methodName);
                 if (handler.Target != null)
                     throw new NotSupportedException("当前版本只支持静态 handler（实例委托包装在路线图中）。");
 
@@ -102,6 +102,35 @@ namespace PclDlSwap.Payload.Swap
                 SwapLog.Info($"[hookbus] {(string.IsNullOrEmpty(hookId) ? methodName : hookId)} -> " +
                              $"{declaringType}.{methodName}（{mode}）已安装");
                 return new DetourToken(detour);
+            }
+
+            /// <summary>
+            /// Module-scoped attach: the addon's own delegate runs behind a generated gate that
+            /// follows the module toggle, so a disabled module stops hooking immediately and a
+            /// disposed token forwards to the original from then on.
+            /// </summary>
+            internal IDisposable AttachScoped(string addonId, string declaringType, string methodName,
+                string hookId, Delegate handler)
+            {
+                if (handler == null) throw new ArgumentNullException(nameof(handler));
+                var target = ResolveTarget(declaringType, methodName);
+                var registration = ScopedHook.Register(addonId, hookId, handler);
+                var gate = ScopedHook.BuildGate(target, registration);
+                var detour = DetourInstaller.Install(target, gate);
+                ScopedHook.Activate(registration, detour);
+                SwapLog.Info($"[hookbus] {declaringType}.{methodName} -> 模块 {addonId} 的 handler 已装载");
+                return new ScopedToken(registration);
+            }
+
+            private MethodInfo ResolveTarget(string declaringType, string methodName)
+            {
+                var type = _host?.GetType(declaringType, throwOnError: false);
+                var target = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                              BindingFlags.Static | BindingFlags.Instance)
+                    .FirstOrDefault(m => m.Name == methodName);
+                if (target == null)
+                    throw new InvalidOperationException($"宿主方法不存在：{declaringType}.{methodName}");
+                return target;
             }
 
             public bool IsHooked(string declaringType, string methodName)
@@ -156,6 +185,21 @@ namespace PclDlSwap.Payload.Swap
                 // Hot-unloading a detour is not supported yet (the trampoline would have to be
                 // restored); the token exists so addons can express lifecycle intent today.
                 SwapLog.Warn("[hookbus] detour 卸载尚未支持，句柄保持安装状态。");
+            }
+        }
+
+        private sealed class ScopedToken : IDisposable
+        {
+            private readonly ScopedHook.Registration _registration;
+            private bool _disposed;
+
+            public ScopedToken(ScopedHook.Registration registration) => _registration = registration;
+
+            public void Dispose()
+            {
+                if (_disposed) return;
+                _disposed = true;
+                ScopedHook.Deactivate(_registration);
             }
         }
 

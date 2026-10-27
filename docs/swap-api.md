@@ -133,4 +133,25 @@ Copy-Item MyAddon.swapaddon "$env:TEMP\PCL2Swap\addons\"
 
 内置 Addon 的功能实现仍位于宿主核心（Alpha 3），P1 起逐个迁移进 Addon 类本身。
 
+---
+
+## 6. 全接口清单（surface dump）
+
+`tools/PclSurface` 把任意 PCL 构建的**全部可调用成员**导出为 JSON（默认排除编译器生成类型，
+加 `--include-generated` 可包含）：
+
+```powershell
+.\tools\PclSurface\bin\Release\net48\PclSurface.exe `
+    "D:\PCL\Plain Craft Launcher 2.exe" "data\pcl-surface-2.99.0.json"
+```
+
+仓库已附 2.99.0 与 2.99.0.1 两份产物。每个类型包含方法/属性/字段的完整元数据：
+名称、静态性、可见性（含 internal/private）、参数与返回类型、metadata token。
+
+Addon 的用法：
+
+1. 在清单里按名称/签名定位目标成员（含 PCL 未在 UI 暴露的内部能力）；
+2. 通过 `ISwapApi.Reflect`（`HostType` / `GetMember` / `SetMember` / `Call`）直接调用——
+   强类型门面没有覆盖的成员同样可以到达，这就是"全部接口可达"的机制保证。
+
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

@@ -412,6 +412,12 @@ namespace PclDlSwap.Payload.Host
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static void HookUpdateStart(bool silent, object urlsOverride)
         {
+            SwapHost.RaiseUpdateRequested(new UpdateEventArgs
+            {
+                Silent = silent,
+                Urls = (urlsOverride as IEnumerable<string>)?.ToArray()
+            });
+
             // OTA Protector module off -> straight to the launcher's own update flow.
             if (!SwapHost.AddonEnabled("swap.ota-protector"))
             {
@@ -490,9 +496,16 @@ namespace PclDlSwap.Payload.Host
             // hook. Only the extensions that can execute or carry code are scanned afterwards.
             _downloadByLoaderEnumerable.InvokeOriginal(null, urls, localPath, loader, checker, simulateBrowserHeaders);
 
+            var urlList = (urls as IEnumerable<string>)?.ToList() ?? new List<string>();
+            SwapHost.RaiseDownloadCompleted(new DownloadEventArgs
+            {
+                Urls = urlList.ToArray(),
+                LocalPath = localPath,
+                IsPclCloud = IsPclCloud(urlList)
+            });
+
             if (Environment.GetEnvironmentVariable("PCL2SWAP_TEST_NOOP") == "1") return;
-            var list = (urls as IEnumerable<string>)?.ToList() ?? new List<string>();
-            if (IsPclCloud(list)) VerifyCloudDownload(localPath);
+            if (IsPclCloud(urlList)) VerifyCloudDownload(localPath);
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -500,6 +513,13 @@ namespace PclDlSwap.Payload.Host
             object checker, bool simulateBrowserHeaders)
         {
             _downloadByLoaderString.InvokeOriginal(null, url, localPath, loader, checker, simulateBrowserHeaders);
+
+            SwapHost.RaiseDownloadCompleted(new DownloadEventArgs
+            {
+                Urls = new[] { url },
+                LocalPath = localPath,
+                IsPclCloud = IsPclCloud(new[] { url })
+            });
 
             if (Environment.GetEnvironmentVariable("PCL2SWAP_TEST_NOOP") == "1") return;
             if (IsPclCloud(new[] { url })) VerifyCloudDownload(localPath);
@@ -509,6 +529,13 @@ namespace PclDlSwap.Payload.Host
         private static void HookDownloadByClient(string url, string localPath, bool simulateBrowserHeaders)
         {
             _downloadByClient.InvokeOriginal(null, url, localPath, simulateBrowserHeaders);
+
+            SwapHost.RaiseDownloadCompleted(new DownloadEventArgs
+            {
+                Urls = new[] { url },
+                LocalPath = localPath,
+                IsPclCloud = IsPclCloud(new[] { url })
+            });
 
             if (Environment.GetEnvironmentVariable("PCL2SWAP_TEST_NOOP") == "1") return;
             if (IsPclCloud(new[] { url })) VerifyCloudDownload(localPath);

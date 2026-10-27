@@ -17,8 +17,8 @@ my-addon.swapaddon
 └─ assets/…                 可选
 ```
 
-把包放进 `%TEMP%\PCL2Swap\addons\` 并重启 PCL（或等平台下一次扫描），
-它就会出现在 设置 → **Swap Addon** 页面。
+把包放进 **`%APPDATA%\PCL2Swap\addons\`**（持久目录；可用环境变量 `PCL2SWAP_DATA`
+整体改到别处，测试/多实例时很有用）并重启 PCL，它就会出现在 设置 → **Swap Addon** 页面。
 
 ### manifest.json
 
@@ -153,5 +153,61 @@ Addon 的用法：
 1. 在清单里按名称/签名定位目标成员（含 PCL 未在 UI 暴露的内部能力）；
 2. 通过 `ISwapApi.Reflect`（`HostType` / `GetMember` / `SetMember` / `Call`）直接调用——
    强类型门面没有覆盖的成员同样可以到达，这就是"全部接口可达"的机制保证。
+
+---
+
+## 7. 模块状态与启停（Alpha 4 repack 4 起）
+
+- 开关状态写在 **`%APPDATA%\PCL2Swap\modules.json`**：`{"<addon id>":{"enabled":true}}`，
+  重启后保持；未知 id 视为启用（配置损坏不会误关功能）。
+- 被禁用的模块在启动阶段**直接跳过**（不调用 `OnLoad`/`OnEnable`），
+  平台自带功能的钩子也会按内置模块的开关放行/拦截。
+- 设置 → Swap Addon 每行都有「启用 / 禁用」按钮：点击即时写入状态、重建页面，
+  **无需重启**（钩子句柄保留但按开关放行）。
+- `OnDisable`/`OnUnload` 会被调用；请在 `OnEnable` 里订阅事件、在 `OnDisable` 里退订。
+
+## 8. 事件总线（IHooks 的三个语义事件）
+
+平台自己的管线会把事件广播给所有已启用模块，每个订阅者单独 try/catch（一个模块抛错不影响其他模块与宿主）：
+
+| 事件 | 触发点 | 参数 |
+|---|---|---|
+| `DialogOpening` | 宿主每次打开弹窗（`ModMain.MyMsgBox` 家族，经公告守卫钩子） | `Caption/Title/IsWarn/ForceWait/Button2/CancelAdded` |
+| `UpdateRequested` | `ModSecret.UpdateStart` 被调用时（含静默 OTA） | `Silent/Urls` |
+| `DownloadCompleted` | 平台的下载钩子把请求交给宿主下载器之后 | `Urls/LocalPath/IsPclCloud` |
+
+```csharp
+public void OnEnable()
+{
+    Api.Hooks.DialogOpening += (s, e) => Api.Log($"弹窗：{e.Title}（forceWait={e.ForceWait}）");
+    Api.Hooks.UpdateRequested += (s, e) => Api.Log($"更新请求：silent={e.Silent}");
+}
+```
+
+参考实现见 `src/PCL2Swap.SampleAddon`（同时被 `--addontest` 用作断言目标）。
+
+## 9. 兼容性自检与本地真机调试
+
+- `PCL2SWAP_SELFTEST=1`：启动 5 秒后在宿主 UI 线程跑一遍**只读**探针
+  （Host / Surface / Reflect / Secret / Animation / Settings / Base / Instance /
+  Download / Launch + 模块清单 + 事件总线），结果全部写入交换日志；
+  2.99.0 实测 `ok=25 fail=0`。换 PCL 版本时先看这行就知道哪些接口漂移了。
+- 不需要 ExLoader 就能跑真机注入：见 `docs/local-e2e.zh.md`
+  （`tools/PclInject` + 测试副本改名 `PCL_SingletonMutex` 绕过单实例 + 隔离 TEMP/`PCL2SWAP_DATA`）。
+
+## 10. 类型化访问族一览（IPclAccess）
+
+| 族 | 覆盖 |
+|---|---|
+| `Secret` | 更新入口（`UpdateStart` / `HasUpdatePermission` / `UpdateCheckByButton`） |
+| `Net` | `NetDownloadByLoader`（多源）/ `NetDownloadByClient`（单源） |
+| `Animation` | `Animation` 门控、`AniStart` / `AniStop` |
+| `Settings` | `Get` / `Set` / `HasSaved` / `Reset` / `GetDefault`（自动兼容泛型与非泛型重载） |
+| `Base` | `GetUuid` 与 INI 读写/删除 |
+| `Instance` | 实例目录与选中项、`GetMcFoolName`、按宿主缓存枚举实例、`McInstance` 成员、`ModLaunch.GetNativesFolder` |
+| `Download` | 源顺序开关、`DlClientListGet`、Assets/Library/LauncherOrMeta/Mod 源、`DlModRequest` |
+| `Launch` | `McLaunchStart`、`McLoginName`、`McLoginAble` |
+
+未覆盖的成员仍可通过 `ISwapApi.Surface`（全量清单）+ `ISwapApi.Reflect` 直达。
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

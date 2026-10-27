@@ -917,6 +917,34 @@ namespace PclDlSwap.ExLoaderHarness
                     Convert.ToBoolean(isEnabled?.Invoke(manager, new object[] { "swap.ota-protector" })));
                 Expect("addon store lives under the durable root",
                     Directory.Exists(Path.Combine(dataRoot, "addons")));
+
+                // ---- event bus: the sample addon subscribed through IHooks and must receive ----
+                var api = hostType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+                var hooks = api?.GetType().GetProperty("Hooks")?.GetValue(api);
+                var raiseDialog = hooks?.GetType().GetMethod("RaiseDialogOpening",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                var raiseUpdate = hooks?.GetType().GetMethod("RaiseUpdateRequested",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                Expect("hook bus exposes the raise surface", raiseDialog != null && raiseUpdate != null);
+
+                raiseDialog?.Invoke(hooks, new object[]
+                {
+                    new PCL2Swap.Api.DialogEventArgs
+                    {
+                        Caption = "harness", Title = "事件测试", ForceWait = true, CancelAdded = true
+                    }
+                });
+                raiseUpdate?.Invoke(hooks, new object[]
+                {
+                    new PCL2Swap.Api.UpdateEventArgs
+                    {
+                        Silent = true, Urls = new[] { "https://example.com/update" }
+                    }
+                });
+
+                Expect("sample addon received DialogOpening", StaticInt("DialogEvents") == 1);
+                Expect("sample addon received UpdateRequested", StaticInt("UpdateEvents") == 1);
+                Expect("sample addon saw the dialog title", StaticString("LastDialogTitle") == "事件测试");
             }
             finally
             {

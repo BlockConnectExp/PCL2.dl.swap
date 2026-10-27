@@ -6,6 +6,30 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-04:20:00 Alpha 4 repack 5/6: the hook event bus is live
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\HostApi.cs            三个 Raise* 变为真实投递 + 订阅者逐个隔离
+.\src\PclDlSwap.Payload\Swap\SwapHost.cs           + RaiseDialogOpening/UpdateRequested/DownloadCompleted
+.\src\PclDlSwap.Payload\Features\AnnouncementGuard.cs  MyMsgBox 钩子广播 DialogOpening（含 CancelAdded）
+.\src\PclDlSwap.Payload\Host\CoreInstaller.cs      UpdateStart 广播 UpdateRequested；三个下载钩子广播 DownloadCompleted
+.\src\PCL2Swap.SampleAddon\SampleAddon.cs          订阅三个事件并计数/记日志（参考实现）
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs           + 测试模式下驱动一次静默 UpdateStart 的事件探针
+.\docs\swap-api.md                                 §7-§10：模块状态、事件总线、自检、访问族一览
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|事件总线|`IHooks.DialogOpening / UpdateRequested / DownloadCompleted` 从死代码变为真实投递：宿主每次弹窗、每次更新请求、每次下载任务交付后都会广播；每个订阅者单独 try/catch，坏 Addon 不会影响其他订阅者或宿主|2026.10.28-04:20:00|PCL2.dl.swap
+2|SampleAddon|示例 Addon 订阅三个事件并在日志中记录（`OnEnable` 订阅 / `OnDisable` 退订），既是打包参考也是 harness 与真机的断言目标；`--addontest` 扩到 21 项|2026.10.28-04:20:00|PCL2.dl.swap
+3|SelfTest|新增事件探针：测试模式下自检调用一次静默 `UpdateStart`，把 `UpdateRequested` 投递链路在真实宿主上跑通（测试模式不触网、不落盘）。真机实测 `ok=25 fail=0`，且打包的示例 Addon 记录到“收到更新请求：silent=True，地址数=0”|2026.10.28-04:20:00|PCL2.dl.swap
+4|文档|`docs/swap-api.md` 补 §7 模块状态与启停（modules.json、开关语义、OnDisable/OnUnload）、§8 事件总线（触发点与参数表）、§9 自检与本地真机调试、§10 类型化访问族一览；Addon 安装目录更正为 `%APPDATA%\PCL2Swap\addons`|2026.10.28-04:20:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-04:05:00 Alpha 4 repack 4: module state that means something + real-host self-check
 
 GitCommitHash: (unreleased)

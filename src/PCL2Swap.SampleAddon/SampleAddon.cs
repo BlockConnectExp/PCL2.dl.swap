@@ -4,9 +4,10 @@ using PCL2Swap.Api;
 namespace PCL2Swap.SampleAddon
 {
     /// <summary>
-    /// Minimal reference addon: records its lifecycle so the harness can assert the package loader
-    /// ran end to end (unpack → manifest validation → ISwapAddon discovery → OnLoad/OnEnable).
-    /// Doubles as the packaging example referenced by the addon-format documentation.
+    /// Reference addon: records its lifecycle and subscribes to the host event bus, so both the
+    /// package loader and the semantic events can be asserted end to end (unpack → manifest check
+    /// → ISwapAddon discovery → OnLoad/OnEnable → events). Doubles as the packaging example the
+    /// addon-format documentation points at.
     /// </summary>
     public sealed class SampleAddon : ISwapAddon
     {
@@ -14,21 +15,68 @@ namespace PCL2Swap.SampleAddon
         public static int EnableCalls;
         public static int DisableCalls;
         public static int UnloadCalls;
+        public static int DialogEvents;
+        public static int UpdateEvents;
+        public static int DownloadEvents;
         public static string LastApiVersion;
+        public static string LastDialogTitle;
+
+        private ISwapApi _api;
 
         public void OnLoad(SwapContext context)
         {
             LoadCalls++;
-            LastApiVersion = context?.Api?.Host?.ApiVersion;
-            context?.Api?.Data?.Set("loaded", "1");
-            context?.Api?.Data?.Save();
+            _api = context?.Api;
+            LastApiVersion = _api?.Host?.ApiVersion;
+            _api?.Data?.Set("loaded", "1");
+            _api?.Data?.Save();
         }
 
-        public void OnEnable() => EnableCalls++;
-        public void OnDisable() => DisableCalls++;
+        public void OnEnable()
+        {
+            EnableCalls++;
+            var hooks = _api?.Hooks;
+            if (hooks == null) return;
+
+            hooks.DialogOpening += OnDialogOpening;
+            hooks.UpdateRequested += OnUpdateRequested;
+            hooks.DownloadCompleted += OnDownloadCompleted;
+            _api.Log("示例 Addon 已订阅事件总线（DialogOpening / UpdateRequested / DownloadCompleted）。");
+        }
+
+        public void OnDisable()
+        {
+            DisableCalls++;
+            var hooks = _api?.Hooks;
+            if (hooks == null) return;
+
+            hooks.DialogOpening -= OnDialogOpening;
+            hooks.UpdateRequested -= OnUpdateRequested;
+            hooks.DownloadCompleted -= OnDownloadCompleted;
+        }
+
         public void OnUnload() => UnloadCalls++;
+
+        private void OnDialogOpening(object sender, DialogEventArgs args)
+        {
+            DialogEvents++;
+            LastDialogTitle = args?.Title;
+            _api?.Log($"示例 Addon 收到弹窗：{args?.Title}（warn={args?.IsWarn}，forceWait={args?.ForceWait}，" +
+                      $"已追加取消={args?.CancelAdded}）");
+        }
+
+        private void OnUpdateRequested(object sender, UpdateEventArgs args)
+        {
+            UpdateEvents++;
+            _api?.Log($"示例 Addon 收到更新请求：silent={args?.Silent}，地址数={args?.Urls?.Length ?? 0}");
+        }
+
+        private void OnDownloadCompleted(object sender, DownloadEventArgs args)
+        {
+            DownloadEvents++;
+            _api?.Log($"示例 Addon 收到下载完成：地址数={args?.Urls?.Length ?? 0}，本地={args?.LocalPath}");
+        }
     }
 }
-
 
 // GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover

@@ -62,6 +62,19 @@ namespace PclDlSwap.Payload.Swap
         /// the launcher's safety nets by accident.
         /// </summary>
         public static bool AddonEnabled(string addonId) => Addons?.IsEnabled(addonId) ?? true;
+
+        // ---- host event bus -------------------------------------------------------------------
+        // The platform's own pipelines call these; addons subscribe through IHooks. The bus is a
+        // host facility, so it keeps publishing even while a module is switched off.
+
+        internal static void RaiseDialogOpening(DialogEventArgs args) =>
+            (Api as HostApi)?.RaiseDialogOpening(args);
+
+        internal static void RaiseUpdateRequested(UpdateEventArgs args) =>
+            (Api as HostApi)?.RaiseUpdateRequested(args);
+
+        internal static void RaiseDownloadCompleted(DownloadEventArgs args) =>
+            (Api as HostApi)?.RaiseDownloadCompleted(args);
     }
 }
 

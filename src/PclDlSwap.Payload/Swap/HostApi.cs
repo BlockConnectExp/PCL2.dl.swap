@@ -48,6 +48,11 @@ namespace PclDlSwap.Payload.Swap
 
         internal void AttachData(AddonDataStore store) => Data = store;
 
+        // Host-wide event surface for the payload's own features; addons subscribe through IHooks.
+        internal void RaiseDialogOpening(DialogEventArgs args) => _hooks.RaiseDialogOpening(args);
+        internal void RaiseUpdateRequested(UpdateEventArgs args) => _hooks.RaiseUpdateRequested(args);
+        internal void RaiseDownloadCompleted(DownloadEventArgs args) => _hooks.RaiseDownloadCompleted(args);
+
         public void Log(string message) => SwapLog.Info("[addon] " + message);
         public void LogWarning(string message) => SwapLog.Warn("[addon] " + message);
         public void LogError(string message, Exception exception = null) =>
@@ -108,10 +113,33 @@ namespace PclDlSwap.Payload.Swap
                 return target != null && DetourInstaller.IsHooked(target);
             }
 
-            // Raised by the built-in addons once they own the corresponding pipeline.
-            internal void RaiseDownloadCompleted(DownloadEventArgs args) => DownloadCompleted?.Invoke(this, args);
-            internal void RaiseDialogOpening(DialogEventArgs args) => DialogOpening?.Invoke(this, args);
-            internal void RaiseUpdateRequested(UpdateEventArgs args) => UpdateRequested?.Invoke(this, args);
+            // Raised by the host pipelines that already see every dialog / update / download.
+            // Each subscriber runs on its own so a broken addon cannot take the bus (or the
+            // launcher) down with it.
+            internal void RaiseDownloadCompleted(DownloadEventArgs args) =>
+                RaiseSafely(DownloadCompleted, args, nameof(DownloadCompleted));
+
+            internal void RaiseDialogOpening(DialogEventArgs args) =>
+                RaiseSafely(DialogOpening, args, nameof(DialogOpening));
+
+            internal void RaiseUpdateRequested(UpdateEventArgs args) =>
+                RaiseSafely(UpdateRequested, args, nameof(UpdateRequested));
+
+            private void RaiseSafely<T>(EventHandler<T> handlers, T args, string name) where T : EventArgs
+            {
+                if (handlers == null) return;
+                foreach (var subscriber in handlers.GetInvocationList())
+                {
+                    try
+                    {
+                        ((EventHandler<T>)subscriber)(this, args);
+                    }
+                    catch (Exception ex)
+                    {
+                        SwapLog.Error($"[hookbus] {name} 订阅者异常（已隔离，其余订阅者继续）：" + ex.Message, ex);
+                    }
+                }
+            }
         }
 
         private sealed class DetourToken : IDisposable

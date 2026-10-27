@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using PCL2Swap.Api;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
 using PclDlSwap.Payload.Swap;
@@ -56,6 +57,21 @@ namespace PclDlSwap.Payload.Features
             string button3, bool isWarn, bool highLight, bool forceWait,
             object button1Action, object button2Action, object button3Action)
         {
+            // Publish first: subscribers see every dialog the launcher opens, and CancelAdded says
+            // whether the module below is about to add one.
+            var forcedNotice = _detour != null &&
+                               IsForcedUpdateNotice(caption, title, button1, button2, button3, forceWait);
+            var cancelButtonAdded = forcedNotice && SwapHost.AddonEnabled("swap.cancel-button");
+            SwapHost.RaiseDialogOpening(new DialogEventArgs
+            {
+                Caption = caption,
+                Title = title,
+                IsWarn = isWarn,
+                ForceWait = forceWait,
+                Button2 = button2,
+                CancelAdded = cancelButtonAdded
+            });
+
             // Cancel Button module off -> behave exactly like the untouched launcher.
             if (!SwapHost.AddonEnabled("swap.cancel-button"))
                 return _detour != null
@@ -65,8 +81,7 @@ namespace PclDlSwap.Payload.Features
 
             try
             {
-                if (_detour != null &&
-                    IsForcedUpdateNotice(caption, title, button1, button2, button3, forceWait))
+                if (forcedNotice)
                 {
                     SwapLog.Warn("拦截到无法关闭的“悲报”式更新公告，已为其追加“取消”按钮。");
                     var body = caption + Environment.NewLine + Environment.NewLine +

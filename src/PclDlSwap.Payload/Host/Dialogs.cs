@@ -30,7 +30,7 @@ namespace PclDlSwap.Payload.Host
             AbortAutoUpdate
         }
 
-        private static bool TestMode => Environment.GetEnvironmentVariable("PCL2SWAP_TEST") == "1";
+        internal static bool TestMode => Environment.GetEnvironmentVariable("PCL2SWAP_TEST") == "1";
 
         /// <summary>
         /// Explicit replacement for the silent OTA path. Returns Cancel when the owner must not be

@@ -112,6 +112,18 @@ namespace PclDlSwap.Payload.Swap
 
             Probe("Data.Get(selftest)", () => api.Data?.Get("selftest"));
 
+            // Drive the real update pipeline once so the event bus is proven on the host itself:
+            // the hook publishes UpdateRequested before any gate, and test mode cancels the silent
+            // update without touching the network.
+            if (Dialogs.TestMode)
+            {
+                Probe("EventBus.UpdateRequested（驱动一次静默 UpdateStart）", () =>
+                {
+                    api.Pcl.Secret.UpdateStart(true, null);
+                    return "raised";
+                });
+            }
+
             try
             {
                 foreach (var record in SwapHost.Addons?.Records ?? new List<AddonManager.AddonRecord>())

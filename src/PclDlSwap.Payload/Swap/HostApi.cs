@@ -114,12 +114,48 @@ namespace PclDlSwap.Payload.Swap
             {
                 if (handler == null) throw new ArgumentNullException(nameof(handler));
                 var target = ResolveTarget(declaringType, methodName);
-                var registration = ScopedHook.Register(addonId, hookId, mode, handler);
-                var gate = ScopedHook.BuildGate(target, registration);
-                var detour = DetourInstaller.Install(target, gate);
-                ScopedHook.Activate(registration, detour);
-                SwapLog.Info($"[hookbus] {declaringType}.{methodName} -> 模块 {addonId} 的 handler 已装载（{mode}）");
-                return new ScopedToken(registration);
+                ValidateHandler(target, handler);
+                return ScopedHook.Attach(addonId, hookId, mode, handler, target);
+            }
+
+            /// <summary>
+            /// Fail fast on a handler whose shape cannot be called with the target's ABI. Without
+            /// this the mismatch only surfaces inside the gate, as a bare
+            /// "TargetParameterCountException" on whichever launcher code path happens to hit it.
+            /// Rules: an instance target passes the receiver first (object or the declaring type);
+            /// value-typed parameters must match exactly; reference parameters may be widened to
+            /// any base type or interface.
+            /// </summary>
+            private static void ValidateHandler(MethodInfo target, Delegate handler)
+            {
+                var declared = target.GetParameters();
+                var offset = target.IsStatic ? 0 : 1;
+                var actual = handler.Method.GetParameters();
+
+                if (actual.Length != declared.Length + offset)
+                {
+                    throw new ArgumentException(
+                        $"钩子 handler 参数个数不匹配：{handler.Method.Name} 需要 " +
+                        $"{actual.Length} 个参数，但 {target.DeclaringType?.Name}.{target.Name} " +
+                        $"需要 {(target.IsStatic ? string.Empty : "接收者 + ")}{declared.Length} 个。");
+                }
+
+                for (var i = 0; i < actual.Length; i++)
+                {
+                    var want = i < offset
+                        ? target.DeclaringType ?? typeof(object)
+                        : declared[i - offset].ParameterType;
+                    var have = actual[i].ParameterType;
+                    var compatible = want.IsValueType
+                        ? have == want
+                        : have.IsAssignableFrom(want);
+                    if (compatible) continue;
+
+                    throw new ArgumentException(
+                        $"钩子 handler 第 {i + 1} 个参数类型不匹配：期望 {want.Name}" +
+                        (want.IsValueType ? "（值类型必须一致）" : "（或其基类/接口）") +
+                        $"，实际是 {have.Name}。");
+                }
             }
 
             private MethodInfo ResolveTarget(string declaringType, string methodName)
@@ -185,21 +221,6 @@ namespace PclDlSwap.Payload.Swap
                 // Hot-unloading a detour is not supported yet (the trampoline would have to be
                 // restored); the token exists so addons can express lifecycle intent today.
                 SwapLog.Warn("[hookbus] detour 卸载尚未支持，句柄保持安装状态。");
-            }
-        }
-
-        private sealed class ScopedToken : IDisposable
-        {
-            private readonly ScopedHook.Registration _registration;
-            private bool _disposed;
-
-            public ScopedToken(ScopedHook.Registration registration) => _registration = registration;
-
-            public void Dispose()
-            {
-                if (_disposed) return;
-                _disposed = true;
-                ScopedHook.Deactivate(_registration);
             }
         }
 

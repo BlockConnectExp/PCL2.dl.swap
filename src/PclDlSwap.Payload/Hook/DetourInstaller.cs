@@ -78,6 +78,18 @@ namespace PclDlSwap.Payload.Hook
                 throw new NotSupportedException(message);
             }
 
+            // Never patch a prologue that already carries a jump: two detours on one entry corrupt
+            // execution (measured - the second one decodes the first one's FF 25 stub). Callers that
+            // need several handlers must chain them; ScopedHook keeps one gate per target for exactly
+            // this reason.
+            if (IsHooked(method))
+            {
+                var message = "目标已被挂钩，拒绝二次 patch：" +
+                              $"{method.DeclaringType?.FullName}.{method.Name}";
+                SwapLog.Warn("[detour] " + message);
+                throw new InvalidOperationException(message);
+            }
+
             RuntimeHelpers.PrepareMethod(method.MethodHandle);
             RuntimeHelpers.PrepareMethod(hookMethod.MethodHandle);
             var target = method.MethodHandle.GetFunctionPointer();

@@ -6,6 +6,30 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-05:35:00 Alpha 5: hook chains, handler shape validation, addon packer, demo module
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\ScopedHook.cs           每个目标一条链（一次 patch，多 handler 加入）
+.\src\PclDlSwap.Payload\Hook\DetourInstaller.cs       引擎层拒绝二次 patch（实测崩溃点）
+.\src\PclDlSwap.Payload\Swap\HostApi.cs              handler 形状挂载前校验 + 走链式 Attach
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs         SetEnabled 先翻转状态再跑生命周期
+.\src\PCL2Swap.SampleAddon\SampleAddon.cs            演示模块：事件 + Prefix 钩子 + 实时页面 + Reflect
+.\tools\PclAddonPack\                                new（dnlib 静态校验 + 打包 .swapaddon）
+.\docs\swap-api.md                                   §1 打包器用法 + §8.1 链式语义
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|钩子链|同一方法被第二个钩子（或第二个模块）命中时不再二次 patch：第一个钩子建立链与唯一 gate，后续注册加入链；每次调用依次跑 Prefix →（首个 Replace 或原方法）→ Postfix；禁用/释放只是把 handler 移出链。修复了「多钩子导致栈损坏」的真实崩溃|2026.10.28-05:35:00|PCL2.dl.swap
+2|handler 形状校验|挂载前校验参数个数与类型（实例目标含接收者；值类型必须一致，引用类型可放宽到基类/接口），不匹配时直接抛带中文说明的 ArgumentException。此前错误会在无关调用路径上以 TargetParameterCountException 形式炸出|2026.10.28-05:35:00|PCL2.dl.swap
+3|PclAddonPack|新增打包器：dnlib 静态校验 entry 实现 ISwapAddon（不执行代码）、自动排除 SDK dll、生成 manifest + zip 并打印 SHA-256|2026.10.28-05:35:00|PCL2.dl.swap
+4|示例模块|SampleAddon 升级为全接口演示：事件订阅、Prefix 钩子（多候选目标回退）、带 DispatcherTimer 实时计数的设置页、通过 Reflect 调用宿主方法、数据持久化。真机验证：侧栏出现第三方页面，点击按钮后 `Prefix 钩子命中：4 次`，页面实时刷新|2026.10.28-05:35:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-05:25:00 Alpha 5: hook modes (Prefix / Postfix / Replace) are real
 
 GitCommitHash: (unreleased)

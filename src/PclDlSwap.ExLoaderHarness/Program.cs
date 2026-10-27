@@ -1082,6 +1082,25 @@ namespace PclDlSwap.ExLoaderHarness
                     instanceHandler.Calls == 1 && echoed == "inst:abc");
                 echoToken?.Dispose();
                 Expect("disposed echo hook restores the host body", PCL.HookTarget.Echo("abc") == "harness:abc");
+
+                // A handler whose shape cannot be called with the target's ABI must fail at attach
+                // time (field lesson: the mismatch only surfaced later, as a bare
+                // TargetParameterCountException on an unrelated launcher code path).
+                try
+                {
+                    attachScoped?.Invoke(api, new object[]
+                    {
+                        "test.sample", "PCL.HookTarget", "Ping", "sample.bad",
+                        PCL2Swap.Api.HookMode.Replace, (Action)(() => { })
+                    });
+                    Expect("mismatched handler shape is rejected", false);
+                }
+                catch (System.Reflection.TargetInvocationException ex)
+                    when (ex.InnerException is ArgumentException)
+                {
+                    Expect("mismatched handler shape is rejected with a readable error",
+                        ex.InnerException.Message.Contains("参数个数不匹配"));
+                }
             }
             finally
             {

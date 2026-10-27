@@ -20,6 +20,22 @@ my-addon.swapaddon
 把包放进 **`%APPDATA%\PCL2Swap\addons\`**（持久目录；可用环境变量 `PCL2SWAP_DATA`
 整体改到别处，测试/多实例时很有用）并重启 PCL，它就会出现在 设置 → **Swap Addon** 页面。
 
+### 用打包器生成 `.swapaddon`
+
+```powershell
+.\tools\PclAddonPack\bin\Release\net48\PclAddonPack.exe `
+    --project .\src\YourAddon\bin\Release\net48 `
+    --id com.example.my-addon --name "My Addon" --version 1.0.0 `
+    --entry MyAddon.MainAddon --description "One line summary." `
+    --out .\dist\my-addon.swapaddon
+```
+
+打包器会用 dnlib **静态校验** `--entry` 类型确实实现了 `PCL2Swap.Api.ISwapAddon`
+（不会执行你的代码），自动跳过 `PCL2Swap.Api.dll`（SDK 由宿主提供，随包分发会造成类型标识冲突），
+并打印包内条目与 SHA-256。参考实现见 `src/PCL2Swap.SampleAddon`：它订阅事件总线、
+挂 Prefix 钩子、注册带实时计数的设置页、用 `Reflect` 调用宿主方法并持久化数据——
+一个模块能用到的东西它都用了一遍。
+
 ### manifest.json
 
 ```json
@@ -220,6 +236,16 @@ handler 可以是实例委托（不再要求静态方法）；参数形状与宿
 
 **安全阀**：IL 体过小的方法（JIT 后比跳转补丁还短）会被拒绝安装并抛 `NotSupportedException`，
 而不是破坏相邻代码 —— 这是实测踩到过的崩溃点（11 字节方法 vs 14 字节补丁）。
+
+**多模块/多钩子 = 一条链**：同一个宿主方法只会被 patch 一次。第一个钩子建立「钩子链」并装上
+唯一的 gate，之后任何模块/任何模式的钩子都**加入这条链**（引擎层也会拒绝二次 patch，
+因为叠加两个跳转补丁会破坏执行——同样是实测结论）。每次调用按固定顺序执行：
+
+1. 依次调用仍然生效的 `Prefix` handler；
+2. 若有生效的 `Replace` handler，由**第一个**接管返回值，否则调用宿主原方法；
+3. 依次调用仍然生效的 `Postfix` handler。
+
+模块被禁用或句柄被释放时，该 handler 只是从链上移除；链上不再有任何 handler 时调用直通原方法。
 
 ## 9. 兼容性自检与本地真机调试
 

@@ -13,17 +13,19 @@ using PclDlSwap.Payload.Host;
 namespace PclDlSwap.Payload.Swap
 {
     /// <summary>
-    /// Addon-scoped bytecode hooks. The addon hands over an ordinary delegate (instance or static);
-    /// the platform installs a generated *gate* whose behaviour follows the module toggle:
+    /// Module-scoped bytecode hooks. Addons hand over an ordinary delegate (instance or static) and
+    /// the platform does the rest:
     ///
-    ///  * module enabled  -> the addon's handler runs and its return value is used;
-    ///  * module disabled -> the gate forwards to the original method (as if never installed);
-    ///  * attach token disposed -> same as disabled, per hook.
+    ///  * one dynamic gate per *target method*; the first hook patches the prologue, every further
+    ///    hook joins the same chain instead of patching again. Stacking two jumps on one prologue
+    ///    corrupts execution - that was measured, not guessed;
+    ///  * the gate follows the module toggle: a disabled module's handler is skipped and, when no
+    ///    live handler remains, the call goes straight to the host's original method;
+    ///  * disposing an attach token removes that handler from the chain immediately.
     ///
-    /// That gives LSPosed-like semantics without hot-unloading the native prologue: switching a
-    /// module off stops its hooks immediately, and the physical jump only goes away with the
-    /// process. The gate keeps the target's ABI (reference parameters travel as object, value
-    /// parameters keep their exact type), so it can be the detour target itself.
+    /// Chain semantics per call: run live Prefix handlers in registration order, then run the first
+    /// live Replace handler (which owns the result) or the original method when there is none, then
+    /// run live Postfix handlers in order.
     /// </summary>
     public static class ScopedHook
     {
@@ -34,104 +36,169 @@ namespace PclDlSwap.Payload.Swap
             public string HookId;
             public HookMode Mode;
             public Delegate Handler;
-            public DetourInstaller Installer;
             public volatile bool Active = true;
             public long Calls;
-            public long Forwarded;
-        }
+            public long Skipped;
 
-        private static readonly ConcurrentDictionary<int, Registration> Registry =
-            new ConcurrentDictionary<int, Registration>();
-        private static readonly object GateLock = new object();
-        private static ModuleBuilder _gateModule;
-        private static int _nextId;
+            public bool IsLive => Active && SwapHost.AddonEnabled(AddonId);
 
-        internal static Registration Register(string addonId, string hookId, HookMode mode, Delegate handler)
-        {
-            var registration = new Registration
+            public object Call(object[] arguments)
             {
-                Id = Interlocked.Increment(ref _nextId),
-                AddonId = addonId,
-                HookId = hookId,
-                Mode = mode,
-                Handler = handler
-            };
-            Registry[registration.Id] = registration;
-            return registration;
+                Interlocked.Increment(ref Calls);
+                return Handler.DynamicInvoke(arguments);
+            }
+
+            public void MarkSkipped() => Interlocked.Increment(ref Skipped);
         }
 
-        internal static void Activate(Registration registration, DetourInstaller installer)
+        internal sealed class Chain
         {
-            registration.Installer = installer;
-            SwapLog.Info($"[hookbus] 模块钩子已装载：{registration.AddonId} · {registration.Mode} · " +
-                         $"{(string.IsNullOrEmpty(registration.HookId) ? "(unnamed)" : registration.HookId)}" +
-                         $"（当前{(SwapHost.AddonEnabled(registration.AddonId) ? "启用" : "禁用")}）");
+            public int Id;
+            public MethodInfo Target;
+            public DetourInstaller Installer;
+            public readonly List<Registration> Registrations = new List<Registration>();
+
+            public Registration[] Snapshot()
+            {
+                lock (Registrations) return Registrations.ToArray();
+            }
         }
 
-        internal static void Deactivate(Registration registration)
-        {
-            registration.Active = false;
-            SwapLog.Info($"[hookbus] 模块钩子已停用：{registration.AddonId} · " +
-                         $"{(string.IsNullOrEmpty(registration.HookId) ? "(unnamed)" : registration.HookId)}" +
-                         "（直通原方法，物理跳转保留到进程结束）");
-        }
-
-        internal static string Describe(Registration registration) =>
-            $"{registration.AddonId} · {registration.HookId} · {registration.Mode}：命中 {registration.Calls} 次，" +
-            $"其中放行 {registration.Forwarded} 次";
+        private static readonly object GateLock = new object();
+        private static readonly ConcurrentDictionary<int, Chain> ChainsById =
+            new ConcurrentDictionary<int, Chain>();
+        private static readonly Dictionary<MethodInfo, Chain> ChainsByTarget =
+            new Dictionary<MethodInfo, Chain>();
+        private static ModuleBuilder _gateModule;
+        private static int _nextChainId;
+        private static int _nextRegistrationId;
 
         /// <summary>
-        /// Entry point of every generated gate. Called with the target's ABI arguments, so value
-        /// types arrive boxed in <paramref name="args"/>.
+        /// Attaches one module handler to a host method, creating the chain (and the single gate
+        /// detour) on first use.
         /// </summary>
-        public static object Invoke(int id, object self, object[] args)
+        internal static IDisposable Attach(string addonId, string hookId, HookMode mode,
+            Delegate handler, MethodInfo target)
         {
-            if (!Registry.TryGetValue(id, out var registration)) return null;
-            Interlocked.Increment(ref registration.Calls);
+            Chain chain;
+            Registration registration;
+            var installedNow = false;
 
-            if (!registration.Active || !SwapHost.AddonEnabled(registration.AddonId))
+            lock (GateLock)
             {
-                Interlocked.Increment(ref registration.Forwarded);
-                var installer = registration.Installer;
-                return installer == null
-                    ? null
-                    : installer.InvokeOriginal(self, args ?? new object[0]);
+                if (!ChainsByTarget.TryGetValue(target, out chain))
+                {
+                    chain = new Chain
+                    {
+                        Id = Interlocked.Increment(ref _nextChainId),
+                        Target = target
+                    };
+                    ChainsByTarget[target] = chain;
+                    ChainsById[chain.Id] = chain;
+                }
+
+                registration = new Registration
+                {
+                    Id = Interlocked.Increment(ref _nextRegistrationId),
+                    AddonId = addonId,
+                    HookId = hookId,
+                    Mode = mode,
+                    Handler = handler
+                };
+                lock (chain.Registrations) chain.Registrations.Add(registration);
+
+                if (chain.Installer == null)
+                {
+                    var gate = BuildGate(target, chain);
+                    chain.Installer = DetourInstaller.Install(target, gate);
+                    installedNow = true;
+                }
             }
 
-            var passthrough = new List<object>();
-            if (self != null) passthrough.Add(self);
-            if (args != null) passthrough.AddRange(args);
-            var arguments = passthrough.ToArray();
-            var installerRef = registration.Installer;
-
-            switch (registration.Mode)
-            {
-                case HookMode.Prefix:
-                    // Observe (or veto by throwing) before the host method runs; its own result wins.
-                    registration.Handler.DynamicInvoke(arguments);
-                    return installerRef == null ? null : installerRef.InvokeOriginal(self, args ?? new object[0]);
-
-                case HookMode.Postfix:
-                    // Let the host method run first, then hand the same call to the handler.
-                    var result = installerRef == null ? null : installerRef.InvokeOriginal(self, args ?? new object[0]);
-                    registration.Handler.DynamicInvoke(arguments);
-                    return result;
-
-                default:
-                    // Replace: the handler owns the call and its return value is the result.
-                    return registration.Handler.DynamicInvoke(arguments);
-            }
+            SwapLog.Info($"[hookbus] {(installedNow ? "新建钩子链并装载" : "加入既有钩子链")}：" +
+                         $"{target.DeclaringType?.Name}.{target.Name} ← {addonId} · {mode} · " +
+                         $"{(string.IsNullOrEmpty(hookId) ? "(unnamed)" : hookId)}" +
+                         $"（当前{(SwapHost.AddonEnabled(addonId) ? "启用" : "禁用")}）");
+            return new ScopedToken(chain, registration);
         }
 
-        /// <summary>Handler hits per registration - used by the self-check and diagnostics.</summary>
+        internal static void Deactivate(Chain chain, Registration registration)
+        {
+            registration.Active = false;
+            lock (chain.Registrations) chain.Registrations.Remove(registration);
+            SwapLog.Info($"[hookbus] 模块钩子已移除：{registration.AddonId} · " +
+                         $"{(string.IsNullOrEmpty(registration.HookId) ? "(unnamed)" : registration.HookId)}" +
+                         (chain.Registrations.Count == 0
+                             ? "（链路已空，调用继续直通原方法）"
+                             : $"（链上剩 {chain.Registrations.Count} 个 handler）"));
+        }
+
         internal static IReadOnlyCollection<string> Snapshot() =>
-            Registry.Values.Select(Describe).ToList();
+            ChainsById.Values
+                .SelectMany(chain => chain.Snapshot().Select(registration =>
+                    $"{chain.Target.DeclaringType?.Name}.{chain.Target.Name} · {registration.AddonId} · " +
+                    $"{registration.Mode}：命中 {registration.Calls} 次，跳过 {registration.Skipped} 次"))
+                .ToList();
+
+        /// <summary>Entry point of every generated gate (called with the target's ABI arguments).</summary>
+        public static object InvokeChain(int chainId, object self, object[] args)
+        {
+            if (!ChainsById.TryGetValue(chainId, out var chain)) return null;
+            var registrations = chain.Snapshot();
+            var arguments = BuildArguments(self, args);
+
+            foreach (var registration in registrations)
+            {
+                if (registration.Mode != HookMode.Prefix) continue;
+                if (registration.IsLive) registration.Call(arguments);
+                else registration.MarkSkipped();
+            }
+
+            object result = null;
+            var replaced = false;
+            foreach (var registration in registrations)
+            {
+                if (registration.Mode != HookMode.Replace) continue;
+                if (!registration.IsLive)
+                {
+                    registration.MarkSkipped();
+                    continue;
+                }
+                result = registration.Call(arguments);
+                replaced = true;
+                break;
+            }
+
+            if (!replaced)
+            {
+                var installer = chain.Installer;
+                result = installer == null ? null : installer.InvokeOriginal(self, args ?? new object[0]);
+            }
+
+            foreach (var registration in registrations)
+            {
+                if (registration.Mode != HookMode.Postfix) continue;
+                if (registration.IsLive) registration.Call(arguments);
+                else registration.MarkSkipped();
+            }
+
+            return result;
+        }
+
+        private static object[] BuildArguments(object self, object[] args)
+        {
+            if (self == null) return args ?? new object[0];
+            var all = new object[(args?.Length ?? 0) + 1];
+            all[0] = self;
+            if (args != null) Array.Copy(args, 0, all, 1, args.Length);
+            return all;
+        }
 
         /// <summary>
         /// Builds the gate method for one target: same ABI (value parameters keep their type,
-        /// reference parameters are object), body forwards to <see cref="Invoke"/>.
+        /// reference parameters are object), body forwards to <see cref="InvokeChain"/>.
         /// </summary>
-        internal static MethodInfo BuildGate(MethodInfo target, Registration registration)
+        internal static MethodInfo BuildGate(MethodInfo target, Chain chain)
         {
             var parameters = new List<ParameterExpression>();
             var hasSelf = !target.IsStatic;
@@ -155,9 +222,11 @@ namespace PclDlSwap.Payload.Swap
                 .Skip(hasSelf ? 1 : 0)
                 .Select(expression => Expression.Convert(expression, typeof(object)));
             var call = Expression.Call(
-                typeof(ScopedHook).GetMethod(nameof(Invoke), BindingFlags.Public | BindingFlags.Static),
-                Expression.Constant(registration.Id),
-                self == null ? (Expression)Expression.Constant(null, typeof(object)) : Expression.Convert(self, typeof(object)),
+                typeof(ScopedHook).GetMethod(nameof(InvokeChain), BindingFlags.Public | BindingFlags.Static),
+                Expression.Constant(chain.Id),
+                self == null
+                    ? (Expression)Expression.Constant(null, typeof(object))
+                    : Expression.Convert(self, typeof(object)),
                 Expression.NewArrayInit(typeof(object), boxed));
 
             var body = target.ReturnType == typeof(void)
@@ -166,12 +235,16 @@ namespace PclDlSwap.Payload.Swap
 
             var signature = parameters.Select(parameter => parameter.Type).ToList();
             signature.Add(target.ReturnType);
-            var delegateType = Expression.GetDelegateType(signature.ToArray());
+            // GetDelegateType needs at least one parameter plus the return type; a parameterless
+            // void target (e.g. ModBase.GetUuid) is exactly the plain Action case.
+            var delegateType = signature.Count == 1 && signature[0] == typeof(void)
+                ? typeof(Action)
+                : Expression.GetDelegateType(signature.ToArray());
             var lambda = Expression.Lambda(delegateType, body, parameters);
 
             // Compile into a real method of a dynamic assembly: the detour engine needs a genuine
             // MethodHandle (RuntimeHelpers.PrepareMethod), which a DynamicMethod cannot provide.
-            var typeBuilder = NextGateType(registration.Id);
+            var typeBuilder = NextGateType(chain.Id);
             var methodBuilder = typeBuilder.DefineMethod("Invoke",
                 MethodAttributes.Public | MethodAttributes.Static,
                 target.ReturnType,
@@ -183,16 +256,32 @@ namespace PclDlSwap.Payload.Swap
 
         private static TypeBuilder NextGateType(int id)
         {
-            lock (GateLock)
+            if (_gateModule == null)
             {
-                if (_gateModule == null)
-                {
-                    var assembly = AppDomain.CurrentDomain.DefineDynamicAssembly(
-                        new AssemblyName("Pcl2Swap.ScopedHooks"), AssemblyBuilderAccess.Run);
-                    _gateModule = assembly.DefineDynamicModule("Pcl2Swap.ScopedHooks");
-                }
-                return _gateModule.DefineType("Gate_" + id,
-                    TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
+                var assembly = AppDomain.CurrentDomain.DefineDynamicAssembly(
+                    new AssemblyName("Pcl2Swap.ScopedHooks"), AssemblyBuilderAccess.Run);
+                _gateModule = assembly.DefineDynamicModule("Pcl2Swap.ScopedHooks");
+            }
+            return _gateModule.DefineType("Gate_" + id,
+                TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
+        }
+
+        private sealed class ScopedToken : IDisposable
+        {
+            private readonly Chain _chain;
+            private readonly Registration _registration;
+            private int _disposed;
+
+            public ScopedToken(Chain chain, Registration registration)
+            {
+                _chain = chain;
+                _registration = registration;
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+                Deactivate(_chain, _registration);
             }
         }
     }

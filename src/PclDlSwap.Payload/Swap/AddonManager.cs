@@ -72,6 +72,10 @@ namespace PclDlSwap.Payload.Swap
             }
             if (record.Enabled == enabled) return true;
 
+            // Flip the flag first: the module's own lifecycle hooks (and any hook it attaches)
+            // must see the new state, otherwise a re-enable would install its hooks as "disabled".
+            var previous = record.Enabled;
+            record.Enabled = enabled;
             try
             {
                 if (enabled)
@@ -92,7 +96,6 @@ namespace PclDlSwap.Payload.Swap
                     record.Status = "disabled";
                 }
 
-                record.Enabled = enabled;
                 SaveState();
                 var note = record.BuiltIn
                     ? (enabled
@@ -104,8 +107,10 @@ namespace PclDlSwap.Payload.Swap
             }
             catch (Exception ex)
             {
+                record.Enabled = previous;
                 record.Status = "failed";
                 record.Failure = ex;
+                SaveState();
                 SwapLog.Error($"Addon {(enabled ? "启用" : "禁用")}失败：{record.Id}", ex);
                 return false;
             }

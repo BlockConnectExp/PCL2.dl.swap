@@ -14,4 +14,11 @@
   <ItemGroup>
     <ProjectReference Include="..\PCL2Swap.Api\PCL2Swap.Api.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The sample builds a real WPF page (live counters), so it needs the desktop references. -->
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Xaml" />
+  </ItemGroup>
 </Project>

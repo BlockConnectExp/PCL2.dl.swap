@@ -165,6 +165,11 @@ Addon 的用法：
 - 设置 → Swap Addon 每行都有「启用 / 禁用」按钮：点击即时写入状态、重建页面，
   **无需重启**（钩子句柄保留但按开关放行）。
 - `OnDisable`/`OnUnload` 会被调用；请在 `OnEnable` 里订阅事件、在 `OnDisable` 里退订。
+- **生效范围（重要）**：钩子类行为（OTA 拦截、弹窗取消按钮、下载查毒、事件订阅）**立即**随开关生效；
+  而**结构类修复**（原版游戏页重驱、下载侧栏恢复）是启动时对宿主对象的一次性修改——关闭模块后
+  当前进程里的页面/侧栏保持已修复状态，**重启 PCL 才会完全回退**（与 Xposed/LSPosed 的
+  “重启生效”语义一致）。真机验证：`modules.json` 置 `{"swap.download-mc":{"enabled":false}}`
+  后重启，下载页回到宿主原生的“不再提供 MC 下载功能”，两个看门线程直接退出。
 
 ## 8. 事件总线（IHooks 的三个语义事件）
 
@@ -207,6 +212,7 @@ public void OnEnable()
 | `Instance` | 实例目录与选中项、`GetMcFoolName`、按宿主缓存枚举实例、`McInstance` 成员、`ModLaunch.GetNativesFolder` |
 | `Download` | 源顺序开关、`DlClientListGet`、Assets/Library/LauncherOrMeta/Mod 源、`DlModRequest` |
 | `Launch` | `McLaunchStart`、`McLoginName`、`McLoginAble` |
+| `Loader` | 任务栏进度（`TaskbarProgress` / `RefreshTaskbar` / `TaskbarAdd`）、LoaderBase 的 `State` / `Progress` / `IsRunning` / `Start` / `Cancel` / `Failed` |
 
 未覆盖的成员仍可通过 `ISwapApi.Surface`（全量清单）+ `ISwapApi.Reflect` 直达。
 

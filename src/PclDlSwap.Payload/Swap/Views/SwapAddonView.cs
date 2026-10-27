@@ -39,6 +39,8 @@ namespace PclDlSwap.Payload.Swap.Views
             page.Children.Add(SwapUi.Card("说明",
                 SwapUi.Note("开关立即生效并写入 modules.json（内置功能的钩子按开关放行/拦截）；" +
                             "模块状态、配置与已安装的 Addon 都放在数据目录里，可在 Swap Settings 打开。"),
+                SwapUi.Note("注意：结构类修复（原版游戏页 / 下载侧栏）是启动时对宿主对象的一次性修复，" +
+                            "关闭模块后要重启 PCL 才会完全回退；OTA、弹窗类拦截则立即停用。"),
                 SwapUi.Buttons(SwapUi.Button("打开 Addon 目录",
                     () => OpenFolder(api?.Host.AddonDirectory)))));
 

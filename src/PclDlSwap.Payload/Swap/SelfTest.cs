@@ -107,6 +107,7 @@ namespace PclDlSwap.Payload.Swap
             Probe("Pcl.Download.PreferMojang", () => api.Pcl.Download.PreferMojang);
             Probe("Pcl.Download.SourceModGet",
                 () => api.Pcl.Download.SourceModGet("sodium"));
+            Probe("Pcl.Loader.TaskbarProgress", () => api.Pcl.Loader.TaskbarProgress);
             Probe("Pcl.Launch.LoginName", () => api.Pcl.Launch.LoginName());
             Probe("Pcl.Launch.LoginAble", () => api.Pcl.Launch.LoginAble());
 

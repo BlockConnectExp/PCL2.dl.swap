@@ -759,6 +759,40 @@ namespace PclDlSwap.ExLoaderHarness
                     PCL.ModLaunch.StartCalls == 1);
             }
 
+            var loader = pcl?.GetType().GetProperty("Loader")?.GetValue(pcl);
+            Expect("Loader family exposed", loader != null);
+            if (loader != null)
+            {
+                var loaderType = loader.GetType();
+                Expect("Loader.TaskbarProgress reads the host value",
+                    Math.Abs(Convert.ToDouble(loaderType.GetProperty("TaskbarProgress")
+                        ?.GetValue(loader) ?? 0.0) - 0.42) < 0.0001);
+
+                loaderType.GetMethod("RefreshTaskbar")?.Invoke(loader, null);
+                Expect("Loader.RefreshTaskbar reaches the host", PCL.ModLoader.TaskbarRefreshCalls == 1);
+
+                loaderType.GetMethod("TaskbarAdd")?.Invoke(loader, new object[] { "combo" });
+                Expect("Loader.TaskbarAdd publishes to the host",
+                    Convert.ToString(PCL.ModLoader.LastTaskbarCombo) == "combo");
+
+                var stub = new PCL.ModLoader.LoaderBase();
+                loaderType.GetMethod("Start")?.Invoke(loader, new object[] { stub, "input", true });
+                Expect("Loader.Start drives a loader instance",
+                    stub.StartCalls == 1 && stub.LastForceRestart &&
+                    Convert.ToBoolean(loaderType.GetMethod("IsRunning")
+                        ?.Invoke(loader, new object[] { stub }) ?? false));
+
+                stub.Progress = 0.5;
+                Expect("Loader.GetProgress reads the loader",
+                    Math.Abs(Convert.ToDouble(loaderType.GetMethod("GetProgress")
+                        ?.Invoke(loader, new object[] { stub }) ?? 0.0) - 0.5) < 0.0001);
+
+                loaderType.GetMethod("Cancel")?.Invoke(loader, new object[] { stub });
+                loaderType.GetMethod("Failed")?.Invoke(loader, new object[] { stub, new Exception("boom") });
+                Expect("Loader.Cancel/Failed reach the loader",
+                    stub.CancelCalls == 1 && stub.FailedCalls == 1);
+            }
+
             Console.WriteLine(failures == 0 ? "[pcl] RESULT: PASS" : "[pcl] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
         }
@@ -1728,6 +1762,49 @@ namespace PCL
         public static string GetNativesFolder(object instance) => @"C:\temp\natives";
         public static string McLoginName() => LoginNameValue;
         public static string McLoginAble() => string.Empty;
+    }
+
+    /// <summary>Stand-in for PCL.ModLoader: taskbar helpers plus a LoaderBase instance.</summary>
+    public static class ModLoader
+    {
+        public static int TaskbarRefreshCalls;
+        public static double TaskbarProgressValue = 0.42;
+        public static object LastTaskbarCombo;
+
+        public static double LoaderTaskbarProgressGet() => TaskbarProgressValue;
+        public static void LoaderTaskbarProgressRefresh() => TaskbarRefreshCalls++;
+        public static void LoaderTaskbarAdd(object combo) => LastTaskbarCombo = combo;
+
+        public class LoaderBase
+        {
+            public string State = "Waiting";
+            public double Progress;
+            public int StartCalls;
+            public int CancelCalls;
+            public int FailedCalls;
+            public object LastInput;
+            public bool LastForceRestart;
+
+            public void Start(object input, bool forceRestart)
+            {
+                StartCalls++;
+                LastInput = input;
+                LastForceRestart = forceRestart;
+                State = "Loading";
+            }
+
+            public void Cancel()
+            {
+                CancelCalls++;
+                State = "Canceled";
+            }
+
+            public void Failed(Exception error)
+            {
+                FailedCalls++;
+                State = "Failed";
+            }
+        }
     }
 
     /// <summary>Stand-in for PCL.PageDownloadInstall.</summary>

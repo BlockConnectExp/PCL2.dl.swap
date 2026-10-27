@@ -45,7 +45,7 @@ namespace PclDlSwap.Loader
             var targetDirectory = Path.GetDirectoryName(Path.GetFullPath(target)) ?? baseDirectory;
             var patchedPath = Path.Combine(targetDirectory, PatchedFileName);
 
-            Console.WriteLine("PCL2 DLL-Swap loader (v26.0-Alpha 4)");
+            Console.WriteLine("PCL2 DLL-Swap loader (v26.0-Alpha 5)");
             Console.WriteLine("  目标    : " + target);
             Console.WriteLine("  原版哈希: " + ShortHash(target));
 

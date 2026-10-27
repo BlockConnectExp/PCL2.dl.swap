@@ -27,6 +27,7 @@ namespace PclDlSwap.Payload.Swap
             Instance = new InstanceAccess(host);
             Download = new DownloadAccess(host);
             Launch = new LaunchAccess(host);
+            Loader = new LoaderAccess(host);
         }
 
         public IPclSecretAccess Secret { get; }
@@ -37,6 +38,7 @@ namespace PclDlSwap.Payload.Swap
         public IPclInstanceAccess Instance { get; }
         public IPclDownloadAccess Download { get; }
         public IPclLaunchAccess Launch { get; }
+        public IPclLoaderAccess Loader { get; }
 
         // ------------------------------------------------------------------ helpers
 
@@ -488,6 +490,58 @@ namespace PclDlSwap.Payload.Swap
                 var method = FindMethod(_host, "PCL.ModLaunch", name, m => m.GetParameters().Length == 0);
                 if (method == null) throw new MissingMethodException("PCL.ModLaunch." + name);
                 return method.Invoke(null, null);
+            }
+        }
+
+        private sealed class LoaderAccess : IPclLoaderAccess
+        {
+            private readonly Assembly _host;
+
+            public LoaderAccess(Assembly host) => _host = host;
+
+            public double TaskbarProgress =>
+                Convert.ToDouble(Static("LoaderTaskbarProgressGet", 0).Invoke(null, null) ?? 0.0);
+
+            public void RefreshTaskbar() => Static("LoaderTaskbarProgressRefresh", 0).Invoke(null, null);
+
+            public void TaskbarAdd(object loaderCombo) =>
+                Static("LoaderTaskbarAdd", 1).Invoke(null, new[] { loaderCombo });
+
+            public object GetState(object loader) => ReadMember(Require(loader), "State");
+
+            public double GetProgress(object loader) =>
+                Convert.ToDouble(ReadMember(Require(loader), "Progress") ?? 0.0);
+
+            public bool IsRunning(object loader) =>
+                string.Equals(Convert.ToString(GetState(loader)), "Loading", StringComparison.OrdinalIgnoreCase);
+
+            public void Start(object loader, object input = null, bool forceRestart = false) =>
+                InstanceCall(Require(loader), "Start", input, forceRestart);
+
+            public void Cancel(object loader) => InstanceCall(Require(loader), "Cancel");
+
+            public void Failed(object loader, Exception error) =>
+                InstanceCall(Require(loader), "Failed", error);
+
+            private static object Require(object loader) =>
+                loader ?? throw new ArgumentNullException(nameof(loader), "需要一个 LoaderBase 实例");
+
+            private MethodInfo Static(string name, int parameterCount)
+            {
+                var method = FindMethod(_host, "PCL.ModLoader", name,
+                    candidate => candidate.GetParameters().Length == parameterCount);
+                if (method == null) throw new MissingMethodException("PCL.ModLoader." + name);
+                return method;
+            }
+
+            private static void InstanceCall(object loader, string name, params object[] args)
+            {
+                var method = loader.GetType()
+                    .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .FirstOrDefault(candidate =>
+                        candidate.Name == name && candidate.GetParameters().Length == args.Length);
+                if (method == null) throw new MissingMethodException(loader.GetType().FullName, name);
+                method.Invoke(loader, args);
             }
         }
     }

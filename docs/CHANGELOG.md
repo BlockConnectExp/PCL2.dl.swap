@@ -6,6 +6,28 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-04:45:00 Alpha 5: Loader family, and the toggle explains its own scope
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\IPclAccess.cs                      + IPclLoaderAccess
+.\src\PclDlSwap.Payload\Swap\PclAccess.cs             + LoaderAccess
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs          开关日志注明“结构类修复需重启回退”
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs   页面说明补同一条
+.\src\PclDlSwap.Payload\Host\SwapLog.cs + Shim.cpp + Loader 版本号升 v26.0-Alpha 5
+.\docs\swap-api.md + RELEASE-NOTES-v26.0-Alpha4.md    生效范围说明
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|Loader 族|新增 `IPclAccess.Loader`：任务栏进度（`LoaderTaskbarProgressGet` / `Refresh` / `TaskbarAdd`）、任意 LoaderBase 的 `State` / `Progress` / `IsRunning` / `Start(input, forceRestart)` / `Cancel` / `Failed`。harness `--pcltest` 扩到 30 项断言全绿|2026.10.28-04:45:00|PCL2.dl.swap
+2|开关生效范围|回应 owner 实测：禁用 Download MC 后同一次运行里“原版游戏”仍在——因为页面/侧栏修复是启动时对宿主对象的一次性修改。现在开关日志与 Swap Addon 页面都写明：钩子类拦截立即生效，结构类修复需重启 PCL 完全回退；真机验证（modules.json 关闭 + 重启）下载页确实回到宿主原生的“不再提供 MC 下载功能”|2026.10.28-04:45:00|PCL2.dl.swap
+3|版本|工作构建升到 `v26.0-Alpha 5`（`%TEMP%\PCL2Swap\v26.0-Alpha5\`），与已发布的 Alpha 4 资产区分开|2026.10.28-04:45:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-04:20:00 Alpha 4 repack 5/6: the hook event bus is live
 
 GitCommitHash: tag v26.0-Alpha4（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha4.md）

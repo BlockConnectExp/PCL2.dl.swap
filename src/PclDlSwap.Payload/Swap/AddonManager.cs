@@ -94,8 +94,12 @@ namespace PclDlSwap.Payload.Swap
 
                 record.Enabled = enabled;
                 SaveState();
-                SwapLog.Info($"Addon 已{(enabled ? "启用" : "禁用")}：{record.Id}" +
-                             (record.BuiltIn ? "（内置功能随开关放行/拦截）" : string.Empty));
+                var note = record.BuiltIn
+                    ? (enabled
+                        ? "（内置功能的钩子立即放行）"
+                        : "（钩子类拦截立即停用；已完成的页面/侧栏修复要重启 PCL 才会完全回退）")
+                    : string.Empty;
+                SwapLog.Info($"Addon 已{(enabled ? "启用" : "禁用")}：{record.Id}" + note);
                 return true;
             }
             catch (Exception ex)

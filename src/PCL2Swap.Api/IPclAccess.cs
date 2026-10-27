@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace PCL2Swap.Api
@@ -17,6 +18,42 @@ namespace PCL2Swap.Api
         IPclInstanceAccess Instance { get; }
         IPclDownloadAccess Download { get; }
         IPclLaunchAccess Launch { get; }
+        IPclLoaderAccess Loader { get; }
+    }
+
+    /// <summary>
+    /// PCL.ModLoader - the launcher's own task/loader infrastructure. Addons can drive an existing
+    /// loader (start/cancel/watch progress) or report taskbar progress like the launcher does.
+    /// Loader objects are host-shaped (LoaderBase/LoaderCombo&lt;T&gt;), so they travel as
+    /// <c>object</c>; use <see cref="ISwapApi.Surface"/> to discover the concrete members.
+    /// </summary>
+    public interface IPclLoaderAccess
+    {
+        /// <summary>LoaderTaskbarProgressGet - the 0..1 progress the launcher shows on the taskbar.</summary>
+        double TaskbarProgress { get; }
+
+        /// <summary>LoaderTaskbarProgressRefresh.</summary>
+        void RefreshTaskbar();
+
+        /// <summary>LoaderTaskbarAdd - publishes a LoaderCombo&lt;T&gt; to the taskbar list.</summary>
+        void TaskbarAdd(object loaderCombo);
+
+        /// <summary>LoaderBase.State (LoadState) of a loader object.</summary>
+        object GetState(object loader);
+
+        /// <summary>LoaderBase.Progress (0..1) of a loader object.</summary>
+        double GetProgress(object loader);
+
+        bool IsRunning(object loader);
+
+        /// <summary>LoaderBase.Start(input, forceRestart).</summary>
+        void Start(object loader, object input = null, bool forceRestart = false);
+
+        /// <summary>LoaderBase.Cancel.</summary>
+        void Cancel(object loader);
+
+        /// <summary>LoaderBase.Failed(error).</summary>
+        void Failed(object loader, Exception error);
     }
 
     /// <summary>PCL.ModMinecraft - instance folders and the selected instance.</summary>

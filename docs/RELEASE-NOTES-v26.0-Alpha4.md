@@ -72,6 +72,13 @@ The reference implementation lives in `src/PCL2Swap.SampleAddon`; the author gui
 - Detours cannot be hot-unloaded yet: switching a module off gates its behaviour at runtime
   (hooks stay installed), so a *code* change still needs a launcher restart. Per-addon
   `IHooks.Attach` detach tokens are still intent-only.
+- **Scope of a toggle**: hook-shaped behaviour (OTA interception, cancel button, download
+  scanning, event subscriptions) starts or stops immediately. *Structural* repairs (原版游戏
+  page redrive, download sidebar restore) are one-shot changes to live host objects made at
+  start-up, so switching the module off keeps them until the launcher is restarted - the same
+  model as Xposed/LSPosed. Verified on 2.99.0: with
+  `{"swap.download-mc":{"enabled":false}}` in `modules.json`, the download page returns to the
+  host's own "不再提供 MC 下载功能" state and both watcher threads exit immediately.
 - The disk-patch shape (`PclDlSwap.Loader.exe`) remains static-only: the runtime features above
   belong to the injected shape until the static bootstrap lands.
 - Addons share the host process and CLR: they are trusted code by definition.

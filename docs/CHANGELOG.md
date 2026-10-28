@@ -8,7 +8,7 @@
 ---
 ## 2026.10.28-17:45:00 Alpha 9: 模块日志 + 崩溃隔离
 
-GitCommitHash: (unreleased)
+GitCommitHash: tag v26.0-Alpha9（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha9.md）
 
 ChangedFiles:
 ```

@@ -8,7 +8,7 @@
 ---
 ## 2026.10.28-19:40:00 Alpha 11: 安装前预览（信任审查）
 
-GitCommitHash: (unreleased)
+GitCommitHash: tag v26.0-Alpha11（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha11.md）
 
 ChangedFiles:
 ```

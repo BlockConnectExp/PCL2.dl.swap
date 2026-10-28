@@ -161,6 +161,33 @@ namespace PclDlSwap.Payload.Swap
                              : $"（链上剩 {chain.Registrations.Count} 个 handler）"));
         }
 
+        /// <summary>
+        /// Drops every handler one module owns. Uninstall and reload need this: a retired module's
+        /// registrations would otherwise stay live (an unknown addon id counts as enabled), so its
+        /// hooks would keep running - and a reload would run the previous generation's Prefix handler
+        /// twice. Returns how many handlers were removed.
+        /// </summary>
+        internal static int RemoveAll(string addonId)
+        {
+            if (string.IsNullOrEmpty(addonId)) return 0;
+
+            var removed = 0;
+            foreach (var chain in ChainsById.Values)
+            {
+                foreach (var registration in chain.Snapshot())
+                {
+                    if (!string.Equals(registration.AddonId, addonId, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    Deactivate(chain, registration);
+                    removed++;
+                }
+            }
+
+            if (removed > 0)
+                SwapLog.Info($"[hookbus] 已清理模块 {addonId} 的 {removed} 个钩子注册。");
+            return removed;
+        }
+
         internal static IReadOnlyCollection<string> Snapshot() =>
             ChainsById.Values
                 .SelectMany(chain => chain.Snapshot().Select(registration =>

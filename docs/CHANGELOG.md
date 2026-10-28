@@ -6,9 +6,33 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
-## 2026.10.28-19:40:00 Alpha 11: 安装前预览（信任审查）
+## 2026.10.28-21:45:00 v26.1-Alpha 1: 模块详情视图 + 钩子注册清理
 
-GitCommitHash: tag v26.0-Alpha11（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha11.md）
+GitCommitHash: tag v26.1-Alpha1（发布说明见 docs/RELEASE-NOTES-v26.1-Alpha1.md）
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs         审计字段（来源/哈希/时间）、Selected/LogTail/GetModuleConfigPath/Reload
+.\src\PclDlSwap.Payload\Swap\ScopedHook.cs           RemoveAll：清理一个模块的全部钩子注册
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs  详情卡片 + 每行「详情」按钮 + 紧凑动作条
+.\src\PclDlSwap.ExLoaderHarness\Program.cs           9 项新断言（审计、日志尾部、配置路径、选中态、重载、注册清理）
+.\docs\swap-api.md                                   §11 详情视图与重载语义
+.\src\Pcl2Swap.Shim\Shim.cpp + SwapLog.cs + Loader     版本号升 v26.0-Alpha 12
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|模块详情视图|每行的「详情」按钮展开该模块的管理页：状态/id/版本/**安装时间**/**来源包**/**包 SHA-256**/模块目录/配置文件/API 范围/入口/作者/形状与宿主作用域/权限声明/钩子数（命中、抛错）/钩子链/模块日志尾部，以及 `禁用\|启用`、`重载`、`打开日志`、`打开配置目录`、`收起`、`卸载` 六个动作；安装时记录来源与哈希，启动时发现的模块以包文件为来源与时间|2026.10.28-21:45:00|PCL2.dl.swap
+2|钩子注册清理（缺陷修复）|卸载/更新后模块的钩子注册原本留在链上——**未知 addon id 被当成"已启用"**，于是已卸载模块的 handler 会继续执行；`ScopedHook.RemoveAll` 现在在 Retire 与 Reload 时清空该模块的全部注册（重载同时避免上一代 Prefix handler 叠加执行）|2026.10.28-21:45:00|PCL2.dl.swap
+3|重载动作|非内置模块可一键 `重载`：OnDisable → 平台清理该模块遗留注册 → OnLoad/OnEnable；内置模块拒绝重载并提示用开关|2026.10.28-21:45:00|PCL2.dl.swap
+4|界面细节|详情动作条按钮改用 100px 紧凑宽度（默认 140 会撑出卡片）；开关/卸载仍走原生确认框|2026.10.28-21:45:00|PCL2.dl.swap
+5|验证|harness 新增 9 项断言（审计三元组、日志尾部、配置路径、选中态记忆、重载成功且仍启用、重载清掉上一代注册、内置模块拒绝重载、卸载后注册归零等）全部 PASS，六个套件全绿；真机 2.99.0：详情页完整渲染（作用域/权限/钩子链/日志尾部/六按钮同一行），点「重载」日志实录 `Addon 重载：demo.scope` → `模块钩子已移除（链路已空）` → `加入既有钩子链` → `Addon 已启用`|2026.10.28-21:45:00|PCL2.dl.swap
+
+---
+## 2026.10.28-19:40:00 v26.1-Alpha 1: 安装前预览（信任审查）
+
+GitCommitHash: tag v26.1-Alpha1（与上一条同属 v26.1-Alpha 1；原先的 v26.0-Alpha11 预发布已并入本次发布）
 
 ChangedFiles:
 ```
@@ -29,9 +53,9 @@ Num|File Name|Change Description|Change Time|Changer
 4|验证|harness：新增「可预览未安装的包」「预览不触碰模块目录」「预览含 API 范围与 SHA-256」「预览含权限声明」4 项断言，六套件全绿；真机 2.99.0：预览对话框原生渲染，完整列出 `形状作用域 injected、patched / 宿主版本 >=2.99.0 / 权限 host.hooks.attach、host.settings.write` 与包 SHA-256，点「取消」日志记录 `安装预览返回：2`|2026.10.28-19:40:00|PCL2.dl.swap
 
 ---
-## 2026.10.28-18:55:00 Alpha 10: 宿主版本作用域 + 安装前兼容预检
+## 2026.10.28-18:55:00 Alpha 10 → 正式版 v26.0: 宿主版本作用域 + 安装前兼容预检
 
-GitCommitHash: tag v26.0-Alpha10（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha10.md）
+GitCommitHash: tag v26.0（正式发布，发布说明见 docs/RELEASE-NOTES-v26.0.md；预发布标签 v26.0-Alpha10 保留溯源）
 
 ChangedFiles:
 ```

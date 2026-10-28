@@ -1440,6 +1440,50 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("a module scoped to another PCL build is skipped, not failed",
                     StatusOf(otherHost) == "skipped-host");
 
+                // ---- module detail view: audit trail, log tail, selection, reload ----
+                var installedRecordType = installed?.GetType();
+                Expect("install records the audit trail (source, hash, time)",
+                    Convert.ToString(installedRecordType?.GetProperty("SourcePath")?.GetValue(installed)) == external &&
+                    (Convert.ToString(installedRecordType?.GetProperty("Sha256")?.GetValue(installed)) ?? string.Empty).Length == 64 &&
+                    installedRecordType?.GetProperty("InstalledAtUtc")?.GetValue(installed) != null);
+
+                var logTail = Convert.ToString(manager?.GetType().GetMethod("LogTail")
+                    ?.Invoke(manager, new object[] { "test.installed", 5 })) ?? string.Empty;
+                Expect("the detail view can read a module's log tail", logTail.Contains("[info]"));
+
+                var configPath = Convert.ToString(manager?.GetType().GetMethod("GetModuleConfigPath")
+                    ?.Invoke(manager, new object[] { "test.installed" }));
+                Expect("the detail view knows where the module config lives",
+                    !string.IsNullOrEmpty(configPath) &&
+                    configPath.EndsWith("config.json", StringComparison.OrdinalIgnoreCase));
+
+                manager?.GetType().GetProperty("SelectedAddonId")?.SetValue(manager, "test.installed");
+                var selectedRecord = manager?.GetType().GetProperty("Selected")?.GetValue(manager);
+                Expect("the manager remembers which module detail is open",
+                    Convert.ToString(selectedRecord?.GetType().GetProperty("Id")?.GetValue(selectedRecord)) ==
+                    "test.installed");
+                manager?.GetType().GetProperty("SelectedAddonId")?.SetValue(manager, null);
+
+                var hookChainType = payload.GetType("PclDlSwap.Payload.Swap.ScopedHook", throwOnError: true);
+                var countFor = hookChainType.GetMethod("CountFor", BindingFlags.NonPublic | BindingFlags.Static);
+                // The harness host lacks ModBase.ToUnixTimestampUtc, so the sample module cannot
+                // attach its own hook here - register one for it to give the reload something to clean.
+                attachScoped?.Invoke(api, new object[]
+                {
+                    "test.installed", "PCL.HookTarget", "Ping", "detail.ping",
+                    PCL2Swap.Api.HookMode.Replace, (Func<int, int>)(value => value * 3)
+                });
+                var hooksBeforeReload = Convert.ToInt32(countFor?.Invoke(null, new object[] { "test.installed" }) ?? -1);
+                var reloadMethod = manager?.GetType().GetMethod("Reload");
+                var reloaded = Convert.ToBoolean(reloadMethod?.Invoke(manager, new object[] { "test.installed" }) ?? false);
+                var hooksAfterReload = Convert.ToInt32(countFor?.Invoke(null, new object[] { "test.installed" }) ?? -1);
+                Expect("reload cycles the module and leaves it enabled",
+                    reloaded && Convert.ToBoolean(isEnabled?.Invoke(manager, new object[] { "test.installed" })));
+                Expect("reload drops the previous generation's hooks",
+                    hooksBeforeReload > 0 && hooksAfterReload == 0);
+                Expect("built-in modules refuse to reload",
+                    !Convert.ToBoolean(reloadMethod?.Invoke(manager, new object[] { "swap.ota-protector" }) ?? true));
+
                 var removedOk = Convert.ToBoolean(uninstall?.Invoke(manager, new object[] { "test.installed" }));
                 Expect("uninstall drops the module from the list",
                     removedOk && !RecordIds().Contains("test.installed"));
@@ -1453,6 +1497,8 @@ namespace PclDlSwap.ExLoaderHarness
                     !Directory.Exists(unpackedDir) || queued);
                 Expect("uninstall removes the module's own log",
                     !File.Exists(moduleLogPath) || queued);
+                Expect("uninstall drops the module's hook registrations",
+                    Convert.ToInt32(countFor?.Invoke(null, new object[] { "test.installed" }) ?? -1) == 0);
                 Expect("the user's original package survived the uninstall", File.Exists(external));
                 Expect("built-in modules refuse to uninstall",
                     !Convert.ToBoolean(uninstall?.Invoke(manager, new object[] { "swap.ota-protector" })));

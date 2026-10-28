@@ -38,6 +38,11 @@ namespace PclDlSwap.Payload.Swap.Views
 
             page.Children.Add(SwapUi.Card("已安装的 Addon", list.ToArray()));
 
+            // Manager-style detail view: the row's 详情 button selects a module and the page is
+            // rebuilt around it (metadata, audit trail, hook chains, log tail, actions).
+            var selected = addons?.Selected;
+            if (selected != null) page.Children.Add(Detail(api, addons, selected));
+
             page.Children.Add(SwapUi.Card("模块管理",
                 SwapUi.Note("安装会把包归档到 Addon 目录并立即启动，不需要重启 PCL；" +
                             "卸载会停掉模块、撤下它的设置页并删除模块目录（入口 DLL 被占用时留到下次启动清理）。"),
@@ -169,6 +174,16 @@ namespace PclDlSwap.Payload.Swap.Views
                     if (!addons.SetEnabled(id, !record.Enabled)) return;
                     PageRegistry.InvalidatePage("swap-addons");
                 });
+                var detail = SwapUi.Button("详情", () =>
+                {
+                    addons.SelectedAddonId = id;
+                    PageRegistry.InvalidatePage("swap-addons");
+                });
+                PclUi.SetMember(detail, "Height", 35.0);
+                PclUi.SetMember(detail, "MinWidth", 56.0);
+                PclUi.SetMember(detail, "Margin", new Thickness(0, 0, 8, 0));
+                actions.Children.Add(detail);
+
                 PclUi.SetMember(toggle, "Height", 35.0);
                 PclUi.SetMember(toggle, "MinWidth", 76.0);
                 PclUi.SetMember(toggle, "Margin", new Thickness(0, 0, 8, 0));
@@ -193,6 +208,102 @@ namespace PclDlSwap.Payload.Swap.Views
                 grid.Children.Add(actions);
             }
             return grid;
+        }
+
+        /// <summary>
+        /// Per-module detail view: everything the manager knows about one module - metadata, the audit
+        /// trail (where the package came from, its hash, when it landed), that module's own hook
+        /// chains, the tail of its log, and the lifecycle actions (toggle, reload, log, config,
+        /// uninstall).
+        /// </summary>
+        private static FrameworkElement Detail(ISwapApi api, AddonManager addons,
+            AddonManager.AddonRecord record)
+        {
+            var manifest = record.Manifest;
+            var content = new List<FrameworkElement>
+            {
+                SwapUi.InfoRow("状态", StatusText(record)),
+                SwapUi.InfoRow("id / 版本", record.Id + "  " + record.Version),
+                SwapUi.InfoRow("安装时间", record.InstalledAtUtc.HasValue
+                    ? record.InstalledAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                    : "（内置模块）"),
+                SwapUi.InfoRow("来源包", string.IsNullOrEmpty(record.SourcePath) ? "（内置模块）" : record.SourcePath),
+                SwapUi.InfoRow("包 SHA-256", string.IsNullOrEmpty(record.Sha256) ? "（内置模块）" : record.Sha256),
+                SwapUi.InfoRow("模块目录", string.IsNullOrEmpty(record.Directory) ? "（内置模块）" : record.Directory),
+                SwapUi.InfoRow("配置文件", addons.GetModuleConfigPath(record.Id))
+            };
+
+            if (manifest != null)
+            {
+                content.Add(SwapUi.InfoRow("API 范围", manifest.ApiVersion));
+                content.Add(SwapUi.InfoRow("入口", manifest.Entry));
+                if (!string.IsNullOrEmpty(manifest.Author)) content.Add(SwapUi.InfoRow("作者", manifest.Author));
+                content.Add(SwapUi.InfoRow("形状作用域", manifest.Shapes.Count == 0
+                    ? "（未声明 —— 全部形状）"
+                    : string.Join("、", manifest.Shapes)));
+                content.Add(SwapUi.InfoRow("宿主版本", manifest.HostVersions.Count == 0
+                    ? "（未声明 —— 任意版本）"
+                    : string.Join("、", manifest.HostVersions)));
+                content.Add(SwapUi.InfoRow("权限声明", manifest.Permissions.Count == 0
+                    ? "（未声明 —— 兼容模式，全部访问）"
+                    : string.Join("、", manifest.Permissions)));
+            }
+
+            var chains = ScopedHook.Snapshot()
+                .Where(line => line.IndexOf(record.Id, StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+            var hooks = ScopedHook.CountFor(record.Id);
+            var hits = ScopedHook.HitsFor(record.Id);
+            var errors = ScopedHook.ErrorsFor(record.Id);
+            content.Add(SwapUi.InfoRow("钩子", hooks == 0
+                ? "（无）"
+                : $"{hooks} 个（命中 {hits}，抛错 {errors}）"));
+            if (chains.Count > 0) content.Add(SwapUi.Note(string.Join("；", chains)));
+
+            var tail = addons.LogTail(record.Id, 12);
+            content.Add(SwapUi.Note("模块日志尾部："));
+            content.Add(SwapUi.Text(string.IsNullOrEmpty(tail) ? "（这个模块还没有日志）" : tail, 11, true));
+
+            var actions = new List<FrameworkElement>
+            {
+                ActionButton(record.Enabled ? "禁用" : "启用", () =>
+                {
+                    addons.SetEnabled(record.Id, !record.Enabled);
+                    PageRegistry.InvalidatePage("swap-addons");
+                }),
+                ActionButton("重载", () =>
+                {
+                    addons.Reload(record.Id);
+                    PageRegistry.InvalidatePage("swap-addons");
+                }),
+                ActionButton("打开日志", () => OpenModuleLog(api, addons, record)),
+                ActionButton("打开配置目录", () =>
+                    OpenFolder(System.IO.Path.GetDirectoryName(addons.GetModuleConfigPath(record.Id)))),
+                ActionButton("收起", () =>
+                {
+                    addons.SelectedAddonId = null;
+                    PageRegistry.InvalidatePage("swap-addons");
+                })
+            };
+            if (!record.BuiltIn)
+                actions.Add(ActionButton("卸载", () => UninstallModule(api, addons, record), "Red"));
+            content.Add(SwapUi.Buttons(actions.ToArray()));
+
+            return SwapUi.Card("模块详情：" + (record.Name ?? record.Id), content.ToArray());
+        }
+
+        /// <summary>
+        /// Compact native button for the detail action strip: the shipped default is 140px wide,
+        /// which overflows a card once five or six actions sit on one line.
+        /// </summary>
+        private static FrameworkElement ActionButton(string text, Action onClick,
+            string colorType = null, double minWidth = 100)
+        {
+            var button = SwapUi.Button(text, onClick, colorType);
+            PclUi.SetMember(button, "Height", 35.0);
+            PclUi.SetMember(button, "MinWidth", minWidth);
+            PclUi.SetMember(button, "Margin", new Thickness(0, 0, 8, 0));
+            return button;
         }
 
         private static FrameworkElement Separator()

@@ -36,6 +36,15 @@ namespace PclDlSwap.Payload.Swap
 
             /// <summary>Settings pages this addon registered, so an uninstall can drop them again.</summary>
             public List<string> PageIds { get; } = new List<string>();
+
+            /// <summary>When the package was installed (null for built-ins).</summary>
+            public DateTime? InstalledAtUtc { get; set; }
+
+            /// <summary>The file the user picked - audit trail only, the platform never writes there.</summary>
+            public string SourcePath { get; set; }
+
+            /// <summary>SHA-256 of the archived package, so a later re-install can be compared.</summary>
+            public string Sha256 { get; set; }
         }
 
         private readonly ISwapApi _api;
@@ -117,6 +126,59 @@ namespace PclDlSwap.Payload.Swap
         /// <summary>Where a module's own log lives (see <see cref="ModuleLog"/>).</summary>
         public string GetModuleLogPath(string addonId) => ModuleLog.PathFor(addonId);
 
+        /// <summary>Where a module's own key/value store (config.json) lives.</summary>
+        public string GetModuleConfigPath(string addonId) => SwapPaths.AddonConfigFile(addonId);
+
+        /// <summary>The module whose detail view is open; null/empty means "no detail shown".</summary>
+        public string SelectedAddonId { get; set; }
+
+        public AddonRecord Selected => string.IsNullOrEmpty(SelectedAddonId) ? null : Find(SelectedAddonId);
+
+        /// <summary>Last lines of a module's own log - what the detail view shows inline.</summary>
+        public string LogTail(string addonId, int lines = 12)
+        {
+            try
+            {
+                var path = ModuleLog.PathFor(addonId);
+                if (!File.Exists(path)) return string.Empty;
+                var all = File.ReadAllLines(path);
+                if (lines <= 0 || all.Length <= lines) return string.Join(Environment.NewLine, all);
+                return string.Join(Environment.NewLine, all.Skip(all.Length - lines));
+            }
+            catch (Exception ex)
+            {
+                return "（读取模块日志失败：" + ex.Message + "）";
+            }
+        }
+
+        /// <summary>
+        /// Full disable/enable cycle for one module: OnDisable → hooks detach (behaviourally) →
+        /// OnLoad/OnEnable run again. Built-ins own the host's own features, so they are not
+        /// reloadable - use the toggle.
+        /// </summary>
+        public bool Reload(string addonId)
+        {
+            var record = Find(addonId);
+            if (record == null)
+            {
+                SwapLog.Warn("Addon 重载：未找到 " + addonId);
+                return false;
+            }
+            if (record.BuiltIn)
+            {
+                SwapLog.Info($"Addon 重载：{addonId} 是内置模块，请用启用/禁用开关。");
+                return false;
+            }
+
+            SwapLog.Info($"Addon 重载：{addonId}");
+            var disabled = SetEnabled(addonId, false);
+            // Drop whatever the previous generation attached before it starts again, so a reloaded
+            // Prefix handler does not end up stacked on top of itself.
+            ScopedHook.RemoveAll(addonId);
+            var enabled = SetEnabled(addonId, true);
+            return disabled && enabled && Find(addonId)?.Status == "enabled";
+        }
+
         // ------------------------------------------------------------------ install / uninstall
 
         /// <summary>
@@ -142,6 +204,8 @@ namespace PclDlSwap.Payload.Swap
             }
 
             var record = Unpack(storeCopy, manifest);
+            record.SourcePath = Path.GetFullPath(archivePath);
+            record.InstalledAtUtc = DateTime.UtcNow;
             _records.Add(record);
 
             // Compatibility precheck: a package that does not fit *this* host still installs (the user
@@ -248,6 +312,10 @@ namespace PclDlSwap.Payload.Swap
             catch (Exception ex) { SwapLog.Warn($"Addon {record.Id} OnDisable 抛错：" + ex.Message); }
             try { record.Instance?.OnUnload(); }
             catch (Exception ex) { SwapLog.Warn($"Addon {record.Id} OnUnload 抛错：" + ex.Message); }
+
+            // Platform-side cleanup: an uninstalled module's id is no longer in the list, and an
+            // unknown id counts as "enabled", so any handler it left behind would keep firing.
+            ScopedHook.RemoveAll(record.Id);
 
             foreach (var pageId in record.PageIds.ToList())
                 PageRegistry.UnregisterPage(pageId);
@@ -677,6 +745,10 @@ namespace PclDlSwap.Payload.Swap
             {
                 var manifest = ReadManifest(archive);
                 record = Unpack(archive, manifest);
+                // Modules discovered at startup carry the archive as their source of record; the
+                // package's own timestamp is the honest stand-in for "installed at".
+                record.SourcePath = archive;
+                try { record.InstalledAtUtc = File.GetLastWriteTimeUtc(archive); } catch { }
                 _records.Add(record);
             }
             catch (Exception ex)
@@ -722,6 +794,7 @@ namespace PclDlSwap.Payload.Swap
                 Version = manifest.Version,
                 Description = manifest.Description,
                 ArchivePath = archive,
+                Sha256 = ShortHash(archive),
                 Enabled = true,
                 Status = "unpacked"
             };

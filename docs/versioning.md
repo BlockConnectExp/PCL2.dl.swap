@@ -26,6 +26,18 @@ v{Year}.{Major}-Alpha {AlphaVer.}
 Ten Alpha releases are planned per Major version. Alpha 10 is normally hidden from the display and
 serves as the LTS release of that Major version.
 
+In practice (2026-10-28):
+
+- Alphas 1-9 are published as GitHub **Pre-Releases** (`v26.0-Alpha 1` … `v26.0-Alpha 9`).
+- **Alpha 10 becomes the official release**: it is published once, as a normal (non-pre-release)
+  release whose name and tag are simply `v26.0` — the `-Alpha10` spelling stays available on the
+  pre-release line for traceability, but the public entry point is `v26.0`.
+- Work that lands **after** the official release opens the next minor cycle and restarts the alpha
+  counter: `v26.1-Alpha 1`, `v26.1-Alpha 2`, … (again ten of them, with Alpha 10 becoming `v26.1`).
+
+> Do not publish `v26.0-Alpha 11` and friends: a Major version has exactly ten Alphas, and anything
+> past Alpha 10 belongs to the next major version's alpha series.
+
 ## 2 Artifact Naming
 
 ```
@@ -69,5 +81,8 @@ release file : PCL2.dl.swap-v26.0-Alpha1.zip
 4. Patched binary launches and reports the expected PCL version in its own log.
 5. Commit is SSH-signed (the repository enables `commit.gpgsign`).
 6. Tag and Pre-Release are SSH-signed, release notes attached.
+7. Release notes carry screenshots: upload the PNGs as release assets and reference them by their
+   `https://github.com/BlockConnectExp/PCL2.dl.swap/releases/download/<tag>/<file>` URL (imgur is not
+   used - it is unreachable from the build host).
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

@@ -17,6 +17,9 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal static class SelfTest
     {
+        /// <summary>Keeps the self-test's loader subscriptions alive so late callbacks still log.</summary>
+        private static readonly List<IDisposable> HeldWatches = new List<IDisposable>();
+
         public static void RunIfRequested(ISwapApi api)
         {
             if (api == null) return;
@@ -108,6 +111,9 @@ namespace PclDlSwap.Payload.Swap
             Probe("Pcl.Download.SourceModGet",
                 () => api.Pcl.Download.SourceModGet("sodium"));
             Probe("Pcl.Loader.TaskbarProgress", () => api.Pcl.Loader.TaskbarProgress);
+            Probe("Pcl.Loader.ListAll", () => api.Pcl.Loader.ListAll(false));
+            Probe("Pcl.Loader.Watch(real loader)", () => RunLoaderWatchProbe(api));
+            Probe("Pcl.Loader.Combo(empty)", () => RunLoaderComboProbe(api));
             Probe("Pcl.Launch.LoginName", () => api.Pcl.Launch.LoginName());
             Probe("Pcl.Launch.LoginAble", () => api.Pcl.Launch.LoginAble());
 
@@ -152,6 +158,50 @@ namespace PclDlSwap.Payload.Swap
                 return "count=" + count;
             }
             return Convert.ToString(value);
+        }
+
+        /// <summary>
+        /// Real-host proof of the loader event bridge: subscribe to a loader the launcher currently
+        /// shows on its taskbar and log whatever the host's own events deliver. The probe returns
+        /// immediately (the launcher dispatches state changes through its UI thread, which is busy
+        /// running this self-test), so the callbacks land in the log right afterwards.
+        /// </summary>
+        private static string RunLoaderWatchProbe(ISwapApi api)
+        {
+            var loaders = api.Pcl.Loader.ListAll(false);
+            if (loaders.Count == 0) return "宿主任务栏为空（跳过）";
+
+            var loader = loaders[0];
+            var name = api.Pcl.Loader.GetName(loader);
+            var weight = api.Pcl.Loader.GetProgressWeight(loader);
+
+            HeldWatches.Add(api.Pcl.Loader.Watch(loader,
+                value => SwapLog.Info($"[selftest] loader 进度事件：{name} = {value:0.###}"),
+                state => SwapLog.Info($"[selftest] loader 状态事件：{name} → {state}")));
+            HeldWatches.Add(api.Pcl.Loader.WatchPreviewFinish(loader,
+                _ => SwapLog.Info($"[selftest] loader PreviewFinish 事件：{name}")));
+
+            return $"{name}（权重 {weight:0.##}）：已订阅状态/进度/PreviewFinish（事件异步写入日志）";
+        }
+
+        /// <summary>
+        /// Deterministic real-host proof of the loader bridge: an empty LoaderCombo is the platform's
+        /// own object (nothing to reparent, no host side effects) and starting it drives the real
+        /// Waiting → Loading → Finished sequence plus PreviewFinish through the host's own events.
+        /// </summary>
+        private static string RunLoaderComboProbe(ISwapApi api)
+        {
+            var combo = api.Pcl.Loader.CreateCombo("PCL2Swap 自检组合", new List<object>(), typeof(object));
+            var name = api.Pcl.Loader.GetName(combo);
+            HeldWatches.Add(api.Pcl.Loader.Watch(combo,
+                value => SwapLog.Info($"[selftest] loader 进度事件：{name} = {value:0.###}"),
+                state => SwapLog.Info($"[selftest] loader 状态事件：{name} → {state}")));
+            HeldWatches.Add(api.Pcl.Loader.WatchPreviewFinish(combo,
+                _ => SwapLog.Info($"[selftest] loader PreviewFinish 事件：{name}")));
+
+            api.Pcl.Loader.Start(combo);
+            var tasks = api.Pcl.Loader.ListTasks(combo, false);
+            return $"{combo.GetType().Name} 已启动（任务 {tasks.Count} 个），状态/进度/PreviewFinish 事件异步写入日志";
         }
 
         /// <summary>

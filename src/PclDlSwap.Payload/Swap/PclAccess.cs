@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using PCL2Swap.Api;
 using PclDlSwap.Payload.Host;
@@ -108,6 +109,20 @@ namespace PclDlSwap.Payload.Swap
                 args[i] = i < provided.Length ? provided[i] : DefaultFor(parameters[i]);
             }
             method.Invoke(null, args);
+        }
+
+        /// <summary>Writes an instance member by name, covering plain fields and VB.NET properties.</summary>
+        internal static void WriteMember(object instance, string name, object value)
+        {
+            if (instance == null) throw new ArgumentNullException(nameof(instance));
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var type = instance.GetType();
+
+            var field = type.GetField(name, flags);
+            if (field != null) { field.SetValue(instance, value); return; }
+            var property = type.GetProperty(name, flags);
+            if (property != null && property.CanWrite) { property.SetValue(instance, value, null); return; }
+            throw new MissingMemberException(type.FullName, name);
         }
 
         internal static object DefaultFor(ParameterInfo parameter)
@@ -523,8 +538,237 @@ namespace PclDlSwap.Payload.Swap
             public void Failed(object loader, Exception error) =>
                 InstanceCall(Require(loader), "Failed", error);
 
+            public string GetName(object loader) => Convert.ToString(ReadMember(Require(loader), "Name"));
+
+            public double GetProgressWeight(object loader) =>
+                Convert.ToDouble(ReadMember(Require(loader), "ProgressWeight") ?? 1.0);
+
+            public void SetProgressWeight(object loader, double weight) =>
+                WriteMember(Require(loader), "ProgressWeight", weight);
+
+            public Exception GetError(object loader) => ReadMember(Require(loader), "Error") as Exception;
+
+            public IDisposable Watch(object loader, Action<double> onProgress, Action<string> onStateChanged) =>
+                new LoaderWatch(Require(loader), onProgress, onStateChanged);
+
+            public IDisposable WatchPreviewFinish(object loader, Action<object> onPreviewFinish)
+            {
+                var target = Require(loader);
+                var preview = target.GetType().GetEvent("PreviewFinish",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (preview == null) throw new MissingMemberException(target.GetType().FullName, "PreviewFinish");
+
+                var handler = DelegateBridge.Create(preview.EventHandlerType,
+                    args => onPreviewFinish?.Invoke(args.Length > 0 ? args[0] : null));
+                preview.AddEventHandler(target, handler.Handler);
+                return new Unsubscriber(() =>
+                {
+                    preview.RemoveEventHandler(target, handler.Handler);
+                    handler.Dispose();
+                });
+            }
+
+            public object CreateCombo(string name, IReadOnlyList<object> loaders, Type inputType = null)
+            {
+                var comboOpen = _host.GetType("PCL.ModLoader+LoaderCombo`1", throwOnError: false);
+                var loaderBase = _host.GetType("PCL.ModLoader+LoaderBase", throwOnError: false);
+                if (comboOpen == null || loaderBase == null)
+                    throw new MissingMemberException(_host.FullName, "PCL.ModLoader+LoaderCombo`1");
+
+                var comboType = comboOpen.MakeGenericType(inputType ?? typeof(object));
+                var listType = typeof(List<>).MakeGenericType(loaderBase);
+                var list = (IList)Activator.CreateInstance(listType);
+                if (loaders != null)
+                {
+                    foreach (var loader in loaders)
+                    {
+                        if (loader == null || !loaderBase.IsInstanceOfType(loader)) continue;
+                        list.Add(loader);
+                    }
+                }
+                return Activator.CreateInstance(comboType, name ?? ("Swap 组合任务 " + list.Count), list);
+            }
+
+            public IReadOnlyList<object> ListTasks(object loader, bool onlyRunning = false)
+            {
+                var target = Require(loader);
+                var list = new List<object>();
+
+                // A LoaderCombo answers this itself...
+                var instance = target.GetType()
+                    .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    .FirstOrDefault(candidate => candidate.Name == "GetLoaderList" &&
+                                                 candidate.GetParameters().Length == 1 &&
+                                                 candidate.GetParameters()[0].ParameterType == typeof(bool));
+                if (instance != null)
+                {
+                    if (instance.Invoke(target, new object[] { onlyRunning }) is IEnumerable direct)
+                    {
+                        foreach (var item in direct) list.Add(item);
+                    }
+                    return list;
+                }
+
+                // ...anything else (a plain LoaderTask) goes through the host's own static walker,
+                // which recurses into nested combos.
+                var loaderBase = _host.GetType("PCL.ModLoader+LoaderBase", throwOnError: false);
+                var comboOpen = _host.GetType("PCL.ModLoader+LoaderCombo`1", throwOnError: false);
+                if (loaderBase == null || comboOpen == null)
+                    throw new MissingMemberException(_host.FullName, "PCL.ModLoader+LoaderCombo`1");
+
+                var walker = comboOpen.MakeGenericType(typeof(object))
+                    .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(candidate => candidate.Name == "GetLoaderList" &&
+                                                 candidate.GetParameters().Length == 3);
+                if (walker == null) throw new MissingMethodException(comboOpen.FullName, "GetLoaderList");
+
+                var filled = Activator.CreateInstance(typeof(List<>).MakeGenericType(loaderBase));
+                var args = new[] { target, filled, (object)onlyRunning };
+                walker.Invoke(null, args);
+                if (args[1] is IEnumerable walked)
+                {
+                    foreach (var item in walked) list.Add(item);
+                }
+                return list;
+            }
+
+            public IReadOnlyList<object> ListAll(bool onlyRunning = false)
+            {
+                var modLoader = _host.GetType("PCL.ModLoader", throwOnError: false);
+                if (modLoader == null) throw new MissingMemberException(_host.FullName, "PCL.ModLoader");
+
+                // ModLoader.LoaderTaskbar is the launcher's own list of loaders currently shown on
+                // the taskbar - the honest "what is PCL busy with" source.
+                var field = modLoader.GetField("LoaderTaskbar",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (!(field?.GetValue(null) is IEnumerable source))
+                    throw new MissingMemberException(modLoader.FullName, "LoaderTaskbar");
+
+                var result = new List<object>();
+                foreach (var item in source)
+                {
+                    if (item == null) continue;
+                    if (onlyRunning &&
+                        !string.Equals(Convert.ToString(ReadMember(item, "State")), "Loading",
+                            StringComparison.OrdinalIgnoreCase)) continue;
+                    result.Add(item);
+                }
+                return result;
+            }
+
             private static object Require(object loader) =>
                 loader ?? throw new ArgumentNullException(nameof(loader), "需要一个 LoaderBase 实例");
+
+            /// <summary>
+            /// One loader subscription. The host exposes real .NET events
+            /// (<c>OnStateChangedUi(LoaderBase, LoadState, LoadState)</c> and
+            /// <c>ProgressChanged(double, double)</c>), so this detaches cleanly on dispose instead of
+            /// polling; the enum/double parameters are bridged by <see cref="DelegateBridge"/>.
+            /// </summary>
+            private sealed class LoaderWatch : IDisposable
+            {
+                private readonly object _loader;
+                private readonly Action<double> _onProgress;
+                private readonly Action<string> _onStateChanged;
+                private readonly EventInfo _stateEvent;
+                private readonly EventInfo _progressEvent;
+                private readonly DelegateBridge.Handle _stateHandler;
+                private readonly DelegateBridge.Handle _progressHandler;
+                private bool _disposed;
+
+                public LoaderWatch(object loader, Action<double> onProgress, Action<string> onStateChanged)
+                {
+                    _loader = loader;
+                    _onProgress = onProgress;
+                    _onStateChanged = onStateChanged;
+
+                    var type = loader.GetType();
+                    _stateEvent = type.GetEvent("OnStateChangedUi", BindingFlags.Public | BindingFlags.Instance);
+                    _progressEvent = type.GetEvent("ProgressChanged", BindingFlags.Public | BindingFlags.Instance);
+
+                    if (_stateEvent != null && onStateChanged != null)
+                    {
+                        _stateHandler = DelegateBridge.Create(_stateEvent.EventHandlerType, OnStateBridge);
+                        _stateEvent.AddEventHandler(loader, _stateHandler.Handler);
+                    }
+                    if (_progressEvent != null && onProgress != null)
+                    {
+                        _progressHandler = DelegateBridge.Create(_progressEvent.EventHandlerType, OnProgressBridge);
+                        _progressEvent.AddEventHandler(loader, _progressHandler.Handler);
+                    }
+
+                    // Seed the current values so a module starts from what is already on screen.
+                    SafeProgress(Convert.ToDouble(ReadMember(loader, "Progress") ?? 0.0));
+                    SafeState(Convert.ToString(ReadMember(loader, "State")));
+                }
+
+                private void OnStateBridge(object[] args)
+                {
+                    var state = args.Length > 1 ? Convert.ToString(args[1]) : null;
+                    SafeState(state);
+
+                    // Finished/Failed/Canceled end the loader's life: stop watching so a module that
+                    // forgets to dispose cannot leak a handler onto a reused loader object.
+                    if (string.Equals(state, "Finished", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(state, "Failed", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(state, "Canceled", StringComparison.OrdinalIgnoreCase))
+                        Dispose();
+                }
+
+                private void OnProgressBridge(object[] args)
+                {
+                    var value = args.Length > 0 ? Convert.ToDouble(args[0]) : 0.0;
+                    SafeProgress(value);
+                }
+
+                private void SafeProgress(double value)
+                {
+                    try { _onProgress?.Invoke(value); }
+                    catch (Exception ex) { SwapLog.Warn("Loader watch 进度回调异常：" + ex.Message); }
+                }
+
+                private void SafeState(string state)
+                {
+                    try { _onStateChanged?.Invoke(state); }
+                    catch (Exception ex) { SwapLog.Warn("Loader watch 状态回调异常：" + ex.Message); }
+                }
+
+                public void Dispose()
+                {
+                    if (_disposed) return;
+                    _disposed = true;
+                    try
+                    {
+                        if (_stateEvent != null && _stateHandler != null)
+                        {
+                            _stateEvent.RemoveEventHandler(_loader, _stateHandler.Handler);
+                            _stateHandler.Dispose();
+                        }
+                        if (_progressEvent != null && _progressHandler != null)
+                        {
+                            _progressEvent.RemoveEventHandler(_loader, _progressHandler.Handler);
+                            _progressHandler.Dispose();
+                        }
+                    }
+                    catch (Exception ex) { SwapLog.Warn("Loader watch 取消订阅失败：" + ex.Message); }
+                }
+            }
+
+            private sealed class Unsubscriber : IDisposable
+            {
+                private readonly Action _dispose;
+                private bool _disposed;
+
+                public Unsubscriber(Action dispose) => _dispose = dispose;
+
+                public void Dispose()
+                {
+                    if (_disposed) return;
+                    _disposed = true;
+                    try { _dispose?.Invoke(); }
+                    catch (Exception ex) { SwapLog.Warn("取消订阅失败：" + ex.Message); }
+                }
+            }
 
             private MethodInfo Static(string name, int parameterCount)
             {
@@ -542,6 +786,66 @@ namespace PclDlSwap.Payload.Swap
                         candidate.Name == name && candidate.GetParameters().Length == args.Length);
                 if (method == null) throw new MissingMethodException(loader.GetType().FullName, name);
                 method.Invoke(loader, args);
+            }
+        }
+
+        /// <summary>
+        /// Adapter for host events whose parameters are value types (<c>LoadState</c> enums, doubles):
+        /// an Action-based module callback cannot bind to those delegates, so this compiles a small
+        /// delegate of the host's exact event type that boxes the arguments into an <c>object[]</c> and
+        /// calls the callback. One entry per subscription; <see cref="Handle.Dispose"/> frees it.
+        /// </summary>
+        private static class DelegateBridge
+        {
+            private static readonly Dictionary<long, Action<object[]>> Slots =
+                new Dictionary<long, Action<object[]>>();
+            private static long _next;
+
+            public sealed class Handle : IDisposable
+            {
+                private readonly long _id;
+                public Delegate Handler { get; }
+                private bool _disposed;
+
+                internal Handle(Delegate handler, long id)
+                {
+                    Handler = handler;
+                    _id = id;
+                }
+
+                public void Dispose()
+                {
+                    if (_disposed) return;
+                    _disposed = true;
+                    lock (Slots) Slots.Remove(_id);
+                }
+            }
+
+            public static Handle Create(Type delegateType, Action<object[]> sink)
+            {
+                var id = System.Threading.Interlocked.Increment(ref _next);
+                lock (Slots) Slots[id] = sink;
+
+                var invoke = delegateType.GetMethod("Invoke");
+                var parameters = invoke.GetParameters()
+                    .Select(parameter => Expression.Parameter(parameter.ParameterType, parameter.Name))
+                    .ToArray();
+                var boxed = Expression.NewArrayInit(typeof(object),
+                    parameters.Select(parameter => (Expression)Expression.Convert(parameter, typeof(object))));
+                var body = Expression.Call(
+                    typeof(DelegateBridge).GetMethod(nameof(Dispatch), BindingFlags.NonPublic | BindingFlags.Static),
+                    Expression.Constant(id),
+                    boxed);
+                var lambda = Expression.Lambda(delegateType, body, parameters);
+                return new Handle(lambda.Compile(), id);
+            }
+
+            private static void Dispatch(long id, object[] args)
+            {
+                Action<object[]> sink;
+                lock (Slots) Slots.TryGetValue(id, out sink);
+                try { sink?.Invoke(args); }
+                catch (Exception ex) { SwapLog.Warn("Loader 事件桥接异常：" + ex.Message); }
             }
         }
     }

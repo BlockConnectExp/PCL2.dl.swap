@@ -316,9 +316,26 @@ handler 可以是实例委托（不再要求静态方法）；参数形状与宿
 | `Instance` | 实例目录与选中项、`GetMcFoolName`、按宿主缓存枚举实例、`McInstance` 成员、`ModLaunch.GetNativesFolder` |
 | `Download` | 源顺序开关、`DlClientListGet`、Assets/Library/LauncherOrMeta/Mod 源、`DlModRequest` |
 | `Launch` | `McLaunchStart`、`McLoginName`、`McLoginAble` |
-| `Loader` | 任务栏进度（`TaskbarProgress` / `RefreshTaskbar` / `TaskbarAdd`）、LoaderBase 的 `State` / `Progress` / `IsRunning` / `Start` / `Cancel` / `Failed` |
+| `Loader` | 任务栏进度（`TaskbarProgress` / `RefreshTaskbar` / `TaskbarAdd`）、LoaderBase 的 `State` / `Progress` / `IsRunning` / `Start` / `Cancel` / `Failed`、`GetName` / `ProgressWeight` / `GetError`、`Watch` / `WatchPreviewFinish`、`CreateCombo` / `ListTasks` / `ListAll` |
 
 未覆盖的成员仍可通过 `ISwapApi.Surface`（全量清单）+ `ISwapApi.Reflect` 直达。
+
+### 10.1 任务与进度（Alpha 8 起）
+
+`Api.Pcl.Loader` 现在能观察宿主的加载器，而不是只能看任务栏的百分比：
+
+| 成员 | 语义 |
+|---|---|
+| `ListAll(onlyRunning)` | 宿主任务栏上的加载器（`ModLoader.LoaderTaskbar`），`onlyRunning` 只留 `Loading` 的 |
+| `ListTasks(loader, onlyRunning)` | 把一个加载器（组合）摊平成任务列表：组合走它自己的 `GetLoaderList`，普通任务走宿主静态 `LoaderCombo.GetLoaderList` 递归 |
+| `GetName` / `GetProgressWeight` / `SetProgressWeight` / `GetError` | 读取/设置宿主加载器字段 |
+| `Watch(loader, onProgress, onStateChanged)` | 订阅宿主自己的 `ProgressChanged` 与 `OnStateChangedUi` 事件（**不是轮询**）；两个回调会先用当前值各触发一次，加载器进入 Finished/Failed/Canceled 时自动解除订阅；返回的句柄 `Dispose` 也能提前解除 |
+| `WatchPreviewFinish(loader, onLoaded)` | 订阅 `PreviewFinish`（宿主把加载器标记完成之前） |
+| `CreateCombo(name, loaders, inputType)` | 用宿主自己的 `LoaderCombo<TInput>` 组合多个加载器，任务栏进度、取消与聚合进度都保持宿主的实现 |
+
+宿主事件的参数是值类型（`LoadState` 枚举、`double`），模块侧只写 `Action`，平台内部用一个编译好的适配委托把参数装箱转交（每个订阅一份，随取消订阅释放）。
+
+**踩坑记录（Alpha 8 修）**：如果宿主目录里留着上一次磁盘补丁形状复制过去的 `PCL2Swap.Api.dll`，CLR 会先绑它——注入形状内嵌的同名程序集就被跳过，结果是 `MissingMethodException`（"找不到方法 ListAll"）。现在 shim 入口会先把解包出来的 `PCL2Swap.Api` / `Gee.External.Capstone` / `MonoMod.Utils` / `Mono.Cecil` 预载定版；Loader 复制运行时文件时也改成按内容哈希比较，不再看时间戳。
 
 ## 11. 模块管理（Alpha 7 起）
 

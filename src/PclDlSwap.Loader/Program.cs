@@ -60,7 +60,7 @@ namespace PclDlSwap.Loader
             var targetDirectory = Path.GetDirectoryName(Path.GetFullPath(target)) ?? baseDirectory;
             var patchedPath = Path.Combine(targetDirectory, PatchedFileName);
 
-            Console.WriteLine("PCL2 DLL-Swap loader (v26.0-Alpha 7)");
+            Console.WriteLine("PCL2 DLL-Swap loader (v26.0-Alpha 8)");
             Console.WriteLine("  目标    : " + target);
             Console.WriteLine("  原版哈希: " + ShortHash(target));
 
@@ -158,10 +158,9 @@ namespace PclDlSwap.Loader
                 var destination = Path.Combine(targetDirectory, name);
                 try
                 {
-                    var upToDate = File.Exists(destination) &&
-                                   new FileInfo(destination).Length == new FileInfo(source).Length &&
-                                   File.GetLastWriteTimeUtc(destination) >= File.GetLastWriteTimeUtc(source);
-                    if (upToDate) continue;
+                    // Compare contents, not timestamps: a same-sized copy from another build would
+                    // otherwise be kept and the patched launcher would bind a mismatched runtime.
+                    if (File.Exists(destination) && SameContent(source, destination)) continue;
 
                     File.Copy(source, destination, true);
                     copied++;
@@ -174,6 +173,32 @@ namespace PclDlSwap.Loader
 
             var text = copied == 0 ? "已就位" : copied + " 个文件已复制到目标目录";
             return missing.Count == 0 ? text : text + "（缺少 " + string.Join(", ", missing) + "）";
+        }
+
+        /// <summary>Byte-level comparison used to decide whether a runtime file needs refreshing.</summary>
+        private static bool SameContent(string left, string right)
+        {
+            try
+            {
+                if (new FileInfo(left).Length != new FileInfo(right).Length) return false;
+                using (var sha = SHA256.Create())
+                using (var first = File.OpenRead(left))
+                using (var second = File.OpenRead(right))
+                {
+                    var firstHash = sha.ComputeHash(first);
+                    sha.Initialize();
+                    var secondHash = sha.ComputeHash(second);
+                    for (var i = 0; i < firstHash.Length; i++)
+                    {
+                        if (firstHash[i] != secondHash[i]) return false;
+                    }
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string ShortHash(string path, bool full = false)

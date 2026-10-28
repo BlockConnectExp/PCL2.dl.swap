@@ -54,6 +54,43 @@ namespace PCL2Swap.Api
 
         /// <summary>LoaderBase.Failed(error).</summary>
         void Failed(object loader, Exception error);
+
+        /// <summary>LoaderBase.Name - the host keeps it as a public field.</summary>
+        string GetName(object loader);
+
+        /// <summary>LoaderBase.ProgressWeight - a combo weights its children by this.</summary>
+        double GetProgressWeight(object loader);
+        void SetProgressWeight(object loader, double weight);
+
+        /// <summary>LoaderBase.Error, or null while the loader has not failed.</summary>
+        Exception GetError(object loader);
+
+        /// <summary>
+        /// Watches one loader through the host's own events (no polling): <paramref name="onProgress"/>
+        /// fires on every progress tick, <paramref name="onStateChanged"/> on every state transition
+        /// with the state name ("Waiting"/"Loading"/"Finished"/"Failed"/"Canceled"). Both fire once
+        /// immediately with the current values, and the subscription releases itself when the loader
+        /// reaches a terminal state. Dispose the handle to stop early.
+        /// </summary>
+        IDisposable Watch(object loader, Action<double> onProgress, Action<string> onStateChanged);
+
+        /// <summary>LoaderBase.PreviewFinish - fires before the host marks a loader as done.</summary>
+        IDisposable WatchPreviewFinish(object loader, Action<object> onPreviewFinish);
+
+        /// <summary>
+        /// Builds a host <c>LoaderCombo&lt;TInput&gt;</c> over the given loaders, so taskbar progress,
+        /// cancellation and the aggregate progress all stay the launcher's own.
+        /// </summary>
+        object CreateCombo(string name, IReadOnlyList<object> loaders, Type inputType = null);
+
+        /// <summary>Flattens a loader/combo into its task list (the host's own GetLoaderList).</summary>
+        IReadOnlyList<object> ListTasks(object loader, bool onlyRunning = false);
+
+        /// <summary>
+        /// The loaders the launcher currently shows on its taskbar (ModLoader.LoaderTaskbar), which is
+        /// how a dashboard-style module enumerates what PCL is busy with.
+        /// </summary>
+        IReadOnlyList<object> ListAll(bool onlyRunning = false);
     }
 
     /// <summary>PCL.ModMinecraft - instance folders and the selected instance.</summary>

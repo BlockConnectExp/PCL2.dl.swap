@@ -839,6 +839,89 @@ namespace PclDlSwap.ExLoaderHarness
                 loaderType.GetMethod("Failed")?.Invoke(loader, new object[] { stub, new Exception("boom") });
                 Expect("Loader.Cancel/Failed reach the loader",
                     stub.CancelCalls == 1 && stub.FailedCalls == 1);
+
+                // ---- watch / combo / weights: the progress + task surface addons build on ----
+                var watchMethod = loaderType.GetMethod("Watch");
+                var watched = new PCL.ModLoader.LoaderBase();
+                var states = new List<string>();
+                var progressSeen = new List<double>();
+                var watch = watchMethod?.Invoke(loader, new object[]
+                {
+                    watched,
+                    new Action<double>(value => progressSeen.Add(value)),
+                    new Action<string>(state => states.Add(state))
+                }) as IDisposable;
+                Expect("Loader.Watch seeds the current state",
+                    watch != null && states.Contains("Waiting"));
+
+                watched.Progress = 0.25;
+                watched.Start(null, false);
+                Expect("Loader.Watch sees progress ticks and state transitions",
+                    progressSeen.Contains(0.25) && states.Contains("Loading"));
+
+                watch?.Dispose();
+                var statesAfterDispose = states.Count;
+                watched.Progress = 0.75;
+                Expect("a disposed loader watch stops receiving", states.Count == statesAfterDispose);
+
+                var auto = new PCL.ModLoader.LoaderBase();
+                var autoStates = new List<string>();
+                var autoProgress = new List<double>();
+                var autoWatch = watchMethod?.Invoke(loader, new object[]
+                {
+                    auto,
+                    new Action<double>(value => autoProgress.Add(value)),
+                    new Action<string>(state => autoStates.Add(state))
+                }) as IDisposable;
+                auto.Cancel();
+                var autoAfterCancel = autoProgress.Count;
+                auto.Progress = 0.9;
+                Expect("a terminal state releases the watch automatically",
+                    autoStates.Contains("Canceled") &&
+                    autoAfterCancel == 1 && autoProgress.Count == 1);
+                autoWatch?.Dispose();
+
+                var previewCalls = 0;
+                var previewWatch = loaderType.GetMethod("WatchPreviewFinish")?.Invoke(loader,
+                    new object[] { auto, new Action<object>(_ => previewCalls++) }) as IDisposable;
+                auto.RaisePreviewFinish();
+                Expect("Loader.WatchPreviewFinish bridges the host event", previewCalls == 1);
+                previewWatch?.Dispose();
+
+                Expect("Loader.GetName reads the host field",
+                    Convert.ToString(loaderType.GetMethod("GetName")?.Invoke(loader, new object[] { watched })) ==
+                    "harness loader");
+                loaderType.GetMethod("SetProgressWeight")?.Invoke(loader, new object[] { watched, 2.5 });
+                Expect("Loader.ProgressWeight round-trips",
+                    Math.Abs(Convert.ToDouble(loaderType.GetMethod("GetProgressWeight")
+                        ?.Invoke(loader, new object[] { watched }) ?? 0.0) - 2.5) < 0.0001);
+
+                var second = new PCL.ModLoader.LoaderBase();
+                var combo = loaderType.GetMethod("CreateCombo")?.Invoke(loader,
+                    new object[] { "harness combo", new List<object> { watched, second }, null });
+                Expect("Loader.CreateCombo builds the host combo type",
+                    combo != null &&
+                    combo.GetType().Name.StartsWith("LoaderCombo", StringComparison.Ordinal));
+
+                var tasks = loaderType.GetMethod("ListTasks")
+                    ?.Invoke(loader, new object[] { combo, false }) as System.Collections.IList;
+                Expect("Loader.ListTasks flattens the combo", tasks != null && tasks.Count == 2);
+
+                PCL.ModLoader.LoaderTaskbar.Clear();
+                PCL.ModLoader.LoaderTaskbar.Add(new PCL.ModLoader.LoaderBase { Name = "taskbar task" });
+                var all = loaderType.GetMethod("ListAll")
+                    ?.Invoke(loader, new object[] { false }) as System.Collections.IList;
+                Expect("Loader.ListAll reads the host's taskbar registry",
+                    all != null && all.Count == 1);
+                var running = loaderType.GetMethod("ListAll")
+                    ?.Invoke(loader, new object[] { true }) as System.Collections.IList;
+                Expect("Loader.ListAll(onlyRunning) filters by state", running != null && running.Count == 0);
+
+                var failure = new Exception("loader fell over");
+                second.Failed(failure);
+                Expect("Loader.GetError surfaces the failure",
+                    ReferenceEquals(loaderType.GetMethod("GetError")
+                        ?.Invoke(loader, new object[] { second }), failure));
             }
 
             Console.WriteLine(failures == 0 ? "[pcl] RESULT: PASS" : "[pcl] RESULT: FAIL (" + failures + ")");
@@ -2115,35 +2198,105 @@ namespace PCL
         public static void LoaderTaskbarProgressRefresh() => TaskbarRefreshCalls++;
         public static void LoaderTaskbarAdd(object combo) => LastTaskbarCombo = combo;
 
+        /// <summary>Mirrors the host's taskbar registry (MeloongCore.ConcurrentList in the real host).</summary>
+        public static readonly List<LoaderBase> LoaderTaskbar = new List<LoaderBase>();
+
+        // The real host raises value-typed events (LoadState enums, doubles); the stand-in mirrors
+        // that shape so the payload's delegate bridge is exercised for real.
+        public enum LoadState { Waiting, Loading, Finished, Failed, Canceled }
+
+        public delegate void OnStateChangedUiEventHandler(LoaderBase Loader, LoadState NewState, LoadState OldState);
+        public delegate void ProgressChangedEventHandler(double NewValue, double OldValue);
+        public delegate void PreviewFinishEventHandler(LoaderBase Loader);
+
         public class LoaderBase
         {
-            public string State = "Waiting";
-            public double Progress;
+            public string Name = "harness loader";
+            public LoadState StateValue = LoadState.Waiting;
+            public string State => StateValue.ToString();
+            public double ProgressWeight = 1.0;
+            public Exception Error;
+
+            private double _progress;
+            public double Progress
+            {
+                get => _progress;
+                set
+                {
+                    if (Math.Abs(_progress - value) < double.Epsilon) return;
+                    var old = _progress;
+                    _progress = value;
+                    ProgressChanged?.Invoke(value, old);
+                }
+            }
+
             public int StartCalls;
             public int CancelCalls;
             public int FailedCalls;
             public object LastInput;
             public bool LastForceRestart;
 
+            public event OnStateChangedUiEventHandler OnStateChangedUi;
+            public event ProgressChangedEventHandler ProgressChanged;
+            public event PreviewFinishEventHandler PreviewFinish;
+
+            public virtual List<LoaderBase> GetLoaderList(bool onlyRunning = false) =>
+                new List<LoaderBase> { this };
+
+            public void RaisePreviewFinish() => PreviewFinish?.Invoke(this);
+
+            protected void SetState(LoadState state)
+            {
+                var old = StateValue;
+                StateValue = state;
+                OnStateChangedUi?.Invoke(this, state, old);
+            }
+
             public void Start(object input, bool forceRestart)
             {
                 StartCalls++;
                 LastInput = input;
                 LastForceRestart = forceRestart;
-                State = "Loading";
+                SetState(LoadState.Loading);
             }
 
             public void Cancel()
             {
                 CancelCalls++;
-                State = "Canceled";
+                SetState(LoadState.Canceled);
             }
 
             public void Failed(Exception error)
             {
                 FailedCalls++;
-                State = "Failed";
+                Error = error;
+                SetState(LoadState.Failed);
             }
+        }
+
+        /// <summary>Stand-in for the host's LoaderCombo&lt;TInput&gt; (aggregate loader).</summary>
+        public class LoaderCombo<TInput> : LoaderBase
+        {
+            public List<LoaderBase> Loaders;
+            public TInput Input;
+
+            public LoaderCombo(string name)
+            {
+                Loaders = new List<LoaderBase>();
+                Name = name;
+            }
+
+            public LoaderCombo(string name, IEnumerable<LoaderBase> loaders) : this(name)
+            {
+                foreach (var loader in loaders)
+                {
+                    if (loader == null) continue;
+                    Loaders.Add(loader);
+                    loader.GetLoaderList();   // mirror the host's parent wiring side effect
+                }
+            }
+
+            public override List<LoaderBase> GetLoaderList(bool onlyRunning = false) => Loaders;
         }
     }
 

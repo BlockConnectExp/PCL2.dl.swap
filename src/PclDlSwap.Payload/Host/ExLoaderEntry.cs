@@ -21,9 +21,25 @@ namespace PclDlSwap.Payload.Host
         private static bool _started;
         private static bool _resolverInstalled;
 
+        /// <summary>
+        /// Files the shim extracts next to the payload. They are preloaded so the *extracted* build
+        /// wins: a same-named assembly sitting next to the host (typical leftover of an earlier
+        /// disk-patch run) is found by the default probing path first, and the payload would then
+        /// fail against the older interface with a MissingMethodException - the resolver below only
+        /// runs after probing fails, which it does not in that case.
+        /// </summary>
+        private static readonly string[] PreloadedDependencies =
+        {
+            "PCL2Swap.Api.dll",
+            "Gee.External.Capstone.dll",
+            "MonoMod.Utils.dll",
+            "Mono.Cecil.dll"
+        };
+
         public static int Activate(string argument)
         {
             RegisterDependencyResolver();
+            PreloadOwnDependencies();
 
             lock (Gate)
             {
@@ -62,6 +78,28 @@ namespace PclDlSwap.Payload.Host
             {
                 SwapLog.Error("ExLoaderEntry.Activate 失败：" + ex);
                 return -1;
+            }
+        }
+
+        /// <summary>Pins the payload-adjacent copies of the runtime assemblies before first use.</summary>
+        private static void PreloadOwnDependencies()
+        {
+            try
+            {
+                var directory = Path.GetDirectoryName(typeof(ExLoaderEntry).Assembly.Location);
+                if (string.IsNullOrEmpty(directory)) return;
+
+                foreach (var name in PreloadedDependencies)
+                {
+                    var path = Path.Combine(directory, name);
+                    if (!File.Exists(path)) continue;
+                    var loaded = Assembly.LoadFrom(path);
+                    SwapLog.Info($"依赖预载：{loaded.GetName().Name} {loaded.GetName().Version} ← {path}");
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("依赖预载失败（继续正常装配）：" + ex.Message);
             }
         }
 

@@ -6,9 +6,34 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
-## 2026.10.28-13:45:00 Alpha 7: 模块管理器（安装/卸载/作用域，无需重启）
+## 2026.10.28-16:05:00 Alpha 8: 加载器观察面 + 依赖遮蔽修复
 
 GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\IPclAccess.cs                  Loader 族新增 GetName/Weight/Error/Watch/CreateCombo/ListTasks/ListAll
+.\src\PclDlSwap.Payload\Swap\PclAccess.cs         LoaderWatch + DelegateBridge（值类型事件桥）+ 组合/任务面实现
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs          真机加载器探针（真事件写日志；空组合自驱动）
+.\src\PclDlSwap.Payload\Host\ExLoaderEntry.cs     预载解包目录的运行时程序集，修宿主目录旧同名 DLL 遮蔽
+.\src\PclDlSwap.Loader\Program.cs                 运行时文件按内容哈希比较（不再看时间戳）
+.\src\PclDlSwap.ExLoaderHarness\Program.cs        Loader 桩补事件/权重/任务栏注册表 + 11 项断言
+.\docs\swap-api.md                                §10 Loader 族 + §10.1 任务与进度
+.\src\Pcl2Swap.Shim\Shim.cpp + SwapLog.cs + Loader  版本号升 v26.0-Alpha 8
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|加载器观察面|`Api.Pcl.Loader` 新增 `Watch(loader, onProgress, onStateChanged)` / `WatchPreviewFinish`：直接订阅宿主自己的 `ProgressChanged` 与 `OnStateChangedUi` 事件（**不是轮询**），先用当前值各触发一次，加载器结束（Finished/Failed/Canceled）时自动解除订阅，句柄 `Dispose` 也能提前解除。宿主事件参数是值类型（`LoadState` 枚举、`double`），模块侧只写 `Action`，平台用一个编译好的适配委托装箱转交|2026.10.28-16:05:00|PCL2.dlSwap
+2|组合与任务面|新增 `CreateCombo(name, loaders, inputType)`（用宿主自己的 `LoaderCombo<TInput>`，任务栏进度与取消保持宿主实现）、`ListTasks`（组合走实例 `GetLoaderList`，普通任务走宿主静态递归走查）、`ListAll`（`ModLoader.LoaderTaskbar` 注册表，可按运行中过滤）、`GetName` / `GetProgressWeight` / `SetProgressWeight` / `GetError`|2026.10.28-16:05:00|PCL2.dlSwap
+3|依赖遮蔽修复（现场级）|宿主目录里若留着上次磁盘补丁形状复制过去的 `PCL2Swap.Api.dll`，CLR 会先绑它、跳过 shim 内嵌的同名程序集 —— 真机表现为 `MissingMethodException：找不到方法 ListAll`。现在 `ExLoaderEntry.Activate` 先把解包目录的 `PCL2Swap.Api` / `Gee.External.Capstone` / `MonoMod.Utils` / `Mono.Cecil` 预载定版；`EnsureRuntimeFiles` 也改成按 SHA-256 内容比较（原来同大小同长度的旧文件会被误判为“已就位”）|2026.10.28-16:05:00|PCL2.dlSwap
+4|验证|harness `--pcltest` 新增 11 项断言（Watch 播种/收事件/Dispose 停药/终态自动解绑、PreviewFinish、GetName、权重往返、CreateCombo、ListTasks、ListAll 及运行中过滤）全部 PASS；真机 2.99.0 自检 `ok=28 fail=0`，日志实录真实事件 `→ Waiting`、`→ Loading`、`PreviewFinish`、`→ Finished`；空 `LoaderCombo<object>` 由平台自建并启动，未触碰宿主既有加载器|2026.10.28-16:05:00|PCL2.dlSwap
+
+---
+## 2026.10.28-13:45:00 Alpha 7: 模块管理器（安装/卸载/作用域，无需重启）
+
+GitCommitHash: tag v26.0-Alpha7（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha7.md）
 
 ChangedFiles:
 ```

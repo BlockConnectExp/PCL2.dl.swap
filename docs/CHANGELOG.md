@@ -8,7 +8,7 @@
 ---
 ## 2026.10.28-16:05:00 Alpha 8: 加载器观察面 + 依赖遮蔽修复
 
-GitCommitHash: (unreleased)
+GitCommitHash: tag v26.0-Alpha8（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha8.md）
 
 ChangedFiles:
 ```

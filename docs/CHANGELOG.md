@@ -8,7 +8,7 @@
 ---
 ## 2026.10.28-18:55:00 Alpha 10: 宿主版本作用域 + 安装前兼容预检
 
-GitCommitHash: (unreleased)
+GitCommitHash: tag v26.0-Alpha10（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha10.md）
 
 ChangedFiles:
 ```

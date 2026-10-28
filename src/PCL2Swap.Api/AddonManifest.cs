@@ -4,6 +4,18 @@ using System.Collections.Generic;
 namespace PCL2Swap.Api
 {
     /// <summary>
+    /// One payload file of a package and its SHA-256. The packer writes this list into
+    /// <c>manifest.json</c> *before* signing it, so the signature covers the payload hashes too.
+    /// </summary>
+    public sealed class AddonFileEntry
+    {
+        public string Path { get; set; }
+        public string Sha256 { get; set; }
+
+        public override string ToString() => (Path ?? "(unnamed)") + " " + (Sha256 ?? "(no hash)");
+    }
+
+    /// <summary>
     /// Addon package manifest (manifest.json inside a .swapaddon archive). The host parses it into
     /// this model; see docs/swap-api-research.zh.md section 4 for the schema draft.
     /// </summary>
@@ -28,6 +40,12 @@ namespace PCL2Swap.Api
 
         public List<string> Permissions { get; set; } = new List<string>();
         public bool DefaultEnabled { get; set; }
+
+        /// <summary>
+        /// Payload integrity list (file -> SHA-256) written by the packer. Empty for packages built
+        /// before the trust chain (v26.1) - those are simply "no file list".
+        /// </summary>
+        public List<AddonFileEntry> Files { get; set; } = new List<AddonFileEntry>();
 
         public override string ToString() =>
             (Name ?? Id ?? "(unnamed)") + (string.IsNullOrEmpty(Version) ? string.Empty : " " + Version);

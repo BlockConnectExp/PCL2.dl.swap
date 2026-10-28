@@ -6,6 +6,35 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.29-03:35:00 v26.1-Alpha 2: 包信任链（签名 + 负载哈希 + 版本级告警）
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\AddonManifest.cs                  新增 AddonFileEntry 与 manifest.Files
+.\src\PclDlSwap.Payload\Swap\PackageTrust.cs         新文件：信任链校验（签名、受信任密钥、文件清单）
+.\src\PclDlSwap.Payload\Swap\AddonManifestReader.cs  files 清单解析
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs         Review/信任策略、负载摘要、降级与换包告警、启动时校验
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs  预览带信任状态；详情新增「签名状态」行
+.\src\PclDlSwap.Payload\Swap\SwapHost.cs             e2e 预览钩子改用 Review（带信任）
+.\tools\PclAddonPack\Program.cs                      --gen-key / --sign、files 清单、signature.json
+.\src\PclDlSwap.ExLoaderHarness\Program.cs           9 项信任链断言
+.\docs\swap-api.md                                   manifest files + §11.1 信任链
+.\src\Pcl2Swap.Shim\Shim.cpp + SwapLog.cs + Loader    版本号升 v26.1-Alpha 2
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|包信任链|`signature.json` 的 RSA-SHA256 签名覆盖 `manifest.json` 原始字节，清单里带每个负载文件的 SHA-256；受信任公钥放在 `<数据根>\trusted-keys\*.xml`，keyId 由公钥 XML 的 SHA-256 前 16 位派生（打包器与宿主算法一致，不需要额外 id 注册表）|2026.10.29-03:35:00|PCL2.dl.swap
+2|信任策略|`Trusted`（受信任密钥 + 文件全对）与 `Unsigned`（老包，有清单仍校验）/`UnknownKey`（签名但密钥不受信任）放行但提示；`InvalidSignature` 与 `TamperedFiles`（缺文件、哈希不符、**出现未列入清单的 dll**）**拒绝安装**；启动扫描时同一校验会把被篡改的已装模块标为失败且不启用|2026.10.29-03:35:00|PCL2.dl.swap
+3|版本级告警|安装预览新增：降级安装（已装 X → 包内 Y）提示；同一 id+版本但负载清单摘要不一致时提示「包内容与已安装的不一致」（用负载摘要而不是 zip 文件哈希，避免重新打包就误报）|2026.10.29-03:35:00|PCL2.dl.swap
+4|打包器|`--gen-key <私钥.xml>` 生成 RSA-2048 密钥对（同时输出 `.pub.xml` 与 keyId）；`--sign <私钥.xml>` 自动写入 files 清单并签名，输出里打印签名状态|2026.10.29-03:35:00|PCL2.dl.swap
+5|界面|安装预览新增「信任状态」行；模块详情新增「签名状态」行（含密钥 id 与文件校验结果）|2026.10.29-03:35:00|PCL2.dl.swap
+6|验证|harness 新增 9 项断言（老包 Unsigned、受信任签名 Trusted、安装记录负载摘要、未知密钥 UnknownKey 且不阻塞、篡改负载 TamperedFiles、篡改包拒绝安装、降级告警、同版本换内容告警、预览打印信任状态）全部 PASS，六套件全绿；真机 2.99.0：用 `--gen-key`/`--sign` 生成的包在把公钥放进 `trusted-keys` 后，预览显示「已签名（密钥 2487732295f39f81），文件校验通过（1 个）」，安装后详情页同样显示，模块正常启用|2026.10.29-03:35:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-21:45:00 v26.1-Alpha 1: 模块详情视图 + 钩子注册清理
 
 GitCommitHash: tag v26.1-Alpha1（发布说明见 docs/RELEASE-NOTES-v26.1-Alpha1.md）

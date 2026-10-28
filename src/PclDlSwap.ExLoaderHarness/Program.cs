@@ -7,6 +7,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 
@@ -1035,6 +1036,84 @@ namespace PclDlSwap.ExLoaderHarness
                 }
             }
 
+            string HashFile(string path)
+            {
+                using (var sha = SHA256.Create())
+                using (var stream = File.OpenRead(path))
+                    return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", string.Empty)
+                        .ToLowerInvariant();
+            }
+
+            string KeyIdFor(RSA key)
+            {
+                using (var sha = SHA256.Create())
+                {
+                    var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(key.ToXmlString(false)));
+                    var text = new StringBuilder(16);
+                    for (var index = 0; index < 8; index++) text.Append(hash[index].ToString("x2"));
+                    return text.ToString();
+                }
+            }
+
+            void WriteZipEntry(ZipArchive archive, string name, byte[] bytes)
+            {
+                var entry = archive.CreateEntry(name);
+                using (var stream = entry.Open()) stream.Write(bytes, 0, bytes.Length);
+            }
+
+            /// <summary>Packs one signed module: manifest (+ payload hashes) + RSA-SHA256 signature.</summary>
+            void PackSignedAddon(string path, string manifestJson, RSA key, string dllPath = null)
+            {
+                var dll = dllPath ?? typeof(PCL2Swap.SampleAddon.SampleAddon).Assembly.Location;
+                var dllName = Path.GetFileName(dll);
+                var body = manifestJson.TrimEnd();
+                if (body.EndsWith("}", StringComparison.Ordinal)) body = body.Substring(0, body.Length - 1).TrimEnd();
+                var withFiles = body + ",\n  \"files\": [{\"path\": \"" + dllName + "\", \"sha256\": \"" +
+                                HashFile(dll) + "\"}]\n}";
+                var manifestBytes = new UTF8Encoding(false).GetBytes(withFiles);
+
+                using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+                {
+                    WriteZipEntry(zip, "manifest.json", manifestBytes);
+                    if (key != null)
+                    {
+                        var signature = key.SignData(manifestBytes, HashAlgorithmName.SHA256,
+                            RSASignaturePadding.Pkcs1);
+                        var signatureJson = "{\"algorithm\":\"RSA-SHA256\",\"keyId\":\"" + KeyIdFor(key) +
+                                             "\",\"signature\":\"" + Convert.ToBase64String(signature) + "\"}";
+                        WriteZipEntry(zip, "signature.json", new UTF8Encoding(false).GetBytes(signatureJson));
+                    }
+                    zip.CreateEntryFromFile(dll, dllName);
+                }
+            }
+
+            /// <summary>Rewrites a package's dll entry so its bytes no longer match the signed hash.</summary>
+            void TamperDllEntry(string path)
+            {
+                string dllName;
+                byte[] manifestBytes;
+                using (var zip = ZipFile.OpenRead(path))
+                {
+                    dllName = zip.Entries.First(entry => entry.FullName.EndsWith(".dll",
+                        StringComparison.OrdinalIgnoreCase)).FullName;
+                    using (var stream = zip.GetEntry("manifest.json").Open())
+                    using (var buffer = new MemoryStream())
+                    {
+                        stream.CopyTo(buffer);
+                        manifestBytes = buffer.ToArray();
+                    }
+                }
+
+                var tampered = new byte[manifestBytes.Length + 16];
+                Array.Copy(manifestBytes, tampered, manifestBytes.Length);
+
+                using (var zip = ZipFile.Open(path, ZipArchiveMode.Update))
+                {
+                    zip.GetEntry(dllName)?.Delete();
+                    WriteZipEntry(zip, dllName, tampered);   // wrong payload, hash now mismatches
+                }
+            }
+
             // Keep the test out of the real profile: the module state and addon store now live in
             // SwapPaths.DataRoot, which PCL2SWAP_DATA overrides.
             var dataRoot = Path.Combine(Path.GetTempPath(), "PCL2SwapTest-" + Guid.NewGuid().ToString("N"));
@@ -1338,13 +1417,25 @@ namespace PclDlSwap.ExLoaderHarness
                     (manager?.GetType().GetProperty("Records")?.GetValue(manager) as System.Collections.IEnumerable)
                     ?.Cast<object>().Select(IdOf).ToList() ?? new List<string>();
 
+                // Trusted key material has to exist before the first package is packed: the install
+                // preview, the audit trail and the repack warning all read the trust chain.
+                var trustedDir = Path.Combine(dataRoot, "trusted-keys");
+                Directory.CreateDirectory(trustedDir);
+                var trustedKey = RSA.Create();
+                trustedKey.KeySize = 2048;
+                File.WriteAllText(Path.Combine(trustedDir, "harness.xml"), trustedKey.ToXmlString(false),
+                    new UTF8Encoding(false));
+
                 var external = Path.Combine(Path.GetTempPath(),
                     "PCL2SwapInstall-" + Guid.NewGuid().ToString("N") + ".swapaddon");
-                PackAddon(external, "test.installed", "Installed Sample", "2.0.0",
+                // Unsigned, but with a payload inventory: the "legacy" shape for the trust tests while
+                // still giving the installed record a digest the repack warning can compare.
+                PackSignedAddon(external,
                     "{\"schema\":1,\"id\":\"test.installed\",\"name\":\"Installed Sample\"," +
                     "\"version\":\"2.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
                     "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"author\":\"harness\"," +
-                    "\"description\":\"installed by the manager test\",\"permissions\":[\"host.read\"]}");
+                    "\"description\":\"installed by the manager test\",\"permissions\":[\"host.read\"]}",
+                    null);
 
                 // ---- install preview: inspect without touching the store, then describe it ----
                 var inspectMethod = manager?.GetType().GetMethod("Inspect");
@@ -1358,13 +1449,75 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("inspect reads the manifest without touching the addon store",
                     Convert.ToString(inspected?.GetType().GetProperty("Id")?.GetValue(inspected)) == "test.installed");
 
+                var reviewMethod = manager?.GetType().GetMethod("Review");
+                var legacyReview = reviewMethod?.Invoke(manager, new object[] { external });
                 var previewText = Convert.ToString(describeMethod?.Invoke(manager,
-                    new object[] { inspected, external })) ?? string.Empty;
+                    new object[]
+                    {
+                        inspected, external,
+                        legacyReview?.GetType().GetProperty("Trust")?.GetValue(legacyReview)
+                    })) ?? string.Empty;
                 Expect("the install preview names the module, its API range and its hash",
                     previewText.Contains("test.installed") && previewText.Contains("API") &&
                     previewText.Contains("SHA-256"));
                 Expect("the install preview repeats the declared permissions",
                     previewText.Contains("权限声明") && previewText.Contains("host.read"));
+
+                // ---- trust chain: signature + payload hashes + version-level warnings -------------
+                object TrustOfReview(object review) =>
+                    review?.GetType().GetProperty("Trust")?.GetValue(review);
+                string TrustKindOf(object review)
+                {
+                    var trust = TrustOfReview(review);
+                    return Convert.ToString(trust?.GetType().GetProperty("Kind")?.GetValue(trust));
+                }
+
+                Expect("a legacy package reports Unsigned", TrustKindOf(legacyReview) == "Unsigned");
+                Expect("the preview prints the trust state", previewText.Contains("信任状态"));
+
+                var signedOut = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapSigned-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                PackSignedAddon(signedOut,
+                    "{\"schema\":1,\"id\":\"test.signed\",\"name\":\"Signed Addon\",\"version\":\"1.0.0\"," +
+                    "\"apiVersion\":\">=1.0 <2.0\",\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\"}", trustedKey);
+
+                var signedReview = reviewMethod?.Invoke(manager, new object[] { signedOut });
+                Expect("a package signed by a trusted key reports Trusted",
+                    TrustKindOf(signedReview) == "Trusted");
+
+                var signedRecord = install?.Invoke(manager, new object[] { signedOut, true });
+                var signedRecordType = signedRecord?.GetType();
+                Expect("the install records the signature state",
+                    Convert.ToString(signedRecordType?.GetProperty("TrustKind")?.GetValue(signedRecord)) == "Trusted");
+                Expect("the install records a payload digest",
+                    (Convert.ToString(signedRecordType?.GetProperty("PayloadDigest")?.GetValue(signedRecord)) ??
+                     string.Empty).Length == 64);
+
+                var unknownKeyOut = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapOtherKey-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                using (var otherKey = RSA.Create())
+                {
+                    otherKey.KeySize = 2048;
+                    PackSignedAddon(unknownKeyOut,
+                        "{\"schema\":1,\"id\":\"test.other-key\",\"name\":\"Other Key\",\"version\":\"1.0.0\"," +
+                        "\"apiVersion\":\">=1.0 <2.0\",\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\"}", otherKey);
+                }
+                Expect("a package signed by an unknown key is reported as UnknownKey",
+                    TrustKindOf(reviewMethod?.Invoke(manager, new object[] { unknownKeyOut })) == "UnknownKey");
+                Expect("an unknown key is advisory, not blocking",
+                    install?.Invoke(manager, new object[] { unknownKeyOut, true }) != null);
+
+                var tamperedOut = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapTampered-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                File.Copy(signedOut, tamperedOut, true);
+                TamperDllEntry(tamperedOut);
+                Expect("a modified payload reports TamperedFiles",
+                    TrustKindOf(reviewMethod?.Invoke(manager, new object[] { tamperedOut })) == "TamperedFiles");
+
+                var refusedTamper = false;
+                try { install?.Invoke(manager, new object[] { tamperedOut, true }); }
+                catch (TargetInvocationException) { refusedTamper = true; }
+                Expect("a tampered package is refused at install", refusedTamper);
 
                 object installed = null;
                 try
@@ -1381,6 +1534,35 @@ namespace PclDlSwap.ExLoaderHarness
                     File.Exists(Path.Combine(addonRoot, "test.installed-2.0.0.swapaddon")));
                 Expect("install keeps the user's original package untouched", File.Exists(external));
                 Expect("installed module shows up in the list", RecordIds().Contains("test.installed"));
+
+                // Version-level warnings only make sense once the same id is installed.
+                var downgradeOut = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapDowngrade-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                PackSignedAddon(downgradeOut,
+                    "{\"schema\":1,\"id\":\"test.installed\",\"name\":\"Installed Sample\",\"version\":\"1.0.0\"," +
+                    "\"apiVersion\":\">=1.0 <2.0\",\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\"}", trustedKey);
+                var downgradeReview = reviewMethod?.Invoke(manager, new object[] { downgradeOut });
+                var downgradeText = Convert.ToString(describeMethod?.Invoke(manager, new object[]
+                {
+                    downgradeReview?.GetType().GetProperty("Manifest")?.GetValue(downgradeReview),
+                    downgradeOut, TrustOfReview(downgradeReview)
+                })) ?? string.Empty;
+                Expect("the preview warns about a downgrade", downgradeText.Contains("降级安装"));
+
+                var repackOut = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapRepack-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                PackSignedAddon(repackOut,
+                    "{\"schema\":1,\"id\":\"test.installed\",\"name\":\"Installed Sample\",\"version\":\"2.0.0\"," +
+                    "\"apiVersion\":\">=1.0 <2.0\",\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\"}", trustedKey,
+                    typeof(PCL.ModMain).Assembly.Location);
+                var repackReview = reviewMethod?.Invoke(manager, new object[] { repackOut });
+                var repackText = Convert.ToString(describeMethod?.Invoke(manager, new object[]
+                {
+                    repackReview?.GetType().GetProperty("Manifest")?.GetValue(repackReview),
+                    repackOut, TrustOfReview(repackReview)
+                })) ?? string.Empty;
+                Expect("the preview warns when the same version ships different content",
+                    repackText.Contains("包内容与已安装的不一致"));
 
                 // Per-module log: the module's own lines and the hooks the platform attaches for it.
                 var moduleLogPath = Convert.ToString(manager?.GetType().GetMethod("GetModuleLogPath")
@@ -1503,7 +1685,11 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("built-in modules refuse to uninstall",
                     !Convert.ToBoolean(uninstall?.Invoke(manager, new object[] { "swap.ota-protector" })));
 
-                foreach (var temp in new[] { external, broken, scopedOut, hostOut })
+                foreach (var temp in new[]
+                         {
+                             external, broken, scopedOut, hostOut, signedOut, unknownKeyOut, tamperedOut,
+                             downgradeOut, repackOut
+                         })
                 {
                     try { if (File.Exists(temp)) File.Delete(temp); } catch { }
                 }

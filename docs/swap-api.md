@@ -51,6 +51,7 @@ my-addon.swapaddon
   "shapes": ["injected", "patched"],
   "hostVersions": [">=2.99.0 <3.0"],
   "permissions": ["ui.pages", "hooks.dialogs"],
+  "files": [{ "path": "MyAddon.dll", "sha256": "…" }],
   "defaultEnabled": false
 }
 ```
@@ -63,6 +64,8 @@ my-addon.swapaddon
   不在作用域内的模块**不会启动**，状态显示「作用域不适用 / 宿主版本不适用」，不会被标记为失败；
   安装时平台会先把不匹配写进日志提醒（仍然允许安装 —— 你可能是在为另一个 PCL 版本做准备）。
 - `permissions` 目前是**声明式**（用于展示与审计），运行时不做硬隔离：Addon 与宿主同权限。
+- `files` 是**负载清单**（每个文件的 SHA-256），由打包器自动写入；`signature.json` 的 RSA-SHA256
+  签名覆盖 `manifest.json` 的原始字节，因此签名同时覆盖清单与全部负载哈希。
 
 ---
 
@@ -344,6 +347,37 @@ handler 可以是实例委托（不再要求静态方法）；参数形状与宿
 **踩坑记录（Alpha 8 修）**：如果宿主目录里留着上一次磁盘补丁形状复制过去的 `PCL2Swap.Api.dll`，CLR 会先绑它——注入形状内嵌的同名程序集就被跳过，结果是 `MissingMethodException`（"找不到方法 ListAll"）。现在 shim 入口会先把解包出来的 `PCL2Swap.Api` / `Gee.External.Capstone` / `MonoMod.Utils` / `Mono.Cecil` 预载定版；Loader 复制运行时文件时也改成按内容哈希比较，不再看时间戳。
 
 ## 11. 模块管理（Alpha 7 起）
+
+### 11.1 包信任链（v26.1-Alpha 1 起）
+
+平台不强制签名，但会给每个包一个**可验证的身份**：
+
+| 状态 | 含义 | 安装策略 |
+|---|---|---|
+| `Trusted` | 签名密钥在 `<数据根>\trusted-keys\*.xml` 里，且清单里每个文件的 SHA-256 都对得上 | 放行 |
+| `Unsigned` | 没有 `signature.json`（老包）；有清单就照样校验文件 | 放行 |
+| `UnknownKey` | 有签名，但密钥不在受信任集合里 —— 签名本身不构成信任 | 放行但明确提示 |
+| `InvalidSignature` | 受信任密钥的签名校验失败 | **拒绝安装** |
+| `TamperedFiles` | 签名有效但包内文件与清单不符（缺失、哈希不符、或出现未列入清单的 dll） | **拒绝安装**；启动扫描时也会把这种模块标为失败且不启用 |
+
+给模块签名（作者侧）：
+
+```powershell
+# 1) 生成密钥对（只做一次；私钥自己保管，公钥给用户）
+.\tools\PclAddonPack\bin\Release\net48\PclAddonPack.exe --gen-key .\keys\my.key.xml
+
+# 2) 打包并签名（自动写入 files 清单与 signature.json）
+.\tools\PclAddonPack\bin\Release\net48\PclAddonPack.exe --project .\bin --id demo --name Demo `
+    --version 1.0.0 --entry Demo.Addon --sign .\keys\my.key.xml
+```
+
+用户侧只需要把作者的 `<key>.pub.xml` 复制到 `%APPDATA%\PCL2Swap\trusted-keys\`（命名随意）。
+安装预览与模块详情都会显示「签名状态」，包括密钥 id 与文件校验结果。
+
+另外两个版本级提醒（写在安装预览里，不阻塞）：
+
+- **降级安装**：包内版本低于已安装版本时提示 `旧 → 新`（防止误用旧包）。
+- **同版本换内容**：同一 id+版本但负载清单摘要与已安装的不一致时提示（重打包/换包会露出来）。
 
 设置 → Swap Addon → **模块管理** 提供安装 / 卸载 / 打开目录 / 刷新；列表里每行都有
 `启用|禁用`，第三方模块额外有 `卸载`（红色）。行为：

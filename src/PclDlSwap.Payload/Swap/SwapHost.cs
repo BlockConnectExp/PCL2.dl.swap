@@ -93,8 +93,9 @@ namespace PclDlSwap.Payload.Swap
                         try
                         {
                             SwapLog.Info("[e2e] 打开安装预览（PCL2SWAP_E2E_PREVIEW）：" + preview);
-                            var manifest = Addons.Inspect(preview);
-                            var text = Addons.DescribeForReview(manifest, preview);
+                            var review = Addons.Review(preview);
+                            var manifest = review.Manifest;
+                            var text = Addons.DescribeForReview(manifest, preview, review.Trust);
                             var answer = Api?.Ui.MsgBox(text,
                                 Addons.Find(manifest.Id) == null ? "PCL2 Swap · 安装模块" : "PCL2 Swap · 更新模块",
                                 "安装", "取消") ?? 1;

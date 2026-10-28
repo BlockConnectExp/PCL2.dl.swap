@@ -39,6 +39,19 @@ namespace PclDlSwap.Payload.Swap
             if (manifest.HostVersions.Count == 0)
                 manifest.HostVersions.AddRange(ToStrings(GetRaw(map, "hostVersion")));
             manifest.Permissions.AddRange(ToStrings(GetRaw(map, "permissions")));
+
+            // files: [{ "path": "Addon.dll", "sha256": "…" }] - the payload integrity list.
+            if (GetRaw(map, "files") is IEnumerable fileList)
+            {
+                foreach (var item in fileList)
+                {
+                    if (!(item is Dictionary<string, object> entry)) continue;
+                    var path = Get(entry, "path");
+                    var hash = Get(entry, "sha256");
+                    if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(hash)) continue;
+                    manifest.Files.Add(new AddonFileEntry { Path = path, Sha256 = hash });
+                }
+            }
             return manifest;
         }
 

@@ -45,6 +45,19 @@ namespace PclDlSwap.Payload.Swap
 
             /// <summary>SHA-256 of the archived package, so a later re-install can be compared.</summary>
             public string Sha256 { get; set; }
+
+            /// <summary>Trust chain verdict at install time (see <see cref="PackageTrust"/>).</summary>
+            public string Signature { get; set; }
+
+            /// <summary>Machine-readable half of <see cref="Signature"/>.</summary>
+            public string TrustKind { get; set; }
+
+            /// <summary>
+            /// Digest of the signed payload inventory (path + hash of every file). Two packages with
+            /// the same id and version but different payloads are distinguishable even though the zip
+            /// container itself may be re-timestamped.
+            /// </summary>
+            public string PayloadDigest { get; set; }
         }
 
         private readonly ISwapApi _api;
@@ -193,7 +206,17 @@ namespace PclDlSwap.Payload.Swap
                 throw new FileNotFoundException("找不到模块包：" + archivePath);
 
             var storeCopy = EnsureStoreCopy(archivePath);
-            var manifest = ReadManifest(storeCopy);
+            var manifest = ReadManifest(storeCopy, out var manifestBytes);
+
+            // Trust chain: a broken signature or a payload that does not match its hashes never
+            // reaches the module store. Unknown keys and unsigned packages are the user's call.
+            var trust = PackageTrust.Verify(storeCopy, manifest, manifestBytes);
+            if (trust.IsBlocking)
+                throw new InvalidOperationException("包校验未通过，已拒绝安装：" + trust.Summary +
+                                                    (trust.Problems.Count == 0
+                                                        ? string.Empty
+                                                        : "（" + trust.Problems[0] + "）"));
+
             var existing = Find(manifest.Id);
             if (existing != null)
             {
@@ -206,6 +229,9 @@ namespace PclDlSwap.Payload.Swap
             var record = Unpack(storeCopy, manifest);
             record.SourcePath = Path.GetFullPath(archivePath);
             record.InstalledAtUtc = DateTime.UtcNow;
+            record.Signature = trust.Summary;
+            record.TrustKind = trust.Kind.ToString();
+            record.PayloadDigest = PayloadDigestOf(manifest);
             _records.Add(record);
 
             // Compatibility precheck: a package that does not fit *this* host still installs (the user
@@ -239,11 +265,33 @@ namespace PclDlSwap.Payload.Swap
             return ReadManifest(archivePath);
         }
 
+        /// <summary>Manifest plus its trust verdict - what the install dialog needs in one call.</summary>
+        internal sealed class PackageReview
+        {
+            public AddonManifest Manifest { get; set; }
+            public PackageTrustResult Trust { get; set; }
+        }
+
+        /// <summary>Reads a package and runs the trust chain without touching the addon store.</summary>
+        public PackageReview Review(string archivePath)
+        {
+            if (string.IsNullOrWhiteSpace(archivePath) || !File.Exists(archivePath))
+                throw new FileNotFoundException("找不到模块包：" + archivePath);
+            var manifest = ReadManifest(archivePath, out var manifestBytes);
+            return new PackageReview
+            {
+                Manifest = manifest,
+                Trust = PackageTrust.Verify(archivePath, manifest, manifestBytes)
+            };
+        }
+
         /// <summary>Builds the install/update preview shown before a package is written to disk.</summary>
-        public string DescribeForReview(AddonManifest manifest, string archivePath)
+        public string DescribeForReview(AddonManifest manifest, string archivePath,
+            PackageTrustResult trust = null)
         {
             if (manifest == null) throw new ArgumentNullException(nameof(manifest));
             var existing = Find(manifest.Id);
+            var packageHash = ShortHash(archivePath);
 
             var text = new StringBuilder();
             text.AppendLine(existing == null
@@ -267,7 +315,37 @@ namespace PclDlSwap.Payload.Swap
             text.AppendLine();
             text.AppendLine("  包文件：" + Path.GetFileName(archivePath) +
                             "（" + new FileInfo(archivePath).Length + " 字节）");
-            text.AppendLine("  SHA-256：" + ShortHash(archivePath));
+            text.AppendLine("  SHA-256：" + packageHash);
+            if (trust != null)
+                text.AppendLine("  信任状态：" + trust.Summary);
+
+            // Version-level warnings: a downgrade, or the same version number with different content.
+            if (existing != null)
+            {
+                var comparison = CompareVersions(manifest.Version, existing.Version);
+                if (comparison < 0)
+                {
+                    text.AppendLine();
+                    text.AppendLine($"  注意：这是降级安装（已装 {existing.Version} → 包内 {manifest.Version}）。");
+                }
+                else if (comparison == 0)
+                {
+                    var incomingDigest = PayloadDigestOf(manifest);
+                    if (!string.IsNullOrEmpty(existing.PayloadDigest) && !string.IsNullOrEmpty(incomingDigest) &&
+                        !string.Equals(existing.PayloadDigest, incomingDigest, StringComparison.OrdinalIgnoreCase))
+                    {
+                        text.AppendLine();
+                        text.AppendLine("  注意：同一个版本号的包内容与已安装的不一致" +
+                                        $"（已装 {ShortText(existing.PayloadDigest)}，本包 {ShortText(incomingDigest)}）。");
+                    }
+                }
+            }
+
+            if (trust != null && trust.Problems.Count > 0)
+            {
+                text.AppendLine();
+                foreach (var problem in trust.Problems.Take(3)) text.AppendLine("  ⚠ " + problem);
+            }
 
             // State the scope mismatch before anything is written to disk.
             if (!IsInScope(manifest, out _, out var scopeReason))
@@ -612,6 +690,42 @@ namespace PclDlSwap.Payload.Swap
             return cut > 0 ? value.Substring(0, cut) : value;
         }
 
+        /// <summary>Version comparison that tolerates the shapes modules actually use ("1.0", "1.0.0-beta").</summary>
+        internal static int CompareVersions(string left, string right)
+        {
+            if (Version.TryParse(NormalizeVersion(left), out var first) &&
+                Version.TryParse(NormalizeVersion(right), out var second))
+                return first.CompareTo(second);
+            return string.Compare(left ?? string.Empty, right ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ShortText(string value) =>
+            string.IsNullOrEmpty(value) ? "(none)" : value.Length <= 16 ? value : value.Substring(0, 16) + "…";
+
+        /// <summary>
+        /// Digest of a package's payload inventory: SHA-256 over the sorted "path|hash" lines. Null
+        /// for packages without a list (anything built before the trust chain).
+        /// </summary>
+        internal static string PayloadDigestOf(AddonManifest manifest)
+        {
+            if (manifest?.Files == null || manifest.Files.Count == 0) return null;
+            var lines = manifest.Files
+                .Where(file => !string.IsNullOrEmpty(file.Path))
+                .Select(file => file.Path.Replace('\\', '/').ToLowerInvariant() + "|" +
+                                (file.Sha256 ?? string.Empty).ToLowerInvariant())
+                .OrderBy(line => line, StringComparer.Ordinal)
+                .ToList();
+            if (lines.Count == 0) return null;
+
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(string.Join("\n", lines)));
+                var text = new StringBuilder(hash.Length * 2);
+                foreach (var value in hash) text.Append(value.ToString("x2"));
+                return text.ToString();
+            }
+        }
+
         /// <summary>Full SHA-256 of a package, shown in the install preview so the user can verify it.</summary>
         private static string ShortHash(string path)
         {
@@ -743,12 +857,27 @@ namespace PclDlSwap.Payload.Swap
             AddonRecord record = null;
             try
             {
-                var manifest = ReadManifest(archive);
+                var manifest = ReadManifest(archive, out var manifestBytes);
                 record = Unpack(archive, manifest);
                 // Modules discovered at startup carry the archive as their source of record; the
                 // package's own timestamp is the honest stand-in for "installed at".
                 record.SourcePath = archive;
                 try { record.InstalledAtUtc = File.GetLastWriteTimeUtc(archive); } catch { }
+
+                // A store copy whose payload no longer matches its signed hashes must not run.
+                var trust = PackageTrust.Verify(archive, manifest, manifestBytes);
+                record.Signature = trust.Summary;
+                record.TrustKind = trust.Kind.ToString();
+                record.PayloadDigest = PayloadDigestOf(manifest);
+                if (trust.IsBlocking)
+                {
+                    record.Status = "failed";
+                    record.Enabled = false;
+                    record.Failure = new InvalidOperationException(trust.Summary +
+                        (trust.Problems.Count == 0 ? string.Empty : "；" + trust.Problems[0]));
+                    SwapLog.Error($"模块包校验未通过，已禁止加载：{record.Id} —— {trust.Summary}");
+                }
+
                 _records.Add(record);
             }
             catch (Exception ex)
@@ -765,17 +894,28 @@ namespace PclDlSwap.Payload.Swap
         }
 
         /// <summary>Reads and validates manifest.json; throws a readable message when it cannot be used.</summary>
-        private static AddonManifest ReadManifest(string archive)
+        private static AddonManifest ReadManifest(string archive) => ReadManifest(archive, out _);
+
+        /// <summary>
+        /// Same, but hands back the exact manifest bytes: the signature covers those bytes, so the
+        /// verifier must see them verbatim instead of a re-serialised copy.
+        /// </summary>
+        private static AddonManifest ReadManifest(string archive, out byte[] manifestBytes)
         {
+            manifestBytes = null;
             using (var zip = ZipFile.OpenRead(archive))
             {
                 var manifestEntry = zip.GetEntry("manifest.json");
                 if (manifestEntry == null) throw new InvalidOperationException("包内缺少 manifest.json");
 
-                string json;
-                using (var reader = new StreamReader(manifestEntry.Open(), Encoding.UTF8))
-                    json = reader.ReadToEnd();
+                using (var stream = manifestEntry.Open())
+                using (var buffer = new MemoryStream())
+                {
+                    stream.CopyTo(buffer);
+                    manifestBytes = buffer.ToArray();
+                }
 
+                var json = new UTF8Encoding(false).GetString(manifestBytes);
                 var manifest = AddonManifestReader.Parse(json);
                 var error = Validate(manifest);
                 if (error != null) throw new InvalidOperationException(error);

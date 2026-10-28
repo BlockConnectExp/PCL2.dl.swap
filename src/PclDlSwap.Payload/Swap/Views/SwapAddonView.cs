@@ -229,6 +229,7 @@ namespace PclDlSwap.Payload.Swap.Views
                     : "（内置模块）"),
                 SwapUi.InfoRow("来源包", string.IsNullOrEmpty(record.SourcePath) ? "（内置模块）" : record.SourcePath),
                 SwapUi.InfoRow("包 SHA-256", string.IsNullOrEmpty(record.Sha256) ? "（内置模块）" : record.Sha256),
+                SwapUi.InfoRow("签名状态", string.IsNullOrEmpty(record.Signature) ? "（未记录）" : record.Signature),
                 SwapUi.InfoRow("模块目录", string.IsNullOrEmpty(record.Directory) ? "（内置模块）" : record.Directory),
                 SwapUi.InfoRow("配置文件", addons.GetModuleConfigPath(record.Id))
             };
@@ -330,8 +331,9 @@ namespace PclDlSwap.Payload.Swap.Views
 
                 // Review-before-install: the manifest, the declared scope and the requested
                 // permissions are shown first, so a package never reaches the disk unannounced.
-                var manifest = addons.Inspect(path);
-                var preview = addons.DescribeForReview(manifest, path);
+                var review = addons.Review(path);
+                var manifest = review.Manifest;
+                var preview = addons.DescribeForReview(manifest, path, review.Trust);
                 var existing = addons.Find(manifest.Id);
                 var answer = 1;
                 if (api != null)

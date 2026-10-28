@@ -32,7 +32,7 @@
 #define API_ASM_NAME      L"PCL2Swap.Api.dll"
 #define ENTRY_TYPE        L"PclDlSwap.Payload.Host.ExLoaderEntry"
 #define ENTRY_METHOD      L"Activate"
-#define TOOL_VERSION      L"v26.1-Alpha1"
+#define TOOL_VERSION      L"v26.1-Alpha2"
 
 // GUIDs from metahost.h, spelled out so no import library is needed.
 static const GUID kClsidClrMetaHost =

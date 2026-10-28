@@ -32,11 +32,19 @@ namespace PclDlSwap.Payload.Swap.Views
                 for (var index = 0; index < records.Count; index++)
                 {
                     if (index > 0) list.Add(Separator());
-                    list.Add(Row(records[index], addons));
+                    list.Add(Row(records[index], api, addons));
                 }
             }
 
             page.Children.Add(SwapUi.Card("已安装的 Addon", list.ToArray()));
+
+            page.Children.Add(SwapUi.Card("模块管理",
+                SwapUi.Note("安装会把包归档到 Addon 目录并立即启动，不需要重启 PCL；" +
+                            "卸载会停掉模块、撤下它的设置页并删除模块目录（入口 DLL 被占用时留到下次启动清理）。"),
+                SwapUi.Buttons(
+                    SwapUi.Button("安装模块…", () => InstallFromDialog(api, addons)),
+                    SwapUi.Button("打开 Addon 目录", () => OpenFolder(api?.Host.AddonDirectory)),
+                    SwapUi.Button("刷新", () => PageRegistry.InvalidatePage("swap-addons")))));
 
             var chains = ScopedHook.Snapshot();
             if (chains.Count > 0)
@@ -75,7 +83,7 @@ namespace PclDlSwap.Payload.Swap.Views
             return stack;
         }
 
-        private static FrameworkElement Row(AddonManager.AddonRecord record, AddonManager addons)
+        private static FrameworkElement Row(AddonManager.AddonRecord record, ISwapApi api, AddonManager addons)
         {
             var grid = new Grid { Margin = new Thickness(0, 9, 0, 9), MinHeight = 46 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -105,6 +113,14 @@ namespace PclDlSwap.Payload.Swap.Views
                 left.Children.Add(description);
             }
 
+            var scope = ScopeText(record);
+            if (scope.Length > 0)
+            {
+                var scopeText = SwapUi.Text(scope, 11, true, false);
+                scopeText.Margin = new Thickness(0, 3, 12, 0);
+                left.Children.Add(scopeText);
+            }
+
             if (record.Failure != null)
             {
                 var failure = SwapUi.Text("错误：" + record.Failure.Message, 11.5, false);
@@ -128,6 +144,12 @@ namespace PclDlSwap.Payload.Swap.Views
             if (addons != null)
             {
                 var id = record.Id;
+                var actions = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
                 var toggle = SwapUi.Button(record.Enabled ? "禁用" : "启用", () =>
                 {
                     if (!addons.SetEnabled(id, !record.Enabled)) return;
@@ -135,10 +157,20 @@ namespace PclDlSwap.Payload.Swap.Views
                 });
                 PclUi.SetMember(toggle, "Height", 35.0);
                 PclUi.SetMember(toggle, "MinWidth", 76.0);
-                PclUi.SetMember(toggle, "Margin", new Thickness(0));
-                toggle.VerticalAlignment = VerticalAlignment.Center;
-                Grid.SetColumn(toggle, 2);
-                grid.Children.Add(toggle);
+                PclUi.SetMember(toggle, "Margin", new Thickness(0, 0, 8, 0));
+                actions.Children.Add(toggle);
+
+                if (!record.BuiltIn)
+                {
+                    var uninstall = SwapUi.Button("卸载", () => UninstallModule(api, addons, record), "Red");
+                    PclUi.SetMember(uninstall, "Height", 35.0);
+                    PclUi.SetMember(uninstall, "MinWidth", 76.0);
+                    PclUi.SetMember(uninstall, "Margin", new Thickness(0));
+                    actions.Children.Add(uninstall);
+                }
+
+                Grid.SetColumn(actions, 2);
+                grid.Children.Add(actions);
             }
             return grid;
         }
@@ -154,6 +186,100 @@ namespace PclDlSwap.Payload.Swap.Views
             return line;
         }
 
+        // ------------------------------------------------------------------ module management
+
+        /// <summary>Picks a .swapaddon with the Windows file dialog and installs it hot.</summary>
+        private static void InstallFromDialog(ISwapApi api, AddonManager addons)
+        {
+            if (addons == null) return;
+            try
+            {
+                var path = PickPackage();
+                if (string.IsNullOrEmpty(path)) return;
+
+                var record = addons.Install(path);
+                PageRegistry.RefreshSidebar();
+                PageRegistry.InvalidatePage("swap-addons");
+                SwapLog.Info($"模块已安装：{record.Id} {record.Version}（状态 {record.Status}）");
+                api?.Ui.Hint(record.Status == "enabled"
+                    ? $"已安装并启用：{record.Name} {record.Version}"
+                    : $"已安装：{record.Name} {record.Version}（{StatusText(record)}）");
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Error("安装模块失败：" + ex.Message);
+                api?.Ui.MsgBox("安装失败：" + Environment.NewLine + ex.Message + Environment.NewLine +
+                               Environment.NewLine +
+                               "模块包需要包含 manifest.json（id / version / entry / apiVersion）。",
+                    "PCL2 Swap · 安装模块", "确定");
+            }
+        }
+
+        private static void UninstallModule(ISwapApi api, AddonManager addons, AddonManager.AddonRecord record)
+        {
+            if (addons == null || record == null) return;
+            try
+            {
+                var answer = 1;
+                if (api != null)
+                {
+                    answer = api.Ui.MsgBox(
+                        $"确定要卸载“{record.Name} {record.Version}”吗？" + Environment.NewLine + Environment.NewLine +
+                        "模块立即停止（钩子放行原方法）、设置页从侧栏移除，模块目录与包文件被删除。" + Environment.NewLine +
+                        "被 PCL 占用的 DLL 会留到下次启动时清理。",
+                        "PCL2 Swap · 卸载模块", "卸载", "取消");
+                }
+                if (answer != 1)
+                {
+                    SwapLog.Info("卸载模块已取消：" + record.Id);
+                    return;
+                }
+
+                if (!addons.Uninstall(record.Id))
+                {
+                    api?.Ui.MsgBox("卸载失败：内置模块不能卸载，请在列表里禁用。", "PCL2 Swap · 卸载模块", "确定");
+                    return;
+                }
+
+                PageRegistry.RefreshSidebar();
+                PageRegistry.InvalidatePage("swap-addons");
+                api?.Ui.Hint($"已卸载：{record.Name} {record.Version}");
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Error("卸载模块失败：" + ex.Message);
+                api?.Ui.MsgBox("卸载失败：" + Environment.NewLine + ex.Message, "PCL2 Swap · 卸载模块", "确定");
+            }
+        }
+
+        private static string PickPackage()
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "选择 Swap 模块包",
+                Filter = "Swap 模块包 (*.swapaddon)|*.swapaddon|ZIP 压缩包 (*.zip)|*.zip|所有文件 (*.*)|*.*",
+                CheckFileExists = true,
+                Multiselect = false
+            };
+            return dialog.ShowDialog() == true ? dialog.FileName : null;
+        }
+
+        /// <summary>Manifest scope line: author, API range, shapes and permission count.</summary>
+        private static string ScopeText(AddonManager.AddonRecord record)
+        {
+            var manifest = record.Manifest;
+            if (manifest == null) return string.Empty;
+
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(manifest.Author)) parts.Add("作者 " + manifest.Author);
+            if (!string.IsNullOrEmpty(manifest.ApiVersion)) parts.Add("API " + manifest.ApiVersion);
+            if (manifest.Shapes != null && manifest.Shapes.Count > 0)
+                parts.Add("形状 " + string.Join("/", manifest.Shapes));
+            if (manifest.Permissions != null && manifest.Permissions.Count > 0)
+                parts.Add("权限 " + manifest.Permissions.Count);
+            return parts.Count == 0 ? string.Empty : string.Join(" · ", parts);
+        }
+
         private static string StatusText(AddonManager.AddonRecord record)
         {
             switch (record.Status)
@@ -162,6 +288,9 @@ namespace PclDlSwap.Payload.Swap.Views
                 case "disabled": return "已禁用";
                 case "failed": return "启动失败";
                 case "unpacked": return "已解包（待启用）";
+                case "skipped-shape": return "作用域不适用";
+                case "removed": return "已卸载";
+                case "registered": return "已登记";
                 default: return record.Status ?? string.Empty;
             }
         }

@@ -32,13 +32,18 @@ namespace PclDlSwap.Payload.Swap
                 DefaultEnabled = ToBool(Get(map, "defaultEnabled"), false)
             };
             if (string.IsNullOrEmpty(manifest.ApiVersion)) manifest.ApiVersion = ">=1.0 <2.0";
-            manifest.Shapes.AddRange(ToStrings(Get(map, "shapes")));
-            manifest.Permissions.AddRange(ToStrings(Get(map, "permissions")));
+            // Lists need the raw JSON value: Convert.ToString on an array yields "System.Object[]",
+            // which is why shapes/permissions used to come back empty for every module.
+            manifest.Shapes.AddRange(ToStrings(GetRaw(map, "shapes")));
+            manifest.Permissions.AddRange(ToStrings(GetRaw(map, "permissions")));
             return manifest;
         }
 
         private static string Get(Dictionary<string, object> map, string key) =>
             map.TryGetValue(key, out var value) ? Convert.ToString(value) : null;
+
+        private static object GetRaw(Dictionary<string, object> map, string key) =>
+            map.TryGetValue(key, out var value) ? value : null;
 
         private static int ToInt(string text, int fallback) =>
             int.TryParse(text, out var value) ? value : fallback;

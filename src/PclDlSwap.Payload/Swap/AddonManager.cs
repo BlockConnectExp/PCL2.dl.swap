@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Windows;
 using System.Web.Script.Serialization;
 using PCL2Swap.Api;
 using PclDlSwap.Payload.Host;
@@ -32,6 +33,9 @@ namespace PclDlSwap.Payload.Swap
             public ISwapAddon Instance { get; set; }
             public AddonManifest Manifest { get; set; }
             public Exception Failure { get; set; }
+
+            /// <summary>Settings pages this addon registered, so an uninstall can drop them again.</summary>
+            public List<string> PageIds { get; } = new List<string>();
         }
 
         private readonly ISwapApi _api;
@@ -80,14 +84,8 @@ namespace PclDlSwap.Payload.Swap
             {
                 if (enabled)
                 {
-                    if (record.Instance == null) record.Instance = CreateInstance(record);
-                    var scoped = new ScopedApi(_api, new AddonDataStore(record.Id), record.Id);
-                    var context = new SwapContext(scoped, record.Manifest,
-                        record.Directory ?? AppDomain.CurrentDomain.BaseDirectory);
-                    record.Instance?.OnLoad(context);
-                    record.Instance?.OnEnable();
-                    record.Status = "enabled";
-                    record.Failure = null;
+                    EnableRecord(record);
+                    if (record.Status != "enabled") return false;
                 }
                 else
                 {
@@ -114,6 +112,274 @@ namespace PclDlSwap.Payload.Swap
                 SwapLog.Error($"Addon {(enabled ? "启用" : "禁用")}失败：{record.Id}", ex);
                 return false;
             }
+        }
+
+        // ------------------------------------------------------------------ install / uninstall
+
+        /// <summary>
+        /// Installs (or replaces) a .swapaddon from anywhere on disk: validate it, keep a copy in the
+        /// addon store, unpack it and start it right away. Re-installing the same id retires the
+        /// previous copy first, so its hooks stop and its settings pages leave the sidebar - this is
+        /// the hot module update path, no PCL restart involved.
+        /// </summary>
+        public AddonRecord Install(string archivePath, bool enable = true)
+        {
+            if (string.IsNullOrWhiteSpace(archivePath) || !File.Exists(archivePath))
+                throw new FileNotFoundException("找不到模块包：" + archivePath);
+
+            var storeCopy = EnsureStoreCopy(archivePath);
+            var manifest = ReadManifest(storeCopy);
+            var existing = Find(manifest.Id);
+            if (existing != null)
+            {
+                if (existing.BuiltIn)
+                    throw new InvalidOperationException($"“{manifest.Id}”是内置模块，不能被同名包覆盖。");
+                SwapLog.Info($"Addon 更新：{manifest.Id} {existing.Version} -> {manifest.Version}");
+                Retire(existing, removeArchive: true, keepSavedState: true);
+            }
+
+            var record = Unpack(storeCopy, manifest);
+            _records.Add(record);
+            SaveState();
+
+            if (enable) EnableRecord(record);
+            else
+            {
+                record.Enabled = false;
+                record.Status = "disabled";
+                SaveState();
+            }
+            return record;
+        }
+
+        /// <summary>
+        /// Removes a module: stop it, drop its settings pages, delete the store copy and the
+        /// unpacked files. A loaded entry assembly keeps its DLL locked for the rest of the
+        /// process, so anything still locked is queued for deletion at the next start instead of
+        /// failing the uninstall.
+        /// </summary>
+        public bool Uninstall(string addonId)
+        {
+            var record = Find(addonId);
+            if (record == null)
+            {
+                SwapLog.Warn("Addon 卸载：未找到 " + addonId);
+                return false;
+            }
+            if (record.BuiltIn)
+            {
+                SwapLog.Warn("Addon 卸载：内置模块只能禁用，不能卸载。");
+                return false;
+            }
+
+            Retire(record, removeArchive: true, keepSavedState: false);
+            _savedState.Remove(record.Id);
+            SaveState();
+            SwapLog.Info($"Addon 已卸载：{record.Id}（{record.Name} {record.Version}）");
+            return true;
+        }
+
+        /// <summary>Stops an addon, drops its pages and (optionally) deletes its files.</summary>
+        private void Retire(AddonRecord record, bool removeArchive, bool keepSavedState)
+        {
+            try { record.Instance?.OnDisable(); }
+            catch (Exception ex) { SwapLog.Warn($"Addon {record.Id} OnDisable 抛错：" + ex.Message); }
+            try { record.Instance?.OnUnload(); }
+            catch (Exception ex) { SwapLog.Warn($"Addon {record.Id} OnUnload 抛错：" + ex.Message); }
+
+            foreach (var pageId in record.PageIds.ToList())
+                PageRegistry.UnregisterPage(pageId);
+            record.PageIds.Clear();
+            record.Instance = null;
+            record.Status = "removed";
+
+            if (!keepSavedState) _savedState.Remove(record.Id);
+            if (!record.BuiltIn) DeleteOrQueue(record, removeArchive, removeModuleData: !keepSavedState);
+
+            _records.Remove(record);
+        }
+
+        /// <summary>
+        /// Keeps the package inside the addon store. A package picked from Downloads is copied, so
+        /// uninstall only ever deletes files the platform put there itself.
+        /// </summary>
+        private static string EnsureStoreCopy(string archivePath)
+        {
+            var full = Path.GetFullPath(archivePath);
+            var store = Path.GetFullPath(SwapPaths.AddonsDirectory);
+            if (full.StartsWith(store, StringComparison.OrdinalIgnoreCase)) return full;
+
+            Directory.CreateDirectory(store);
+            var manifest = ReadManifest(full);
+            var name = SwapPaths.Sanitize(manifest.Id + "-" + (manifest.Version ?? "0")) + ".swapaddon";
+            var destination = Path.Combine(store, name);
+            File.Copy(full, destination, true);
+            SwapLog.Info($"Addon 包已归档到模块目录：{destination}");
+            return destination;
+        }
+
+        private static void DeleteOrQueue(AddonRecord record, bool removeArchive, bool removeModuleData)
+        {
+            var targets = new List<string>();
+            // A full uninstall removes the module's whole folder (unpacked versions + config.json);
+            // an update only retires the unpacked version.
+            if (removeModuleData && !string.IsNullOrEmpty(record.Id))
+                targets.Add(SwapPaths.AddonDirectory(record.Id));
+            else if (!string.IsNullOrEmpty(record.Directory)) targets.Add(record.Directory);
+            if (removeArchive && !string.IsNullOrEmpty(record.ArchivePath)) targets.Add(record.ArchivePath);
+
+            var queued = new List<string>();
+            foreach (var path in targets)
+            {
+                try
+                {
+                    if (Directory.Exists(path)) Directory.Delete(path, true);
+                    else if (File.Exists(path)) File.Delete(path);
+                }
+                catch (Exception ex)
+                {
+                    queued.Add(path);
+                    SwapLog.Warn($"Addon 文件暂被占用，将在下次启动删除：{path}（{ex.Message}）");
+                }
+            }
+
+            // Drop the now-empty <addons>\<id> folder too; a locked entry dll keeps it alive, and
+            // then the pending marker above cleans both levels at the next start.
+            if (!removeModuleData && !string.IsNullOrEmpty(record.Directory) && queued.Count == 0)
+            {
+                var parent = Path.GetDirectoryName(record.Directory.TrimEnd(Path.DirectorySeparatorChar));
+                try
+                {
+                    if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent) &&
+                        Directory.GetFileSystemEntries(parent).Length == 0)
+                        Directory.Delete(parent);
+                }
+                catch { /* left for the user; an empty folder is harmless */ }
+            }
+
+            if (queued.Count > 0) WritePendingRemoval(record.Id, queued);
+        }
+
+        private static void WritePendingRemoval(string addonId, IEnumerable<string> paths)
+        {
+            try
+            {
+                var directory = PendingRemovalDirectory;
+                Directory.CreateDirectory(directory);
+                var file = Path.Combine(directory,
+                    SwapPaths.Sanitize(addonId) + "-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + ".txt");
+                File.WriteAllLines(file, paths);
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("记录待删除模块文件失败：" + ex.Message);
+            }
+        }
+
+        private static string PendingRemovalDirectory =>
+            Path.Combine(SwapPaths.AddonsDirectory, ".pending");
+
+        /// <summary>
+        /// Retries the deletions that were blocked by locked module DLLs in a previous run. Called
+        /// before the addon scan so a removed module cannot come back from a half-deleted folder.
+        /// </summary>
+        public void CleanupPendingRemovals()
+        {
+            try
+            {
+                var directory = PendingRemovalDirectory;
+                if (!Directory.Exists(directory)) return;
+                foreach (var marker in Directory.GetFiles(directory, "*.txt"))
+                {
+                    var remaining = new List<string>();
+                    foreach (var path in File.ReadAllLines(marker))
+                    {
+                        if (string.IsNullOrWhiteSpace(path)) continue;
+                        try
+                        {
+                            if (Directory.Exists(path)) Directory.Delete(path, true);
+                            else if (File.Exists(path)) File.Delete(path);
+                        }
+                        catch { remaining.Add(path); }
+                    }
+
+                    if (remaining.Count == 0)
+                    {
+                        try { File.Delete(marker); } catch { }
+                        SwapLog.Info("待删除模块文件已清理完成：" + Path.GetFileName(marker));
+                    }
+                    else
+                    {
+                        File.WriteAllLines(marker, remaining);
+                        SwapLog.Warn("待删除模块文件仍被占用：" + Path.GetFileName(marker));
+                    }
+                }
+
+                // The marker folder itself goes away once nothing is queued any more.
+                try
+                {
+                    if (Directory.Exists(directory) && Directory.GetFileSystemEntries(directory).Length == 0)
+                        Directory.Delete(directory);
+                }
+                catch { /* an empty .pending folder is harmless */ }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("清理待删除模块文件失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Starts one addon. Shape is the platform's scope: a module that declares
+        /// <c>shapes: ["injected"]</c> is skipped (not failed) while PCL runs the patched shape.
+        /// </summary>
+        private void EnableRecord(AddonRecord record)
+        {
+            if (!IsShapeApplicable(record))
+            {
+                record.Status = "skipped-shape";
+                record.Failure = null;
+                SwapLog.Info($"Addon 跳过（作用域不匹配）：{record.Id} 只声明了 " +
+                             string.Join(", ", record.Manifest?.Shapes ?? new List<string>()) +
+                             $"，当前形状 {SwapHost.Shape}。");
+                return;
+            }
+
+            if (record.Instance == null && string.IsNullOrEmpty(record.Directory)) return;
+
+            // Flip the flag first: hooks the module attaches during OnLoad/OnEnable must already see
+            // the module as enabled, otherwise the gate would keep them transparent.
+            record.Enabled = true;
+            try
+            {
+                if (record.Instance == null) record.Instance = CreateInstance(record);
+                if (record.Instance == null) return;
+
+                var scoped = new ScopedApi(_api, record);
+                var context = new SwapContext(scoped, record.Manifest,
+                    record.Directory ?? AppDomain.CurrentDomain.BaseDirectory);
+                record.Instance.OnLoad(context);
+                record.Instance.OnEnable();
+                record.Status = "enabled";
+                record.Failure = null;
+                SwapLog.Info($"Addon 已启用：{record.Id}（{record.Name} {record.Version}）");
+            }
+            catch (Exception ex)
+            {
+                record.Status = "failed";
+                record.Enabled = false;
+                record.Failure = ex;
+                SwapLog.Error($"Addon 启用失败：{record.Id}", ex);
+            }
+        }
+
+        private static bool IsShapeApplicable(AddonRecord record)
+        {
+            var shapes = record.Manifest?.Shapes;
+            if (shapes == null || shapes.Count == 0) return true;
+            var current = SwapHost.Shape.ToString();
+            return shapes.Any(shape =>
+                string.Equals(shape, current, StringComparison.OrdinalIgnoreCase) || shape == "*");
         }
 
         // ------------------------------------------------------------------ module state
@@ -210,6 +476,7 @@ namespace PclDlSwap.Payload.Swap
         {
             try
             {
+                CleanupPendingRemovals();
                 var root = SwapPaths.AddonsDirectory;
                 Directory.CreateDirectory(root);
                 foreach (var archive in Directory.GetFiles(root, "*.swapaddon"))
@@ -226,53 +493,9 @@ namespace PclDlSwap.Payload.Swap
             AddonRecord record = null;
             try
             {
-                using (var zip = ZipFile.OpenRead(archive))
-                {
-                    var manifestEntry = zip.GetEntry("manifest.json");
-                    if (manifestEntry == null) throw new InvalidOperationException("包内缺少 manifest.json");
-
-                    string json;
-                    using (var reader = new StreamReader(manifestEntry.Open(), Encoding.UTF8))
-                        json = reader.ReadToEnd();
-
-                    var manifest = AddonManifestReader.Parse(json);
-                    var error = Validate(manifest);
-                    if (error != null) throw new InvalidOperationException(error);
-
-                    record = new AddonRecord
-                    {
-                        Manifest = manifest,
-                        Id = manifest.Id,
-                        Name = string.IsNullOrEmpty(manifest.Name) ? manifest.Id : manifest.Name,
-                        Version = manifest.Version,
-                        Description = manifest.Description,
-                        ArchivePath = archive,
-                        Enabled = true,
-                        Status = "unpacked"
-                    };
-
-                    var target = Path.Combine(SwapPaths.AddonDirectory(manifest.Id),
-                        SwapPaths.Sanitize(manifest.Version ?? "0"));
-                    var targetRoot = Path.GetFullPath(target);
-                    Directory.CreateDirectory(targetRoot);
-
-                    foreach (var entry in zip.Entries)
-                    {
-                        if (string.IsNullOrEmpty(entry.Name)) continue;   // directory marker
-                        var path = Path.GetFullPath(Path.Combine(targetRoot, entry.FullName));
-                        if (!path.StartsWith(targetRoot, StringComparison.OrdinalIgnoreCase))
-                        {
-                            SwapLog.Warn("Addon 包包含越界路径，已跳过：" + entry.FullName);
-                            continue;
-                        }
-                        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? targetRoot);
-                        entry.ExtractToFile(path, true);
-                    }
-
-                    record.Directory = targetRoot;
-                    _records.Add(record);
-                    SwapLog.Info($"Addon 已解包：{manifest.Id} {manifest.Version} -> {targetRoot}");
-                }
+                var manifest = ReadManifest(archive);
+                record = Unpack(archive, manifest);
+                _records.Add(record);
             }
             catch (Exception ex)
             {
@@ -285,6 +508,65 @@ namespace PclDlSwap.Payload.Swap
                 }
                 SwapLog.Error("Addon 加载失败：" + archive, ex);
             }
+        }
+
+        /// <summary>Reads and validates manifest.json; throws a readable message when it cannot be used.</summary>
+        private static AddonManifest ReadManifest(string archive)
+        {
+            using (var zip = ZipFile.OpenRead(archive))
+            {
+                var manifestEntry = zip.GetEntry("manifest.json");
+                if (manifestEntry == null) throw new InvalidOperationException("包内缺少 manifest.json");
+
+                string json;
+                using (var reader = new StreamReader(manifestEntry.Open(), Encoding.UTF8))
+                    json = reader.ReadToEnd();
+
+                var manifest = AddonManifestReader.Parse(json);
+                var error = Validate(manifest);
+                if (error != null) throw new InvalidOperationException(error);
+                return manifest;
+            }
+        }
+
+        /// <summary>Extracts a validated package under &lt;addons&gt;\&lt;id&gt;\&lt;version&gt; with a zip-slip guard.</summary>
+        private static AddonRecord Unpack(string archive, AddonManifest manifest)
+        {
+            var record = new AddonRecord
+            {
+                Manifest = manifest,
+                Id = manifest.Id,
+                Name = string.IsNullOrEmpty(manifest.Name) ? manifest.Id : manifest.Name,
+                Version = manifest.Version,
+                Description = manifest.Description,
+                ArchivePath = archive,
+                Enabled = true,
+                Status = "unpacked"
+            };
+
+            var targetRoot = Path.GetFullPath(Path.Combine(SwapPaths.AddonDirectory(manifest.Id),
+                SwapPaths.Sanitize(manifest.Version ?? "0")));
+            Directory.CreateDirectory(targetRoot);
+
+            using (var zip = ZipFile.OpenRead(archive))
+            {
+                foreach (var entry in zip.Entries)
+                {
+                    if (string.IsNullOrEmpty(entry.Name)) continue;   // directory marker
+                    var path = Path.GetFullPath(Path.Combine(targetRoot, entry.FullName));
+                    if (!path.StartsWith(targetRoot, StringComparison.OrdinalIgnoreCase))
+                    {
+                        SwapLog.Warn("Addon 包包含越界路径，已跳过：" + entry.FullName);
+                        continue;
+                    }
+                    Directory.CreateDirectory(Path.GetDirectoryName(path) ?? targetRoot);
+                    entry.ExtractToFile(path, true);
+                }
+            }
+
+            record.Directory = targetRoot;
+            SwapLog.Info($"Addon 已解包：{manifest.Id} {manifest.Version} -> {targetRoot}");
+            return record;
         }
 
         private static string Validate(AddonManifest manifest)
@@ -312,27 +594,7 @@ namespace PclDlSwap.Payload.Swap
                     SwapLog.Info($"Addon 已跳过（用户禁用）：{record.Id}");
                     continue;
                 }
-                if (record.Instance == null && string.IsNullOrEmpty(record.Directory)) continue;
-                try
-                {
-                    if (record.Instance == null) record.Instance = CreateInstance(record);
-                    if (record.Instance == null) continue;
-
-                    var scoped = new ScopedApi(_api, new AddonDataStore(record.Id), record.Id);
-                    var context = new SwapContext(scoped, record.Manifest,
-                        record.Directory ?? AppDomain.CurrentDomain.BaseDirectory);
-                    record.Instance.OnLoad(context);
-                    record.Instance.OnEnable();
-                    record.Status = "enabled";
-                    SwapLog.Info($"Addon 已启用：{record.Id}（{record.Name} {record.Version}）");
-                }
-                catch (Exception ex)
-                {
-                    record.Status = "failed";
-                    record.Enabled = false;
-                    record.Failure = ex;
-                    SwapLog.Error($"Addon 启用失败：{record.Id}", ex);
-                }
+                EnableRecord(record);
             }
         }
 
@@ -363,16 +625,17 @@ namespace PclDlSwap.Payload.Swap
         {
             private readonly ISwapApi _inner;
 
-            public ScopedApi(ISwapApi inner, IData data, string addonId)
+            public ScopedApi(ISwapApi inner, AddonRecord record)
             {
                 _inner = inner;
-                Data = data;
-                Hooks = new ScopedHooks(inner.Hooks, inner as HostApi, addonId);
+                Data = new AddonDataStore(record.Id);
+                Hooks = new ScopedHooks(inner.Hooks, inner as HostApi, record.Id);
+                Ui = new ScopedUi(inner.Ui, record);
             }
 
             public IHostInfo Host => _inner.Host;
             public IHooks Hooks { get; }
-            public IUi Ui => _inner.Ui;
+            public IUi Ui { get; }
             public IData Data { get; }
             public IReflection Reflect => _inner.Reflect;
             public ISwapSurface Surface => _inner.Surface;
@@ -380,6 +643,56 @@ namespace PclDlSwap.Payload.Swap
             public void Log(string message) => _inner.Log(message);
             public void LogWarning(string message) => _inner.LogWarning(message);
             public void LogError(string message, Exception exception = null) => _inner.LogError(message, exception);
+        }
+
+        /// <summary>
+        /// Per-addon UI view. Settings pages are namespaced with the module id and remembered on the
+        /// record, so an uninstall can drop exactly the pages that module added - and nothing else.
+        /// </summary>
+        private sealed class ScopedUi : IUi
+        {
+            private readonly IUi _inner;
+            private readonly AddonRecord _record;
+
+            public ScopedUi(IUi inner, AddonRecord record)
+            {
+                _inner = inner;
+                _record = record;
+            }
+
+            public void RegisterSettingsPage(string id, string title, Func<FrameworkElement> viewFactory)
+            {
+                var logical = _record.Id + "/" +
+                              (string.IsNullOrEmpty(id) ? "page" + (_record.PageIds.Count + 1) : id);
+                _record.PageIds.Add(logical);
+                _inner.RegisterSettingsPage(logical, title, viewFactory);
+            }
+
+            public void Hint(string text) => _inner.Hint(text);
+
+            public int MsgBox(string caption, string title, string button1 = "确定", string button2 = "") =>
+                _inner.MsgBox(caption, title, button1, button2);
+
+            public FrameworkElement Card(string title, params FrameworkElement[] content) =>
+                _inner.Card(title, content);
+
+            public FrameworkElement Text(string text, double size = 12.5, bool secondary = false) =>
+                _inner.Text(text, size, secondary);
+
+            public FrameworkElement Button(string text, Action onClick, string colorType = null) =>
+                _inner.Button(text, onClick, colorType);
+
+            public FrameworkElement InfoRow(string label, string value) => _inner.InfoRow(label, value);
+
+            public FrameworkElement Buttons(params FrameworkElement[] buttons) => _inner.Buttons(buttons);
+
+            public FrameworkElement Note(string text) => _inner.Note(text);
+
+            public FrameworkElement CheckBox(string label, bool initial, Action<bool> onChange) =>
+                _inner.CheckBox(label, initial, onChange);
+
+            public FrameworkElement Combo(string label, IReadOnlyList<string> options, int selectedIndex,
+                Action<int> onChange) => _inner.Combo(label, options, selectedIndex, onChange);
         }
 
         /// <summary>

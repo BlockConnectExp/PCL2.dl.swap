@@ -46,12 +46,44 @@ namespace PclDlSwap.Payload.Swap
 
                     PageRegistry.Install(HostAssembly);
                     SelfTest.RunIfRequested(Api);
+                    RunScenarioHooks();
                     SwapLog.Info("SwapHost 就绪。");
                 }
             }
             catch (Exception ex)
             {
                 SwapLog.Error("SwapHost 启动失败：" + ex);
+            }
+        }
+
+        /// <summary>
+        /// Remote-control hooks for the real-host end-to-end runs (docs/local-e2e.zh.md): the file
+        /// picker cannot be driven from a script, so the harness asks the same manager entry points
+        /// the Swap Addon page uses. Every use is logged; nothing happens without the env var.
+        /// </summary>
+        private static void RunScenarioHooks()
+        {
+            try
+            {
+                var install = Environment.GetEnvironmentVariable("PCL2SWAP_E2E_INSTALL");
+                if (!string.IsNullOrWhiteSpace(install) && Addons != null)
+                {
+                    SwapLog.Info("[e2e] 安装模块（PCL2SWAP_E2E_INSTALL）：" + install);
+                    var record = Addons.Install(install);
+                    SwapLog.Info($"[e2e] 安装结果：{record.Id} {record.Version} 状态={record.Status}");
+                    PageRegistry.RefreshSidebar();
+                    var uninstall = Environment.GetEnvironmentVariable("PCL2SWAP_E2E_UNINSTALL");
+                    if (!string.IsNullOrWhiteSpace(uninstall))
+                    {
+                        SwapLog.Info("[e2e] 立即卸载（PCL2SWAP_E2E_UNINSTALL）：" + uninstall);
+                        SwapLog.Info("[e2e] 卸载结果：" + Addons.Uninstall(uninstall));
+                        PageRegistry.RefreshSidebar();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Error("[e2e] 场景钩子失败：" + ex);
             }
         }
 

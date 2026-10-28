@@ -33,6 +33,7 @@ namespace PclDlSwap.Payload.Swap
         private static volatile bool _installed;
         private static volatile bool _sidebarDone;
         private static int _pageIdWriteSkipped;
+        private static readonly List<object> _insertedItems = new List<object>();
 
         /// <summary>
         /// True while the host's <c>PageSetupLeft.PageGet</c> is under our detour. Writing one of
@@ -74,6 +75,26 @@ namespace PclDlSwap.Payload.Swap
                 };
                 SwapLog.Info($"Swap 页面：已登记“{(string.IsNullOrEmpty(title) ? logicalId : title)}”（PageID {id}）。");
             }
+        }
+
+        /// <summary>
+        /// Drops a page (used when a module is uninstalled) and rebuilds the sidebar. The page id is
+        /// never reused, so a stale PageID that still points at it is answered by the PageGet
+        /// fallback instead of reaching the host's throwing switch.
+        /// </summary>
+        public static bool UnregisterPage(string logicalId)
+        {
+            PageEntry removed = null;
+            lock (Gate)
+            {
+                removed = Pages.Values.FirstOrDefault(entry => entry.LogicalId == logicalId);
+                if (removed != null) Pages.Remove(removed.Id);
+            }
+            if (removed == null) return false;
+
+            SwapLog.Info($"[page] 已注销“{removed.Title}”（PageID {removed.Id}）");
+            RefreshSidebar(new[] { removed.Id });
+            return true;
         }
 
         /// <summary>
@@ -415,57 +436,141 @@ namespace PclDlSwap.Payload.Swap
 
         private static void InsertSidebarItems(object pageSetupLeft)
         {
-            PclUi.OnUiThread(() =>
+            if (_sidebarDone) return;
+            PclUi.OnUiThread(() => InsertSidebarItemsCore(pageSetupLeft));
+        }
+
+        /// <summary>Inserts the current page set; must already be running on the host UI thread.</summary>
+        private static void InsertSidebarItemsCore(object pageSetupLeft)
+        {
+            try
             {
-                try
+                if (_sidebarDone) return;
+                if (_pageCheckDetour == null)
                 {
-                    if (_sidebarDone) return;
-                    if (_pageCheckDetour == null)
-                    {
-                        // Without our PageCheck detour the host's own handler would run
-                        // PageChange(<our id>) and throw; better to show no entry at all.
-                        SwapLog.Error("Swap 页面：PageCheck 钩子未安装，已跳过侧栏插入（否则点击会掉进宿主的未知子页面分支）。");
-                        _sidebarDone = true;
-                        return;
-                    }
-
-                    var panItem = PclUi.GetMember(pageSetupLeft, "PanItem");
-                    var children = panItem == null ? null : PclUi.GetMember(panItem, "Children");
-                    var add = children?.GetType().GetMethods()
-                        .FirstOrDefault(m => m.Name == "Add" && m.GetParameters().Length == 1);
-                    var itemType = _host.GetType("PCL.MyListItem", throwOnError: false);
-                    if (panItem == null || add == null || itemType == null)
-                    {
-                        SwapLog.Warn("Swap 页面：侧栏容器或 MyListItem 尚未就绪，稍后重试。");
-                        return;
-                    }
-
-                    var checkType = _host.GetType("PCL.MyListItem+CheckType", throwOnError: false);
-                    var added = 0;
-                    foreach (var entry in Snapshot())
-                    {
-                        var item = Activator.CreateInstance(itemType);
-                        PclUi.SetProperty(item, "Title", entry.Title);
-                        PclUi.SetProperty(item, "Info", BuildItemInfo(entry));
-                        DisableHoverScale(item);
-                        if (checkType != null)
-                            PclUi.SetProperty(item, "Type", Enum.Parse(checkType, "RadioBox"));
-                        PclUi.SetMember(item, "Tag", entry.Id.ToString());
-                        SubscribeCheck(item, itemType);
-                        add.Invoke(children, new[] { item });
-                        added++;
-                    }
-
+                    // Without our PageCheck detour the host's own handler would run
+                    // PageChange(<our id>) and throw; better to show no entry at all.
+                    SwapLog.Error("Swap 页面：PageCheck 钩子未安装，已跳过侧栏插入（否则点击会掉进宿主的未知子页面分支）。");
                     _sidebarDone = true;
-                    SwapLog.Info($"Swap 页面：已在设置侧栏插入 {added} 个条目（悬停缩放动画已关闭，" +
-                                 "与 PCL 自带设置项一致）。");
+                    return;
                 }
-                catch (Exception ex)
+
+                var panItem = PclUi.GetMember(pageSetupLeft, "PanItem");
+                var children = panItem == null ? null : PclUi.GetMember(panItem, "Children");
+                var add = children?.GetType().GetMethods()
+                    .FirstOrDefault(m => m.Name == "Add" && m.GetParameters().Length == 1);
+                var itemType = _host.GetType("PCL.MyListItem", throwOnError: false);
+                if (panItem == null || add == null || itemType == null)
                 {
-                    SwapLog.Error("Swap 页面：插入侧栏项失败：" + ex);
-                    _sidebarDone = true;
+                    SwapLog.Warn("Swap 页面：侧栏容器或 MyListItem 尚未就绪，稍后重试。");
+                    return;
                 }
-            });
+
+                var checkType = _host.GetType("PCL.MyListItem+CheckType", throwOnError: false);
+                var added = 0;
+                foreach (var entry in Snapshot())
+                {
+                    var item = Activator.CreateInstance(itemType);
+                    PclUi.SetProperty(item, "Title", entry.Title);
+                    PclUi.SetProperty(item, "Info", BuildItemInfo(entry));
+                    DisableHoverScale(item);
+                    if (checkType != null)
+                        PclUi.SetProperty(item, "Type", Enum.Parse(checkType, "RadioBox"));
+                    PclUi.SetMember(item, "Tag", entry.Id.ToString());
+                    SubscribeCheck(item, itemType);
+                    add.Invoke(children, new[] { item });
+                    _insertedItems.Add(item);
+                    added++;
+                }
+
+                _sidebarDone = true;
+                SwapLog.Info($"Swap 页面：已在设置侧栏插入 {added} 个条目（悬停缩放动画已关闭，" +
+                             "与 PCL 自带设置项一致）。");
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Error("Swap 页面：插入侧栏项失败：" + ex);
+                _sidebarDone = true;
+            }
+        }
+
+        /// <summary>
+        /// Rebuilds the Swap section of the settings sidebar after pages were added or removed, and
+        /// pops back to the host's own sub-page when the page the user is looking at just vanished.
+        /// Runs on the host UI thread; safe to call from a module lifecycle call.
+        /// </summary>
+        public static void RefreshSidebar(IEnumerable<int> removedPageIds = null)
+        {
+            try
+            {
+                var modMain = _host?.GetType("PCL.ModMain", throwOnError: false);
+                var pageSetupLeft = PclUi.GetMember(modMain, "FrmSetupLeft");
+                if (pageSetupLeft == null) return;   // sidebar not created yet: the watcher will fill it
+
+                PclUi.OnUiThread(() =>
+                {
+                    try
+                    {
+                        var removed = removedPageIds == null
+                            ? null
+                            : new HashSet<int>(removedPageIds);
+                        if (removed != null && removed.Count > 0)
+                            LeaveRemovedPage(pageSetupLeft, removed);
+                        RemoveInsertedItems(pageSetupLeft);
+                        InsertSidebarItemsCore(pageSetupLeft);
+                    }
+                    catch (Exception ex)
+                    {
+                        SwapLog.Error("[page] 重建设置侧栏失败：" + ex);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("[page] RefreshSidebar 失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>Drops the items we inserted so the rebuild starts from the host's own rows.</summary>
+        private static void RemoveInsertedItems(object pageSetupLeft)
+        {
+            if (_insertedItems.Count == 0) return;
+            var panItem = PclUi.GetMember(pageSetupLeft, "PanItem");
+            var children = panItem == null ? null : PclUi.GetMember(panItem, "Children");
+            var remove = children?.GetType().GetMethods()
+                .FirstOrDefault(m => m.Name == "Remove" && m.GetParameters().Length == 1);
+            if (children == null || remove == null) return;
+
+            foreach (var item in _insertedItems)
+            {
+                try { remove.Invoke(children, new[] { item }); }
+                catch (Exception ex) { SwapLog.Warn("[page] 移除侧栏项失败：" + ex.Message); }
+            }
+            _insertedItems.Clear();
+            _sidebarDone = false;
+        }
+
+        /// <summary>
+        /// The host resolves its current sub-page through PageID on every entry into 设置; if that id
+        /// belonged to a module we just uninstalled, hand the host back its own Default page first.
+        /// </summary>
+        private static void LeaveRemovedPage(object pageSetupLeft, HashSet<int> removedIds)
+        {
+            try
+            {
+                var current = Convert.ToInt32(PclUi.GetMember(pageSetupLeft, "PageID") ?? -1);
+                if (!removedIds.Contains(current)) return;
+
+                var subType = _host.GetType("PCL.FormMain+PageSubType", throwOnError: false);
+                if (subType == null) return;
+                var defaultId = Enum.Parse(subType, "Default");
+                SwapLog.Info("[page] 当前页面所属模块已卸载，切回宿主默认设置页。");
+                PclUi.Invoke(pageSetupLeft, "PageChange", defaultId);
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("[page] 切回宿主默认设置页失败：" + ex.Message);
+            }
         }
 
         private static string BuildItemInfo(PageEntry entry)

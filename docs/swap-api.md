@@ -122,8 +122,10 @@ dotnet build MyAddon.csproj -c Release
 Compress-Archive -Path .\bin\Release\net48\MyAddon.dll, .\manifest.json -DestinationPath MyAddon.swapaddon
 
 # 3) 安装
-Copy-Item MyAddon.swapaddon "$env:TEMP\PCL2Swap\addons\"
+Copy-Item MyAddon.swapaddon "$env:APPDATA\PCL2Swap\addons\"
 ```
+
+更省事的做法：PCL → 设置 → **Swap Addon** → **模块管理 → 安装模块…**，选包即装（见 §11）。
 
 一个可直接运行的参考实现：`src/PCL2Swap.SampleAddon`（同时被 harness 的 `--addontest` 用作端到端验证）。
 
@@ -131,10 +133,11 @@ Copy-Item MyAddon.swapaddon "$env:TEMP\PCL2Swap\addons\"
 
 ## 4. 当前限制（1.0）
 
-1. **Hook 仅支持静态 handler 且不可热卸载**——实例委托包装与 detour 卸载在路线图上；
-   因此 `Attach` 返回的 `IDisposable` 现在只表达意图，不会真正还原目标方法。
+1. **卸载是行为级的**：`Attach` 的句柄被释放、或模块被停用/卸载后，gate 让调用直通原方法，
+   但物理跳转补丁要等进程结束才消失。实例 handler、引用类型参数、Prefix/Postfix/Replace 都已支持。
 2. **同进程、同权限**：Addon 与宿主共享 CLR 与地址空间；请把 Addon 当作受信任代码分发。
-3. **启用/停用开关是展示性的**：Swap Addon 页如实列出状态与错误，但停用不会回滚已安装的 hook。
+3. **停用立即生效，卸载彻底清理**：停用让钩子类拦截立即放行（结构类修复如原版游戏页要在重启后
+   才完全回退）；卸载会注销页面、删模块目录与包（入口 DLL 被占用时留到下次启动清理）。
 4. 每个 Addon 的 dll 从自己的解包目录加载，静态状态彼此隔离（这一点是特性而不是缺陷）。
 
 ---
@@ -316,5 +319,28 @@ handler 可以是实例委托（不再要求静态方法）；参数形状与宿
 | `Loader` | 任务栏进度（`TaskbarProgress` / `RefreshTaskbar` / `TaskbarAdd`）、LoaderBase 的 `State` / `Progress` / `IsRunning` / `Start` / `Cancel` / `Failed` |
 
 未覆盖的成员仍可通过 `ISwapApi.Surface`（全量清单）+ `ISwapApi.Reflect` 直达。
+
+## 11. 模块管理（Alpha 7 起）
+
+设置 → Swap Addon → **模块管理** 提供安装 / 卸载 / 打开目录 / 刷新；列表里每行都有
+`启用|禁用`，第三方模块额外有 `卸载`（红色）。行为：
+
+| 动作 | 语义 |
+|---|---|
+| **安装模块…** | 选一个 `.swapaddon`（Windows 文件对话框）→ 校验 manifest → 归档到 `<数据根>\addons\<id>-<版本>.swapaddon` → 解包到 `<数据根>\addons\<id>\<版本>\` → 立即 `OnLoad/OnEnable`、注册页面并重建设置侧栏。**不需要重启 PCL。** |
+| **更新** | 安装同 id 的新版本 = 先停旧版、撤下它的页面，再装新版；模块自己的 `config.json` 保留。 |
+| **卸载** | `OnDisable`/`OnUnload` → 注销它注册的设置页（侧栏重建，若用户正在那一页会切回宿主默认页）→ 删除模块目录（含 `config.json`）与归档包。源包只在被复制进模块目录后才删，用户自己 Downloads 里的原文件保留。 |
+| **延迟删除** | 入口 DLL 已被 CLR 加载、文件被占用时，路径写进 `<数据根>\addons\.pending\*.txt`，下次启动先清理再扫描模块。 |
+| **作用域（shapes）** | `manifest.json` 的 `shapes` 声明模块适用的交付形状（`injected` / `patched` / `*`）。不匹配时模块状态是“作用域不适用”，既不启动也不报失败。 |
+
+manifest 的 `shapes` / `permissions` 现在会被真正解析（Alpha 6 之前数组被 `Convert.ToString`
+吞掉，永远是空），模块行会显示 `作者 · API 版本范围 · 形状 · 权限数`。
+
+真机 e2e 也能不开对话框地驱动这两条路径（`docs/local-e2e.zh.md`）：
+
+```powershell
+$env:PCL2SWAP_E2E_INSTALL   = "D:\包\demo.sample.swapaddon"   # 启动时安装（走页面同一条代码路径）
+$env:PCL2SWAP_E2E_UNINSTALL = "test.sample"                   # 可选：紧接着卸载
+```
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

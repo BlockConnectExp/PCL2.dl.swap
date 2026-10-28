@@ -6,6 +6,33 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-13:45:00 Alpha 7: 模块管理器（安装/卸载/作用域，无需重启）
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs          Install / Uninstall / Retire / 延迟删除 / 形状作用域 / ScopedUi
+.\src\PclDlSwap.Payload\Swap\AddonManifestReader.cs   shapes / permissions 数组解析修复
+.\src\PclDlSwap.Payload\Swap\PageRegistry.cs          UnregisterPage / RefreshSidebar / 卸载后切回宿主页
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs   模块管理卡片 + 每行卸载按钮 + 作用域行
+.\src\PclDlSwap.Payload\Swap\SwapHost.cs              e2e 场景钩子（PCL2SWAP_E2E_INSTALL / _UNINSTALL）
+.\src\PclDlSwap.ExLoaderHarness\Program.cs            --addontest 新增 10 项管理器断言
+.\docs\swap-api.md                                    §11 模块管理 + 限制条目更新
+.\src\Pcl2Swap.Shim\Shim.cpp + SwapLog.cs + Loader    版本号升 v26.0-Alpha 7
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|模块管理器|`AddonManager` 新增 `Install` / `Uninstall`：安装 = 校验包 → 归档到 `<数据根>\addons\<id>-<版本>.swapaddon` → 解包 → 立即 `OnLoad/OnEnable` 并重建设置侧栏（**无需重启 PCL**）；同 id 再装即热更新，旧版先停并撤下页面，模块自己的 `config.json` 保留；卸载 = `OnDisable/OnUnload` → 注销页面 → 删除模块目录（含 config）与归档包，用户 Downloads 里的原包不动|2026.10.28-13:45:00|PCL2.dl.swap
+2|延迟删除|入口 DLL 被 CLR 占用时 `Directory.Delete` 必然失败：现在把路径写进 `<数据根>\addons\.pending\*.txt`，下次启动 `CleanupPendingRemovals` 先清理再扫描模块，`.pending` 清空后自删。真机验证：卸载后日志出现「Addon 文件暂被占用，将在下次启动删除」，重启后「待删除模块文件已清理完成」，`test.sample\1.3.0` 与包文件消失|2026.10.28-13:45:00|PCL2.dl.swap
+3|页面注销|`PageRegistry` 新增 `UnregisterPage` / `RefreshSidebar`：卸载模块时只撤下它自己注册的设置页（`ScopedUi` 把页面 id 命名空间化成 `<模块id>/<页id>` 并记在记录上），侧栏重建；若用户正停留在被卸载的页面，先切回宿主默认设置页；页面 id 不复用，残留 PageID 由 PageGet 兜底处理|2026.10.28-13:45:00|PCL2.dl.swap
+4|作用域（shapes）|`manifest.json` 的 `shapes` 现在真正生效：声明 `["injected"]` 的模块在补丁形状下状态是「作用域不适用」，既不启动也不记为失败；`*` 表示全形状。**同时修掉一个老 bug**：`AddonManifestReader` 用 `Convert.ToString` 取数组，`shapes`/`permissions` 实际永远是空数组（数组被转成 `System.Object[]`），改用原始值解析|2026.10.28-13:45:00|PCL2.dl.swap
+5|管理界面|Swap Addon 页新增「模块管理」卡片（安装模块… / 打开 Addon 目录 / 刷新）；每行显示 `作者 · API 版本范围 · 形状 · 权限数`，第三方模块多一个红色「卸载」按钮，确认框走宿主 MyMsgBox|2026.10.28-13:45:00|PCL2.dl.swap
+6|验证|harness `--addontest` 新增 10 项断言（安装注册并启动、归档到模块目录、原包保留、拒绝无 manifest 的包、形状不匹配只跳过、卸载从列表剔除、删包、删除或排队、原包保留、内置模块拒绝卸载）全部 PASS；真机 2.99.0：`PCL2SWAP_E2E_INSTALL` 热装 `demo.sample` → 页面即时出现并可打开、侧栏变成 3 项，界面点「卸载」→ 确认框 → 行消失、侧栏回到 2 项、`modules.json` 剔除该模块|2026.10.28-13:45:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-08:35:00 Alpha 6: 设置子页面加固 + 页面度量对齐原生 + 补丁形状落地
 
 GitCommitHash: tag v26.0-Alpha6（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha6.md）

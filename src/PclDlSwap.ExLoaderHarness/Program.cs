@@ -909,6 +909,45 @@ namespace PclDlSwap.ExLoaderHarness
                 if (!ok) failures++;
             }
 
+            // Packs a module: manifestJson == null leaves manifest.json out (broken package),
+            // a null id skips the entry dll.
+            void PackAddon(string path, string id, string name, string version, string manifestJson)
+            {
+                using (var zip = new ZipArchive(File.Create(path), ZipArchiveMode.Create))
+                {
+                    if (manifestJson != null)
+                    {
+                        var manifest = zip.CreateEntry("manifest.json");
+                        using (var writer = new StreamWriter(manifest.Open(), new UTF8Encoding(false)))
+                            writer.Write(manifestJson);
+                    }
+                    if (id != null)
+                    {
+                        var dllEntry = zip.CreateEntry("PCL2Swap.SampleAddon.dll");
+                        using (var target = dllEntry.Open())
+                        using (var source = File.OpenRead(typeof(PCL2Swap.SampleAddon.SampleAddon).Assembly.Location))
+                            source.CopyTo(target);
+                    }
+                }
+            }
+
+            // An assembly-load failure can carry a type whose name cannot be resolved any more, and
+            // then even Exception.ToString() throws; print defensively.
+            string SafeException(Exception ex)
+            {
+                try
+                {
+                    var text = ex.GetType().FullName + ": " + ex.Message;
+                    if (ex.InnerException != null)
+                        text += " <- " + ex.InnerException.GetType().FullName + ": " + ex.InnerException.Message;
+                    return text;
+                }
+                catch
+                {
+                    return "(unprintable exception)";
+                }
+            }
+
             // Keep the test out of the real profile: the module state and addon store now live in
             // SwapPaths.DataRoot, which PCL2SWAP_DATA overrides.
             var dataRoot = Path.Combine(Path.GetTempPath(), "PCL2SwapTest-" + Guid.NewGuid().ToString("N"));
@@ -1171,6 +1210,85 @@ namespace PclDlSwap.ExLoaderHarness
                     PCL2Swap.Api.AddonSettings.GetInt(store, "count") == 7 &&
                     PCL2Swap.Api.AddonSettings.GetBool(store, "missing", true) &&
                     store.Saved);
+
+                // ---- module manager: hot install / uninstall / shape scope ------------------------
+                // Runs last: the sample assembly is used for the installed copies too, and its
+                // OnDisable would otherwise tear down the subscriptions the bus tests rely on.
+                var install = manager?.GetType().GetMethod("Install");
+                var uninstall = manager?.GetType().GetMethod("Uninstall");
+                var cleanup = manager?.GetType().GetMethod("CleanupPendingRemovals");
+                Expect("module manager exposes Install / Uninstall / CleanupPendingRemovals",
+                    install != null && uninstall != null && cleanup != null);
+
+                string IdOf(object record) =>
+                    Convert.ToString(record?.GetType().GetProperty("Id")?.GetValue(record));
+                string StatusOf(object record) =>
+                    Convert.ToString(record?.GetType().GetProperty("Status")?.GetValue(record));
+                List<string> RecordIds() =>
+                    (manager?.GetType().GetProperty("Records")?.GetValue(manager) as System.Collections.IEnumerable)
+                    ?.Cast<object>().Select(IdOf).ToList() ?? new List<string>();
+
+                var external = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapInstall-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                PackAddon(external, "test.installed", "Installed Sample", "2.0.0",
+                    "{\"schema\":1,\"id\":\"test.installed\",\"name\":\"Installed Sample\"," +
+                    "\"version\":\"2.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
+                    "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"author\":\"harness\"," +
+                    "\"description\":\"installed by the manager test\",\"permissions\":[\"host.read\"]}");
+
+                object installed = null;
+                try
+                {
+                    installed = install?.Invoke(manager, new object[] { external, true });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[addon] install threw: " + SafeException(ex));
+                }
+                Expect("install registers and starts the new module",
+                    IdOf(installed) == "test.installed" && StatusOf(installed) == "enabled");
+                Expect("install archives the package into the addon store",
+                    File.Exists(Path.Combine(addonRoot, "test.installed-2.0.0.swapaddon")));
+                Expect("install keeps the user's original package untouched", File.Exists(external));
+                Expect("installed module shows up in the list", RecordIds().Contains("test.installed"));
+
+                var broken = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapBroken-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                PackAddon(broken, null, null, null, null);
+                var refused = false;
+                try { install?.Invoke(manager, new object[] { broken, true }); }
+                catch (TargetInvocationException) { refused = true; }
+                Expect("install refuses a package without manifest", refused);
+
+                var scopedOut = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapScoped-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                PackAddon(scopedOut, "test.patched-only", "Patched Only", "1.0.0",
+                    "{\"schema\":1,\"id\":\"test.patched-only\",\"name\":\"Patched Only\"," +
+                    "\"version\":\"1.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
+                    "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"shapes\":[\"patched\"]}");
+                var scopedRecord = install?.Invoke(manager, new object[] { scopedOut, true });
+                Expect("a module scoped to another shape is skipped, not failed",
+                    StatusOf(scopedRecord) == "skipped-shape");
+
+                var removedOk = Convert.ToBoolean(uninstall?.Invoke(manager, new object[] { "test.installed" }));
+                Expect("uninstall drops the module from the list",
+                    removedOk && !RecordIds().Contains("test.installed"));
+                Expect("uninstall deletes the archived package",
+                    !File.Exists(Path.Combine(addonRoot, "test.installed-2.0.0.swapaddon")));
+                var unpackedDir = Path.Combine(addonRoot, "test.installed", "2.0.0");
+                var pendingDir = Path.Combine(addonRoot, ".pending");
+                var queued = Directory.Exists(pendingDir) &&
+                             Directory.GetFiles(pendingDir, "*.txt").Length > 0;
+                Expect("uninstall removes the module files or queues the locked ones",
+                    !Directory.Exists(unpackedDir) || queued);
+                Expect("the user's original package survived the uninstall", File.Exists(external));
+                Expect("built-in modules refuse to uninstall",
+                    !Convert.ToBoolean(uninstall?.Invoke(manager, new object[] { "swap.ota-protector" })));
+
+                foreach (var temp in new[] { external, broken, scopedOut })
+                {
+                    try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+                }
             }
             finally
             {

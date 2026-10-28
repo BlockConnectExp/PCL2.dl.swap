@@ -129,6 +129,18 @@ namespace PclDlSwap.Payload.Swap.Views
                 left.Children.Add(failure);
             }
 
+            var hookErrors = ScopedHook.ErrorsFor(record.Id);
+            if (hookErrors > 0)
+            {
+                // Isolation report: a failing handler is deactivated on its first throw, so this is a
+                // record of "your module broke N times", not a still-broken state.
+                var errors = SwapUi.Text($"钩子抛错 {hookErrors} 次（失败的钩子已自动停用，详见该模块日志）",
+                    11.5, false);
+                errors.Foreground = Brushes.IndianRed;
+                errors.Margin = new Thickness(0, 3, 12, 0);
+                left.Children.Add(errors);
+            }
+
             Grid.SetColumn(left, 0);
             grid.Children.Add(left);
 
@@ -159,6 +171,12 @@ namespace PclDlSwap.Payload.Swap.Views
                 PclUi.SetMember(toggle, "MinWidth", 76.0);
                 PclUi.SetMember(toggle, "Margin", new Thickness(0, 0, 8, 0));
                 actions.Children.Add(toggle);
+
+                var logButton = SwapUi.Button("日志", () => OpenModuleLog(api, addons, record));
+                PclUi.SetMember(logButton, "Height", 35.0);
+                PclUi.SetMember(logButton, "MinWidth", 64.0);
+                PclUi.SetMember(logButton, "Margin", new Thickness(0, 0, 8, 0));
+                actions.Children.Add(logButton);
 
                 if (!record.BuiltIn)
                 {
@@ -264,6 +282,32 @@ namespace PclDlSwap.Payload.Swap.Views
             return dialog.ShowDialog() == true ? dialog.FileName : null;
         }
 
+        /// <summary>Opens a module's own log; shows the folder while the module has not logged yet.</summary>
+        private static void OpenModuleLog(ISwapApi api, AddonManager addons, AddonManager.AddonRecord record)
+        {
+            try
+            {
+                var path = addons?.GetModuleLogPath(record.Id);
+                if (string.IsNullOrEmpty(path)) return;
+
+                if (System.IO.File.Exists(path))
+                {
+                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                    return;
+                }
+
+                var folder = System.IO.Path.GetDirectoryName(path);
+                if (string.IsNullOrEmpty(folder)) return;
+                System.IO.Directory.CreateDirectory(folder);
+                OpenFolder(folder);
+                api?.Ui.Hint("这个模块还没有日志；已经打开日志目录。");
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("打开模块日志失败：" + ex.Message);
+            }
+        }
+
         /// <summary>Manifest scope line: author, API range, shapes and permission count.</summary>
         private static string ScopeText(AddonManager.AddonRecord record)
         {
@@ -276,7 +320,12 @@ namespace PclDlSwap.Payload.Swap.Views
             if (manifest.Shapes != null && manifest.Shapes.Count > 0)
                 parts.Add("形状 " + string.Join("/", manifest.Shapes));
             if (manifest.Permissions != null && manifest.Permissions.Count > 0)
-                parts.Add("权限 " + manifest.Permissions.Count);
+            {
+                var shown = manifest.Permissions.Take(3).ToList();
+                var text = "权限 " + string.Join("、", shown);
+                if (manifest.Permissions.Count > shown.Count) text += " 等 " + manifest.Permissions.Count + " 项";
+                parts.Add(text);
+            }
             return parts.Count == 0 ? string.Empty : string.Join(" · ", parts);
         }
 

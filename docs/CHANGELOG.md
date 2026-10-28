@@ -6,6 +6,30 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-17:45:00 Alpha 9: 模块日志 + 崩溃隔离
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\ModuleLog.cs            新文件：每模块日志（256 KB 轮转）
+.\src\PclDlSwap.Payload\Swap\ScopedHook.cs           handler 抛错 → 自动停用 + 计数 + 写模块日志
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs         ScopedApi/ScopedHooks 写模块日志；卸载连日志一起删
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs  每行「日志」按钮 + 权限名展示 + 钩子抛错提示
+.\src\PclDlSwap.ExLoaderHarness\Program.cs          4 项新断言（模块日志、挂钩记录、抛错记录、隔离回退）
+.\docs\swap-api.md                                  §11 日志 / 崩溃隔离 / 权限声明
+.\src\Pcl2Swap.Shim\Shim.cpp + SwapLog.cs + Loader   版本号升 v26.0-Alpha 9
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|每模块日志|新增 `ModuleLog`：`Api.Log/LogWarning/LogError` 与平台代挂的钩子都写进 `<数据根>\logs\modules\<id>.log`（模块 id 命名空间、256 KB 轮转保留 `.1`），全局日志同一行带 `[<模块id>]` 前缀；模块行新增「日志」按钮直接打开文件（还没有日志时打开目录并提示）；卸载会把该模块的日志一并删除|2026.10.28-17:45:00|PCL2.dlSwap
+2|崩溃隔离|模块 handler 抛异常时 `Registration.Call` 捕获并**自动停用该 handler**，Replace 模式回退到下一个 Replace handler 或宿主原方法（原先 `DynamicInvoke` 直接把异常抛进宿主，PCL 会弹「程序出现未知错误」）；失败计数进模块列表，模块行显示红色「钩子抛错 N 次（失败的钩子已自动停用，详见该模块日志）」|2026.10.28-17:45:00|PCL2.dlSwap
+3|权限声明可见|模块行的作用域行不再只显示权限数量，改为列出最多三个权限名（`权限 host.settings.write、host.hooks.attach`）；文档同时写明：同进程共享 CLR，`permissions` 是声明与展示而非沙箱边界|2026.10.28-17:45:00|PCL2.dlSwap
+4|验证|harness：新增「模块各自写自己的日志」「日志记录平台代挂的钩子」「日志记录 handler 抛错」「抛错后回退宿主原方法且不再重试」4 项断言全部 PASS，六个套件全绿；真机 2.99.0：安装示例模块后 `logs\modules\test.sample.log` 实录「示例模块已加载…」「挂钩 PCL.ModBase.ToUnixTimestampUtc（Prefix…）」，界面每行多出「日志」按钮|2026.10.28-17:45:00|PCL2.dlSwap
+
+---
 ## 2026.10.28-16:05:00 Alpha 8: 加载器观察面 + 依赖遮蔽修复
 
 GitCommitHash: tag v26.0-Alpha8（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha8.md）

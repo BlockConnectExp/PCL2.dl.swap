@@ -114,6 +114,9 @@ namespace PclDlSwap.Payload.Swap
             }
         }
 
+        /// <summary>Where a module's own log lives (see <see cref="ModuleLog"/>).</summary>
+        public string GetModuleLogPath(string addonId) => ModuleLog.PathFor(addonId);
+
         // ------------------------------------------------------------------ install / uninstall
 
         /// <summary>
@@ -224,7 +227,10 @@ namespace PclDlSwap.Payload.Swap
             // A full uninstall removes the module's whole folder (unpacked versions + config.json);
             // an update only retires the unpacked version.
             if (removeModuleData && !string.IsNullOrEmpty(record.Id))
+            {
                 targets.Add(SwapPaths.AddonDirectory(record.Id));
+                targets.Add(ModuleLog.PathFor(record.Id));   // the module's own log goes with it
+            }
             else if (!string.IsNullOrEmpty(record.Directory)) targets.Add(record.Directory);
             if (removeArchive && !string.IsNullOrEmpty(record.ArchivePath)) targets.Add(record.ArchivePath);
 
@@ -624,10 +630,12 @@ namespace PclDlSwap.Payload.Swap
         private sealed class ScopedApi : ISwapApi
         {
             private readonly ISwapApi _inner;
+            private readonly AddonRecord _record;
 
             public ScopedApi(ISwapApi inner, AddonRecord record)
             {
                 _inner = inner;
+                _record = record;
                 Data = new AddonDataStore(record.Id);
                 Hooks = new ScopedHooks(inner.Hooks, inner as HostApi, record.Id);
                 Ui = new ScopedUi(inner.Ui, record);
@@ -640,9 +648,26 @@ namespace PclDlSwap.Payload.Swap
             public IReflection Reflect => _inner.Reflect;
             public ISwapSurface Surface => _inner.Surface;
             public IPclAccess Pcl => _inner.Pcl;
-            public void Log(string message) => _inner.Log(message);
-            public void LogWarning(string message) => _inner.LogWarning(message);
-            public void LogError(string message, Exception exception = null) => _inner.LogError(message, exception);
+
+            // Module lines keep their own file (LSPosed-style per-module log) and are tagged with the
+            // module id in the global log, so "which module did this" never needs guessing.
+            public void Log(string message)
+            {
+                ModuleLog.Write(_record.Id, "info", message);
+                _inner.Log("[" + _record.Id + "] " + message);
+            }
+
+            public void LogWarning(string message)
+            {
+                ModuleLog.Write(_record.Id, "warn", message);
+                _inner.LogWarning("[" + _record.Id + "] " + message);
+            }
+
+            public void LogError(string message, Exception exception = null)
+            {
+                ModuleLog.Write(_record.Id, "error", message, exception);
+                _inner.LogError("[" + _record.Id + "] " + message, exception);
+            }
         }
 
         /// <summary>
@@ -734,9 +759,21 @@ namespace PclDlSwap.Payload.Swap
             public IDisposable Attach(string declaringType, string methodName, string hookId,
                 Delegate handler, HookMode mode)
             {
-                if (_host == null)
-                    return _inner.Attach(declaringType, methodName, hookId, handler, mode);
-                return _host.AttachAddonHook(_addonId, declaringType, methodName, hookId, mode, handler);
+                try
+                {
+                    var token = _host == null
+                        ? _inner.Attach(declaringType, methodName, hookId, handler, mode)
+                        : _host.AttachAddonHook(_addonId, declaringType, methodName, hookId, mode, handler);
+                    ModuleLog.Write(_addonId, "info",
+                        $"挂钩 {declaringType}.{methodName}（{mode}，hookId {hookId}）");
+                    return token;
+                }
+                catch (Exception ex)
+                {
+                    ModuleLog.Write(_addonId, "error",
+                        $"挂钩失败 {declaringType}.{methodName}（{mode}）：{ex.Message}", ex);
+                    throw;
+                }
             }
 
             public bool IsHooked(string declaringType, string methodName) =>

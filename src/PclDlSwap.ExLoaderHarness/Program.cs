@@ -1241,6 +1241,29 @@ namespace PclDlSwap.ExLoaderHarness
                         ex.InnerException.Message.Contains("参数个数不匹配"));
                 }
 
+                // ---- crash isolation: a module handler that throws must not break the host call ----
+                var boomHits = 0;
+                var boomToken = attachScoped?.Invoke(api, new object[]
+                {
+                    "test.sample", "PCL.HookTarget", "Ping", "sample.boom",
+                    PCL2Swap.Api.HookMode.Replace, (Func<int, int>)(value =>
+                    {
+                        boomHits++;
+                        throw new InvalidOperationException("module bug");
+                    })
+                }) as IDisposable;
+                Expect("a throwing Replace handler falls back to the host method",
+                    PCL.HookTarget.Ping(3) == 6);
+                Expect("the failed handler is deactivated instead of retried",
+                    PCL.HookTarget.Ping(4) == 8 && boomHits == 1);
+
+                var scopedHookType = payload.GetType("PclDlSwap.Payload.Swap.ScopedHook", throwOnError: true);
+                var errorsFor = scopedHookType.GetMethod("ErrorsFor",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                var moduleErrors = Convert.ToInt64(errorsFor?.Invoke(null, new object[] { "test.sample" }) ?? 0L);
+                Expect("the failure is counted for the module list", moduleErrors == 1);
+                boomToken?.Dispose();
+
                 // ---- SDK ui builders: native controls when the host has them, plain WPF otherwise ----
                 var ui = api?.GetType().GetProperty("Ui")?.GetValue(api);
                 var uiBuildOk = false;
@@ -1335,6 +1358,22 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("install keeps the user's original package untouched", File.Exists(external));
                 Expect("installed module shows up in the list", RecordIds().Contains("test.installed"));
 
+                // Per-module log: the module's own lines and the hooks the platform attaches for it.
+                var moduleLogPath = Convert.ToString(manager?.GetType().GetMethod("GetModuleLogPath")
+                    ?.Invoke(manager, new object[] { "test.installed" }));
+                var moduleLog = !string.IsNullOrEmpty(moduleLogPath) && File.Exists(moduleLogPath)
+                    ? File.ReadAllText(moduleLogPath)
+                    : string.Empty;
+                Expect("each module writes its own log file",
+                    moduleLog.Length > 0 && moduleLog.Contains("[info]"));
+                Expect("the module log records the hooks installed for it", moduleLog.Contains("挂钩"));
+                var sampleLogPath = Convert.ToString(manager?.GetType().GetMethod("GetModuleLogPath")
+                    ?.Invoke(manager, new object[] { "test.sample" }));
+                var sampleLog = !string.IsNullOrEmpty(sampleLogPath) && File.Exists(sampleLogPath)
+                    ? File.ReadAllText(sampleLogPath)
+                    : string.Empty;
+                Expect("the module log records the handler failure", sampleLog.Contains("抛错"));
+
                 var broken = Path.Combine(Path.GetTempPath(),
                     "PCL2SwapBroken-" + Guid.NewGuid().ToString("N") + ".swapaddon");
                 PackAddon(broken, null, null, null, null);
@@ -1364,6 +1403,8 @@ namespace PclDlSwap.ExLoaderHarness
                              Directory.GetFiles(pendingDir, "*.txt").Length > 0;
                 Expect("uninstall removes the module files or queues the locked ones",
                     !Directory.Exists(unpackedDir) || queued);
+                Expect("uninstall removes the module's own log",
+                    !File.Exists(moduleLogPath) || queued);
                 Expect("the user's original package survived the uninstall", File.Exists(external));
                 Expect("built-in modules refuse to uninstall",
                     !Convert.ToBoolean(uninstall?.Invoke(manager, new object[] { "swap.ota-protector" })));

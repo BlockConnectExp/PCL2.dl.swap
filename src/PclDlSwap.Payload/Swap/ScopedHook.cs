@@ -39,13 +39,41 @@ namespace PclDlSwap.Payload.Swap
             public volatile bool Active = true;
             public long Calls;
             public long Skipped;
+            public long Errors;
 
             public bool IsLive => Active && SwapHost.AddonEnabled(AddonId);
+
+            /// <summary>
+            /// Marker returned when a module handler threw: a Replace handler that fails must not own
+            /// the result (the chain would otherwise hand the host a null), so InvokeChain treats it
+            /// as "no handler" and falls back to the original method.
+            /// </summary>
+            internal static readonly object CallFailed = new object();
 
             public object Call(object[] arguments)
             {
                 Interlocked.Increment(ref Calls);
-                return Handler.DynamicInvoke(arguments);
+                try
+                {
+                    return Handler.DynamicInvoke(arguments);
+                }
+                catch (Exception ex)
+                {
+                    // Module crashes are isolated from the launcher: the handler is deactivated so it
+                    // cannot break the same host path twice, the failure is counted for the module
+                    // list, and it lands in the module's own log.
+                    Interlocked.Increment(ref Errors);
+                    Active = false;
+                    var inner = ex is System.Reflection.TargetInvocationException invocation &&
+                                invocation.InnerException != null
+                        ? invocation.InnerException
+                        : ex;
+                    SwapLog.Error($"[hookbus] 模块 handler 抛错，已自动停用（{AddonId} · {HookId}）：" +
+                                  $"{inner.GetType().Name}: {inner.Message}");
+                    ModuleLog.Write(AddonId, "error",
+                        $"hook {HookId}（{Mode}）抛错，已自动停用：{inner.GetType().Name}: {inner.Message}", inner);
+                    return CallFailed;
+                }
             }
 
             public void MarkSkipped() => Interlocked.Increment(ref Skipped);
@@ -157,6 +185,15 @@ namespace PclDlSwap.Payload.Swap
                         StringComparison.OrdinalIgnoreCase))
                     .Sum(registration => registration.Calls));
 
+        /// <summary>How often one module's handlers threw (they are deactivated on the first throw).</summary>
+        internal static long ErrorsFor(string addonId) =>
+            string.IsNullOrEmpty(addonId)
+                ? 0
+                : ChainsById.Values.Sum(chain => chain.Snapshot()
+                    .Where(registration => string.Equals(registration.AddonId, addonId,
+                        StringComparison.OrdinalIgnoreCase))
+                    .Sum(registration => registration.Errors));
+
         /// <summary>Entry point of every generated gate (called with the target's ABI arguments).</summary>
         public static object InvokeChain(int chainId, object self, object[] args)
         {
@@ -182,6 +219,13 @@ namespace PclDlSwap.Payload.Swap
                     continue;
                 }
                 result = registration.Call(arguments);
+                if (ReferenceEquals(result, Registration.CallFailed))
+                {
+                    // The module's Replace handler blew up and deactivated itself; keep looking for a
+                    // live replacement (or fall back to the host's original method below).
+                    replaced = false;
+                    continue;
+                }
                 replaced = true;
                 break;
             }

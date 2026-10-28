@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -64,6 +65,37 @@ namespace PclDlSwap.Payload.Host
         public static void Initialize()
         {
             Activate(string.Empty);
+        }
+
+        /// <summary>
+        /// Entry point for the disk-patch shape. Its four static IL rewrites already cover the silent
+        /// OTA gate, the update-permission query and the download bodies (they route through
+        /// <see cref="HookEntryPoints"/>), so this only installs what IL cannot express: the runtime
+        /// UI features - download page restore, cancellable announcements, feedback routing and the
+        /// About branding row. SwapHost installs the module platform (pages, hooks, event bus).
+        /// </summary>
+        public static void ActivateFromPatch(Assembly host)
+        {
+            try
+            {
+                lock (Gate)
+                {
+                    if (_installed)
+                    {
+                        SwapLog.Info("ActivateFromPatch 忽略重复调用（已安装）。");
+                        return;
+                    }
+                    _installed = true;
+                    _config = SwapConfig.Load();
+                    SwapLog.Info($"磁盘补丁装配开始（进程：{Process.GetCurrentProcess().Id}，宿主 {host?.Location}）。");
+                    InstallUiFeatures(host ?? Assembly.GetEntryAssembly());
+                    SwapLog.Info("磁盘补丁装配完成。");
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Error("磁盘补丁装配失败：" + ex);
+            }
         }
 
         /// <summary>

@@ -6,6 +6,31 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-08:35:00 Alpha 6: 设置子页面加固 + 页面度量对齐原生 + 补丁形状落地
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\PageRegistry.cs        PageID 写入守卫 / 侧栏前置校验 / STA 化视图构建 / 未知 id 兜底
+.\src\PclDlSwap.Payload\Swap\Views\SwapUi.cs        行网格固定标签列、卡片内边距、注释行距、按钮间距、下拉框高度
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs 模块行重排（状态右对齐 + 35px 按钮）与钩子链两行式卡片
+.\src\PclDlSwap.Payload\Host\CoreInstaller.cs       using System.Diagnostics（ActivateFromPatch 编译修复）
+.\src\PclDlSwap.Payload\Host\Bootstrap.cs           两种形状都启动 SwapHost；disk-patch 走 ActivateFromPatch
+.\src\PclDlSwap.Patcher\IlPatcher.cs                RewriteRuntimeBootstrap：ModMain..cctor 末尾注入 Bootstrap("disk-patch")
+.\src\PclDlSwap.Loader\Program.cs                   EnsureRuntimeFiles：把 payload 及依赖复制到补丁 exe 目录
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|设置子页加固|「未知的设置子页面种类：101」只剩一个成因：宿主 `PageSetupLeft.PageGet` 的钩子没装上、而我们把 Swap 的 PageID 写进了宿主。现在 PageGet 未就绪时**不再写 PageID**（重进设置页退回宿主自己的子页），PageCheck 未就绪时**不插入侧栏项**（点了必然掉进宿主未知分支），PageGet 遇到任何宿主枚举外的 id 一律兜底成 `Default`，视图工厂在非 STA 线程时改走宿主 Dispatcher|2026.10.28-08:35:00|PCL2.dl.swap
+2|页面度量对齐|Swap Settings 的值列原本落在 x≈527，官方 `PageSetupLaunch` 的值列在 x≈389：原因是 `SharedSizeGroup` 在整页作用域里被最长标签（`VirusTotal / MetaDefender Cloud`）撑开。改为固定 110px 标签列 + 24px 间距；卡片内边距改成官方 `20/40/18` + 18px 尾距，注释行距 18px，按钮间距 12px，下拉框高度 35px|2026.10.28-08:35:00|PCL2.dl.swap
+3|模块列表|Swap Addon 行改为 9px 上下留白 + 72px 状态列（右对齐，启用态用主题色）+ 35px 原生按钮；钩子链从挤在一行的「·」文本改成「目标方法 / 模块 · 模式 · 命中」两行块|2026.10.28-08:35:00|PCL2.dl.swap
+4|补丁形状落地|`PclDlSwap.Loader.exe` 打出的磁盘补丁 exe 现在真的会启动运行时：`ModMain..cctor` 末尾注入 `Bootstrap("disk-patch")`，SwapHost 以 Patched 形状启动（模块平台 + 设置页 + 事件总线都在），随后 `CoreInstaller.ActivateFromPatch` 只补 IL 表达不了的 UI 功能（下载页恢复 / 公告取消 / 反馈分流 / 关于页品牌行）；Loader 会把 payload 与依赖复制到补丁 exe 自己的目录|2026.10.28-08:35:00|PCL2.dl.swap
+5|验证|注入形状真机（2.99.0 同源副本）：侧栏与两页正常、离开设置再回来由 PageGet 命中恢复、模块开关落盘 `modules.json`；补丁形状真机：`SwapHost 启动（形状 Patched）`+「磁盘补丁装配完成」，两页与开关同样正常；harness `--loaderhooktest / --scantest / --pagetest / --addontest` 全部 PASS；偏移清单 RVA 校验 PASS|2026.10.28-08:35:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-06:20:00 Alpha 6: out-of-the-box module settings
 
 GitCommitHash: (unreleased)

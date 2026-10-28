@@ -44,14 +44,24 @@ namespace PclDlSwap.Payload.Host
 
                 InstallDownloadGate();
 
-                // The platform layer starts for both shapes; the patch shape reaches this through
-                // the static bootstrap call once that wiring lands (research doc section 6.2).
-                SwapHost.Start(SwapShape.Patched, Assembly.GetEntryAssembly());
+                // The platform layer (module state, pages, hooks, event bus, self-check) starts for
+                // both shapes; the disk-patch shape reaches this through the static bootstrap call
+                // the patcher injects into ModMain..cctor.
+                var host = Assembly.GetEntryAssembly();
+                SwapHost.Start(SwapShape.Patched, host);
 
-                if (string.Equals(argument, "disk-patch", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(argument, "bootstrap-only", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(argument, "disk-patch", StringComparison.OrdinalIgnoreCase))
                 {
-                    SwapLog.Info("磁盘补丁模式：跳过 profiler 钩子地址导出。");
+                    // The static IL rewrites own the OTA/permission/download bodies; the runtime
+                    // installs the UI features IL cannot express.
+                    CoreInstaller.ActivateFromPatch(host);
+                    SwapLog.Info("磁盘补丁模式：运行时装配完成，跳过 profiler 钩子地址导出。");
+                    return 0;
+                }
+
+                if (string.Equals(argument, "bootstrap-only", StringComparison.OrdinalIgnoreCase))
+                {
+                    SwapLog.Info("bootstrap-only 模式：跳过 profiler 钩子地址导出。");
                     return 0;
                 }
 

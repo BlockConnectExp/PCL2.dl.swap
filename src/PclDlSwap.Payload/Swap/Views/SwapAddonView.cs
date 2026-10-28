@@ -41,7 +41,7 @@ namespace PclDlSwap.Payload.Swap.Views
             var chains = ScopedHook.Snapshot();
             if (chains.Count > 0)
             {
-                var lines = chains.Select(chain => (FrameworkElement)SwapUi.Note("· " + chain)).ToList();
+                var lines = chains.Select(ChainRow).ToList();
                 lines.Add(SwapUi.Note("同一个宿主方法只有一条链：第一个钩子负责装 gate，后续模块加入这条链；" +
                                       "链上 handler 全部失效时调用直通原方法。"));
                 page.Children.Add(SwapUi.Card("钩子链（模块作用域）", lines.ToArray()));
@@ -61,14 +61,28 @@ namespace PclDlSwap.Payload.Swap.Views
 
         // ------------------------------------------------------------------ rows
 
+        /// <summary>
+        /// One chain as a two-line block (target on the first line, module/mode/hits on the second)
+        /// instead of a cramped single line - the text carries the load of the whole card.
+        /// </summary>
+        private static FrameworkElement ChainRow(string chain)
+        {
+            var parts = (chain ?? string.Empty).Split(new[] { " · " }, StringSplitOptions.None);
+            var stack = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+            stack.Children.Add(SwapUi.Text(parts.Length > 0 ? parts[0] : chain, 12.5, false, false));
+            if (parts.Length > 1)
+                stack.Children.Add(SwapUi.Text(string.Join(" · ", parts.Skip(1)), 11.5, true));
+            return stack;
+        }
+
         private static FrameworkElement Row(AddonManager.AddonRecord record, AddonManager addons)
         {
-            var grid = new Grid { Margin = new Thickness(0, 2, 0, 6) };
+            var grid = new Grid { Margin = new Thickness(0, 9, 0, 9), MinHeight = 46 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var left = new StackPanel();
+            var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
 
             var headline = new StackPanel { Orientation = Orientation.Horizontal };
             headline.Children.Add(SwapUi.Text(record.Name ?? record.Id, 13, false, false, FontWeights.SemiBold));
@@ -103,8 +117,11 @@ namespace PclDlSwap.Payload.Swap.Views
             grid.Children.Add(left);
 
             var status = SwapUi.Text(StatusText(record), 11.5, record.Status != "enabled", false);
-            status.VerticalAlignment = VerticalAlignment.Top;
-            status.Margin = new Thickness(16, 2, 0, 0);
+            status.TextAlignment = TextAlignment.Right;
+            status.VerticalAlignment = VerticalAlignment.Center;
+            status.Margin = new Thickness(0, 0, 14, 0);
+            if (record.Status == "enabled")
+                SwapUi.UseBrush(status, TextBlock.ForegroundProperty, "ColorBrush2");
             Grid.SetColumn(status, 1);
             grid.Children.Add(status);
 
@@ -116,10 +133,10 @@ namespace PclDlSwap.Payload.Swap.Views
                     if (!addons.SetEnabled(id, !record.Enabled)) return;
                     PageRegistry.InvalidatePage("swap-addons");
                 });
-                PclUi.SetMember(toggle, "Height", 28.0);
+                PclUi.SetMember(toggle, "Height", 35.0);
                 PclUi.SetMember(toggle, "MinWidth", 76.0);
-                PclUi.SetMember(toggle, "Margin", new Thickness(16, 0, 0, 0));
-                toggle.VerticalAlignment = VerticalAlignment.Top;
+                PclUi.SetMember(toggle, "Margin", new Thickness(0));
+                toggle.VerticalAlignment = VerticalAlignment.Center;
                 Grid.SetColumn(toggle, 2);
                 grid.Children.Add(toggle);
             }
@@ -131,10 +148,9 @@ namespace PclDlSwap.Payload.Swap.Views
             var line = new Border
             {
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Margin = new Thickness(0, 0, 0, 8)
             };
             SwapUi.UseBrush(line, Border.BorderBrushProperty, "ColorBrush6");
-            line.Opacity = 0.6;
+            line.Opacity = 0.7;
             return line;
         }
 

@@ -42,10 +42,15 @@ namespace PclDlSwap.Payload.Swap.Views
                     {
                         PclUi.SetMember(card, "Title", title);
                         PclUi.SetMember(card, "Margin", new Thickness(0, 0, 0, 15));
-                        // The shipped cards carry their content as a direct child and let this margin
+                        // Shipped cards carry their content as a direct child and let this margin
                         // clear the title row; MyCard only looks at Children[3] when it is swappable.
-                        body.Margin = new Thickness(25, 40, 25, 25);
+                        // 20/40/18 + an 18px tail are the numbers PCL's own SetContentBuilder uses
+                        // (PageOtherHelp.HelpListLoad), so the spacing matches the stock cards.
+                        body.Margin = new Thickness(20, 40, 18, 0);
+                        body.Children.Add(new Border { Height = 18 });
                         card.Children.Add(body);
+                        // Keep SharedSizeGroup columns (if a future card uses them) per card.
+                        Grid.SetIsSharedSizeScope(card, true);
                         return (FrameworkElement)card;
                     }
                 }
@@ -101,16 +106,16 @@ namespace PclDlSwap.Payload.Swap.Views
         internal static FrameworkElement Row(string label, FrameworkElement value, double bottom = 9)
         {
             var grid = new Grid { Margin = new Thickness(0, 0, 0, bottom), MinHeight = 26 };
-            grid.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = GridLength.Auto,
-                SharedSizeGroup = "Pcl2SwapRowLabel"
-            });
+            // Measured against PageSetupLaunch: the caption starts at the card's content edge and
+            // every control starts 134px further right. A fixed column (110 + 24 gap) keeps our
+            // rows on the same grid as the shipped pages; an Auto column silently grows to the
+            // widest label of the whole page and leaves a hole in the middle of the card.
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(110) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             var caption = Text(label, 12.5, false, false);
             caption.VerticalAlignment = VerticalAlignment.Center;
-            caption.Margin = new Thickness(0, 0, 25, 0);
+            caption.Margin = new Thickness(0, 0, 24, 0);
             Grid.SetColumn(caption, 0);
             grid.Children.Add(caption);
 
@@ -154,7 +159,8 @@ namespace PclDlSwap.Payload.Swap.Views
                         PclUi.SetMember(button, "Height", 35.0);
                         PclUi.SetMember(button, "MinWidth", 140.0);
                         PclUi.SetMember(button, "Padding", new Thickness(13, 0, 13, 0));
-                        PclUi.SetMember(button, "Margin", new Thickness(0, 0, 20, 0));
+                        // 12px is the gap the shipped settings strips use between two buttons.
+                        PclUi.SetMember(button, "Margin", new Thickness(0, 0, 12, 0));
                         if (!string.IsNullOrEmpty(colorType))
                         {
                             var stateType = HostType("PCL.MyButton+ColorState");
@@ -212,7 +218,16 @@ namespace PclDlSwap.Payload.Swap.Views
         }
 
         /// <summary>Short explanation line under a card title.</summary>
-        internal static FrameworkElement Note(string text, bool secondary = true) => Text(text, 12, secondary);
+        internal static FrameworkElement Note(string text, bool secondary = true)
+        {
+            var block = Text(text, 12, secondary);
+            // Stock cards breathe at an 18px line pitch; the default tight leading makes multi-line
+            // Chinese paragraphs look cramped next to PCL's own text blocks.
+            block.LineHeight = 18;
+            block.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+            block.Margin = new Thickness(0, 0, 0, 6);
+            return block;
+        }
 
         /// <summary>
         /// Labelled checkbox. PCL's own MyCheckBox already draws its caption, so it is returned
@@ -295,6 +310,9 @@ namespace PclDlSwap.Payload.Swap.Views
             }
 
             if (selectedIndex >= 0 && selectedIndex < combo.Items.Count) combo.SelectedIndex = selectedIndex;
+            // Shipped settings combos are 35px high (measured on PageSetupLaunch); the bare default
+            // template renders ~30px and makes the whole row look out of step with the rest.
+            combo.Height = 35;
             combo.HorizontalAlignment = HorizontalAlignment.Stretch;
             combo.VerticalAlignment = VerticalAlignment.Center;
             combo.SelectionChanged += (sender, args) => RelayInt(onChange, combo.SelectedIndex);

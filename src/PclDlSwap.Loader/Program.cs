@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
@@ -19,6 +20,20 @@ namespace PclDlSwap.Loader
     internal static class Program
     {
         private const string PatchedFileName = "PclDlSwap.Patched.exe";
+
+        /// <summary>
+        /// Files the patched executable needs at *its own* base directory (the CLR probes the app
+        /// base for the AssemblyRef the runtime bootstrap introduces, not the loader's folder).
+        /// </summary>
+        private static readonly string[] RuntimeFiles =
+        {
+            "PclDlSwap.Payload.dll",
+            "PCL2Swap.Api.dll",
+            "MonoMod.Utils.dll",
+            "Gee.External.Capstone.dll",
+            "capstone.dll",
+            "Mono.Cecil.dll"
+        };
 
         private static int Main(string[] args)
         {
@@ -78,6 +93,8 @@ namespace PclDlSwap.Loader
                 Console.WriteLine("  补丁    : 已是最新（哈希一致），直接启动。");
             }
 
+            Console.WriteLine("  运行时  : " + EnsureRuntimeFiles(baseDirectory, targetDirectory));
+
             var startInfo = new ProcessStartInfo(patchedPath)
             {
                 UseShellExecute = false,
@@ -114,6 +131,49 @@ namespace PclDlSwap.Loader
                 Console.Error.WriteLine("启动异常：" + ex.Message);
                 return 4;
             }
+        }
+
+        /// <summary>
+        /// Copies the runtime files next to the patched executable: the runtime bootstrap introduces
+        /// an AssemblyRef to <c>PclDlSwap.Payload</c>, and the CLR resolves that against the patched
+        /// executable's own base directory, not the loader's folder.
+        /// </summary>
+        private static string EnsureRuntimeFiles(string sourceDirectory, string targetDirectory)
+        {
+            if (string.Equals(Path.GetFullPath(sourceDirectory), Path.GetFullPath(targetDirectory),
+                    StringComparison.OrdinalIgnoreCase))
+                return "已在同一目录（无需复制）";
+
+            var copied = 0;
+            var missing = new List<string>();
+            foreach (var name in RuntimeFiles)
+            {
+                var source = Path.Combine(sourceDirectory, name);
+                if (!File.Exists(source))
+                {
+                    missing.Add(name);
+                    continue;
+                }
+
+                var destination = Path.Combine(targetDirectory, name);
+                try
+                {
+                    var upToDate = File.Exists(destination) &&
+                                   new FileInfo(destination).Length == new FileInfo(source).Length &&
+                                   File.GetLastWriteTimeUtc(destination) >= File.GetLastWriteTimeUtc(source);
+                    if (upToDate) continue;
+
+                    File.Copy(source, destination, true);
+                    copied++;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("    复制 " + name + " 失败：" + ex.Message);
+                }
+            }
+
+            var text = copied == 0 ? "已就位" : copied + " 个文件已复制到目标目录";
+            return missing.Count == 0 ? text : text + "（缺少 " + string.Join(", ", missing) + "）";
         }
 
         private static string ShortHash(string path, bool full = false)

@@ -27,13 +27,20 @@ namespace PclDlSwap.Patcher
     {
         private readonly Action<string> _log;
 
-        public IlPatcher(string payloadAssemblyPath, Action<string> log = null)
+        public IlPatcher(string payloadAssemblyPath, Action<string> log = null, bool runtimeBootstrap = true)
         {
             _log = log ?? (_ => { });
             PayloadAssemblyPath = payloadAssemblyPath;
+            RuntimeBootstrap = runtimeBootstrap;
         }
 
         public string PayloadAssemblyPath { get; }
+
+        /// <summary>
+        /// When true (default) the patched module also gains the runtime bootstrap call, so the
+        /// disk-patch shape boots the same SwapHost platform as the injected shape.
+        /// </summary>
+        public bool RuntimeBootstrap { get; }
 
         public sealed class PatchResult
         {
@@ -54,6 +61,7 @@ namespace PclDlSwap.Patcher
                 RewriteDownloadSidebar(module, result);
                 RewriteSilentOta(module, result);
                 RewriteUpdatePermission(module, result);
+                if (RuntimeBootstrap) RewriteRuntimeBootstrap(module, result);
 
                 var options = new dnlib.DotNet.Writer.ModuleWriterOptions(module);
                 options.MetadataOptions.Flags |= dnlib.DotNet.Writer.MetadataFlags.KeepOldMaxStack;
@@ -86,6 +94,90 @@ namespace PclDlSwap.Patcher
 
             var signature = MethodSig.CreateStatic(returnType, parameters);
             return new MemberRefUser(module, name, signature, declaring);
+        }
+
+        // ------------------------------------------------------------------ 5. runtime bootstrap
+
+        /// <summary>
+        /// Gives the disk-patch shape the same runtime platform as the injected one: the patched
+        /// module gains exactly one new AssemblyRef (<c>PclDlSwap.Payload</c>) plus a call to
+        /// <c>HookEntryPoints.Bootstrap("disk-patch")</c> at the end of PCL's <c>ModMain..cctor</c>.
+        /// The type finishes its own field initialisation first, then the watchdog and SwapHost
+        /// (module platform, pages, hooks, event bus) start before Main runs. The runtime files ship
+        /// next to the patched executable.
+        /// </summary>
+        private void RewriteRuntimeBootstrap(ModuleDefMD module, PatchResult result)
+        {
+            if (string.IsNullOrEmpty(PayloadAssemblyPath) || !File.Exists(PayloadAssemblyPath))
+            {
+                result.Notes.Add("缺少 payload 程序集，运行时 bootstrap 跳过。");
+                _log(result.Notes[result.Notes.Count - 1]);
+                return;
+            }
+
+            var cctor = FindMethod(module, "PCL.ModMain", ".cctor");
+            if (cctor?.Body == null)
+            {
+                result.Notes.Add("未找到 PCL.ModMain::.cctor，运行时 bootstrap 跳过（该构建可能改了启动布局）。");
+                _log(result.Notes[result.Notes.Count - 1]);
+                return;
+            }
+
+            var already = cctor.Body.Instructions.Any(instruction =>
+                (instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt) &&
+                instruction.Operand is IMethod method &&
+                method.DeclaringType?.FullName == "PclDlSwap.Payload.Host.HookEntryPoints" &&
+                method.Name == "Bootstrap");
+            if (already)
+            {
+                result.Notes.Add("运行时 bootstrap 已存在，跳过。");
+                return;
+            }
+
+            string payloadName;
+            Version payloadVersion;
+            using (var payloadModule = ModuleDefMD.Load(PayloadAssemblyPath))
+            {
+                payloadName = payloadModule.Assembly?.Name ?? "PclDlSwap.Payload";
+                payloadVersion = payloadModule.Assembly?.Version ?? new Version(0, 0, 0, 0);
+            }
+
+            var reference = module.GetAssemblyRefs().FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, payloadName, StringComparison.OrdinalIgnoreCase));
+            if (reference == null)
+            {
+                // dnlib registers the AssemblyRef implicitly through the TypeRef/MemberRef scopes,
+                // so it is enough to build the reference and use it below.
+                reference = new AssemblyRefUser(new AssemblyNameInfo(payloadName)
+                {
+                    Version = payloadVersion,
+                    Culture = UTF8String.Empty
+                });
+            }
+
+            var entryType = new TypeRefUser(module, "PclDlSwap.Payload.Host", "HookEntryPoints", reference);
+            var bootstrap = new MemberRefUser(module, "Bootstrap",
+                MethodSig.CreateStatic(module.CorLibTypes.Int32, module.CorLibTypes.String), entryType);
+
+            var instructions = cctor.Body.Instructions;
+            var lastReturn = -1;
+            for (var index = 0; index < instructions.Count; index++)
+                if (instructions[index].OpCode == OpCodes.Ret) lastReturn = index;
+            if (lastReturn < 0)
+            {
+                result.Notes.Add("ModMain::.cctor 中没有 ret，运行时 bootstrap 跳过。");
+                _log(result.Notes[result.Notes.Count - 1]);
+                return;
+            }
+
+            instructions.Insert(lastReturn, Instruction.Create(OpCodes.Ldstr, "disk-patch"));
+            instructions.Insert(lastReturn + 1, Instruction.Create(OpCodes.Call, bootstrap));
+            instructions.Insert(lastReturn + 2, Instruction.Create(OpCodes.Pop));
+
+            result.Rewrites++;
+            result.Notes.Add("运行时 bootstrap：ModMain..cctor 末尾插入 HookEntryPoints.Bootstrap(\"disk-patch\")" +
+                             $"（新增 AssemblyRef {payloadName} {payloadVersion}）");
+            _log(result.Notes[result.Notes.Count - 1]);
         }
 
         // ------------------------------------------------------------------ 1. download gate

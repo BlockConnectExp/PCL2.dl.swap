@@ -15,6 +15,7 @@ src/PclDlSwap.Profiler/*.obj
 # local runtime artefacts
 logs/
 config/swap.config.json
+test/
 
 # reverse-engineering working material (kept in the research workspace, not shipped)
 samples/

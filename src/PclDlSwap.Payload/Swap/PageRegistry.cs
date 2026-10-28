@@ -32,6 +32,14 @@ namespace PclDlSwap.Payload.Swap
         private static DetourInstaller _pageGetDetour;
         private static volatile bool _installed;
         private static volatile bool _sidebarDone;
+        private static int _pageIdWriteSkipped;
+
+        /// <summary>
+        /// True while the host's <c>PageSetupLeft.PageGet</c> is under our detour. Writing one of
+        /// our page ids into the host's PageID field is only safe in that state - the host's own
+        /// switch throws for unknown ids, which is exactly the "未知的设置子页面种类：101" crash.
+        /// </summary>
+        private static bool PageIdWritable => _pageGetDetour != null;
 
         private sealed class PageEntry
         {
@@ -155,6 +163,11 @@ namespace PclDlSwap.Payload.Swap
         /// launcher's own导航 semantics intact and restores the Swap page on re-entry.
         /// The enum parameter travels as int32; the original needs the boxed enum from the
         /// target signature, so it is rebuilt before the fallthrough call.
+        ///
+        /// If this hook cannot be installed, <see cref="SwitchToPage"/> stops writing our id into
+        /// the host's PageID field (see <c>PageIdWritable</c>): a leftover unknown PageID is the
+        /// only thing that can make the *host* throw, so the failure degrades to "re-entering 设置
+        /// shows a native sub-page" instead of crashing the launcher.
         /// </summary>
         private static void InstallPageGetDetour()
         {
@@ -226,9 +239,24 @@ namespace PclDlSwap.Payload.Swap
 
             var parameters = _pageGetDetour?.Method?.GetParameters();
             var parameterType = parameters != null && parameters.Length > 0 ? parameters[0].ParameterType : null;
-            var original = parameterType != null && parameterType.IsEnum
-                ? Enum.ToObject(parameterType, id)
-                : (object)id;
+            object original = id;
+            if (parameterType != null && parameterType.IsEnum)
+            {
+                original = Enum.ToObject(parameterType, id);
+                if (id >= 0 && !Enum.IsDefined(parameterType, original))
+                {
+                    // The host's own switch throws for ids outside its enum, and FormMain.PageChangeActual
+                    // resolves the leftover PageID through here - a stale Swap id would surface as
+                    // "未知的设置子页面种类：N". Degrade to the host's first/default sub-page instead.
+                    var names = Enum.GetNames(parameterType);
+                    var fallbackName = names.Contains("Default") ? "Default" : names.FirstOrDefault();
+                    if (fallbackName != null)
+                    {
+                        SwapLog.Warn($"[page] PageGet({id}) 不是宿主已知的设置子页，按 {fallbackName} 处理，避免宿主抛异常。");
+                        original = Enum.Parse(parameterType, fallbackName);
+                    }
+                }
+            }
             return _pageGetDetour.InvokeOriginal(self, original);
         }
 
@@ -278,10 +306,18 @@ namespace PclDlSwap.Payload.Swap
                             BindingFlags.NonPublic | BindingFlags.Static);
                         run?.Invoke(null, new[] { page });
 
-                        var idType = PclUi.GetMember(pageLeft, "PageID")?.GetType()
-                                     ?? _host.GetType("PCL.FormMain+PageSubType");
-                        PclUi.SetMember(pageLeft, "PageID",
-                            idType == null ? (object)id : Enum.ToObject(idType, id));
+                        if (PageIdWritable)
+                        {
+                            var idType = PclUi.GetMember(pageLeft, "PageID")?.GetType()
+                                         ?? _host.GetType("PCL.FormMain+PageSubType");
+                            PclUi.SetMember(pageLeft, "PageID",
+                                idType == null ? (object)id : Enum.ToObject(idType, id));
+                        }
+                        else if (Interlocked.Increment(ref _pageIdWriteSkipped) == 1)
+                        {
+                            SwapLog.Warn("[page] PageGet 钩子不可用，本次运行不再把 Swap 的 PageID 写进宿主：" +
+                                         "再次进入设置页会回到宿主自己的子页，而不是报“未知的设置子页面种类”。");
+                        }
                     }
                     finally
                     {
@@ -319,7 +355,14 @@ namespace PclDlSwap.Payload.Swap
             try
             {
                 SwapLog.Info($"[page] 构建视图（id={id}，{entry.LogicalId}）");
-                view = entry.Factory();
+                // WPF controls must be created on an STA thread. The host calls us from its UI
+                // thread, but PageGet can also arrive from a worker (or from the console harness),
+                // so marshal the factory through the host's Dispatcher when needed.
+                view = Thread.CurrentThread.GetApartmentState() == ApartmentState.STA
+                    ? entry.Factory()
+                    : PclUi.OnUiThread(entry.Factory, null);
+                if (view == null)
+                    SwapLog.Warn($"[page] 视图构建没有返回内容（id={id}，{entry.LogicalId}）。");
             }
             catch (Exception ex) { SwapLog.Error("Swap 页面：视图构建失败：" + ex); }
             if (view != null)
@@ -377,6 +420,14 @@ namespace PclDlSwap.Payload.Swap
                 try
                 {
                     if (_sidebarDone) return;
+                    if (_pageCheckDetour == null)
+                    {
+                        // Without our PageCheck detour the host's own handler would run
+                        // PageChange(<our id>) and throw; better to show no entry at all.
+                        SwapLog.Error("Swap 页面：PageCheck 钩子未安装，已跳过侧栏插入（否则点击会掉进宿主的未知子页面分支）。");
+                        _sidebarDone = true;
+                        return;
+                    }
 
                     var panItem = PclUi.GetMember(pageSetupLeft, "PanItem");
                     var children = panItem == null ? null : PclUi.GetMember(panItem, "Children");

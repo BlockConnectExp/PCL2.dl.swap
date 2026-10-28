@@ -39,15 +39,19 @@ data/offset-manifest.json           per-build tokens and RVAs
 Expected output:
 
 ```
-PCL2 DLL-Swap loader (v26.0-Alpha 3)
+PCL2 DLL-Swap loader (v26.1-Alpha 1)
   目标    : D:\PCL\Plain Craft Launcher 2.exe
   原版哈希: 6b6e1260cb5a1d6a…
   PageDownloadInstall.LoaderInit -> 恢复 ModDownload.DlClientListLoader
   ModSecret.UpdateStart -> 静默 OTA 改为显式确认（可取消）
   ModSecret.HasUpdatePermission -> false（禁止自动更新）
-  补丁输出：D:\PCL\PclDlSwap.Patched.exe（3 处重写）
+  运行时 bootstrap：ModMain..cctor 末尾注入 Bootstrap("disk-patch")
+  补丁输出：D:\PCL\PclDlSwap.Patched.exe（4 处重写）
   已启动  : pid=…
 ```
+
+> 版本线：`v26.0` 是正式版（第十个 Alpha 即正式发布），之后的改动进入 `v26.1-Alpha 1…` 循环；
+> 规则见 `docs/versioning.md`，每版发布说明带图（托管在对应 Release 资产里）。
 
 ## 3 What Changes
 

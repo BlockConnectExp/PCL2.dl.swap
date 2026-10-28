@@ -35,6 +35,9 @@ namespace PclDlSwap.Payload.Swap
             // Lists need the raw JSON value: Convert.ToString on an array yields "System.Object[]",
             // which is why shapes/permissions used to come back empty for every module.
             manifest.Shapes.AddRange(ToStrings(GetRaw(map, "shapes")));
+            manifest.HostVersions.AddRange(ToStrings(GetRaw(map, "hostVersions")));
+            if (manifest.HostVersions.Count == 0)
+                manifest.HostVersions.AddRange(ToStrings(GetRaw(map, "hostVersion")));
             manifest.Permissions.AddRange(ToStrings(GetRaw(map, "permissions")));
             return manifest;
         }
@@ -54,6 +57,12 @@ namespace PclDlSwap.Payload.Swap
         private static List<string> ToStrings(object value)
         {
             var list = new List<string>();
+            // A single string is the common shorthand for a one-element list.
+            if (value is string single)
+            {
+                if (!string.IsNullOrEmpty(single)) list.Add(single);
+                return list;
+            }
             if (value is IEnumerable enumerable && !(value is string))
             {
                 foreach (var item in enumerable)

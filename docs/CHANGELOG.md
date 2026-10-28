@@ -6,6 +6,36 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-18:55:00 Alpha 10: 宿主版本作用域 + 安装前兼容预检
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\AddonManifest.cs                 新增 hostVersions
+.\src\PCL2Swap.Api\ISwapApi.cs                      IHostInfo.PclVersion
+.\src\PclDlSwap.Payload\Swap\AddonManifestReader.cs hostVersions 解析（含 hostVersion 单数、单字符串简写）
+.\src\PclDlSwap.Payload\Swap\HostApi.cs             PclVersion 读宿主 ProductVersion/FileVersion
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs        作用域统一判定 + HostVersionMatches + 安装预检
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs 作用域行显示宿主版本 + 换行不截断
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs            Host.PclVersion 与作用域判定探针
+.\src\PclDlSwap.ExLoaderHarness\Program.cs          6 项新断言（PclVersion、匹配/拒绝/通配、跳过不失败）
+.\tools\PclAddonPack\Program.cs                     --shapes / --host-versions / --permissions
+.\docs\swap-api.md                                  manifest 作用域说明 + §11
+.\src\Pcl2Swap.Shim\Shim.cpp + SwapLog.cs + Loader    版本号升 v26.0-Alpha 10
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|宿主版本作用域|manifest 新增 `hostVersions`（LSPosed 的「作用域」在单应用下的对应物）：每项互相 OR，支持 `"*"`、精确版本 `"2.99.0.0"` 与比较式 `">=2.99.0"` / `"<3.0"` / `"=2.99.0.1"`，可带 `-beta`/`+413` 后缀（归一化后再比较）；留空=任意宿主（Alpha 9 行为）。不匹配时模块**不启动**、状态「宿主版本不适用」，不记为失败|2026.10.28-18:55:00|PCL2.dl.swap
+2|安装前预检|安装时先算作用域：不匹配仍然允许安装（用户可能在为另一个 PCL 版本备包），但立刻把「模块声明 X，当前宿主 Y」写进日志，安装提示也带状态；`apiVersion` 仍是硬拒绝|2026.10.28-18:55:00|PCL2.dl.swap
+3|宿主版本暴露|`IHostInfo.PclVersion` 读宿主程序集的 `ProductVersion`（PCL 为 2.99.0.0），退回 `FileVersion`/`AssemblyVersion`；自检新增 `Host.PclVersion` 与「模块作用域判定」两项探针|2026.10.28-18:55:00|PCL2.dl.swap
+4|打包器|`PclAddonPack` 新增 `--shapes` / `--host-versions` / `--permissions`，生成的 manifest.json 直接带上作用域与权限声明（原先只能手改包内 JSON）|2026.10.28-18:55:00|PCL2.dl.swap
+5|界面|模块行作用域文本改为换行显示，不再被按钮挤到截断；列出 `API 范围 · 形状 · 宿主 · 权限名`|2026.10.28-18:55:00|PCL2.dl.swap
+6|验证|harness 新增 6 项断言（PclVersion 非空、同版本范围命中、超范围拒绝、通配放行、宿主版本不匹配的模块状态为 skipped-host）全部 PASS，六个套件全绿；真机 2.99.0：用打包器生成 `shapes=[injected,patched] hostVersions=[">=2.99.0"] permissions=[…]` 的包 → 安装即启用（`状态=enabled`），自检 `Host.PclVersion = 2.99.0.0`、`模块作用域判定 = 空约束=True，*=True，精确匹配=True，">=99.0"=False`|2026.10.28-18:55:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-17:45:00 Alpha 9: 模块日志 + 崩溃隔离
 
 GitCommitHash: tag v26.0-Alpha9（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha9.md）

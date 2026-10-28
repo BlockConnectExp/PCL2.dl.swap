@@ -49,6 +49,7 @@ my-addon.swapaddon
   "author": "Example",
   "description": "One line summary.",
   "shapes": ["injected", "patched"],
+  "hostVersions": [">=2.99.0 <3.0"],
   "permissions": ["ui.pages", "hooks.dialogs"],
   "defaultEnabled": false
 }
@@ -56,6 +57,11 @@ my-addon.swapaddon
 
 - `entry` 是类型全名；加载器会在包内所有 dll 中寻找实现 `ISwapAddon` 的那个类型。
 - `apiVersion` 支持 `*`、`=x.y`、`>=x.y`、`<x.y`（空格分隔可组合）。
+- `shapes` / `hostVersions` 是模块**作用域**：前者限定交付形状（`injected` / `patched` / `*`），
+  后者限定支持的 PCL 版本。`hostVersions` 的每一项互相 OR：`"*"`、精确版本（`"2.99.0.0"`）或
+  比较式（`">=2.99.0"`、`"<3.0"`、`"=2.99.0.1"`）；留空表示任意宿主（Alpha 9 之前的行为）。
+  不在作用域内的模块**不会启动**，状态显示「作用域不适用 / 宿主版本不适用」，不会被标记为失败；
+  安装时平台会先把不匹配写进日志提醒（仍然允许安装 —— 你可能是在为另一个 PCL 版本做准备）。
 - `permissions` 目前是**声明式**（用于展示与审计），运行时不做硬隔离：Addon 与宿主同权限。
 
 ---
@@ -348,7 +354,7 @@ handler 可以是实例委托（不再要求静态方法）；参数形状与宿
 | **更新** | 安装同 id 的新版本 = 先停旧版、撤下它的页面，再装新版；模块自己的 `config.json` 保留。 |
 | **卸载** | `OnDisable`/`OnUnload` → 注销它注册的设置页（侧栏重建，若用户正在那一页会切回宿主默认页）→ 删除模块目录（含 `config.json`）与归档包。源包只在被复制进模块目录后才删，用户自己 Downloads 里的原文件保留。 |
 | **延迟删除** | 入口 DLL 已被 CLR 加载、文件被占用时，路径写进 `<数据根>\addons\.pending\*.txt`，下次启动先清理再扫描模块。 |
-| **作用域（shapes）** | `manifest.json` 的 `shapes` 声明模块适用的交付形状（`injected` / `patched` / `*`）。不匹配时模块状态是“作用域不适用”，既不启动也不报失败。 |
+| **作用域（shapes + hostVersions）** | `shapes` 声明适用的交付形状（`injected` / `patched` / `*`），`hostVersions` 声明支持的 PCL 版本（`["*"]`、精确版本或 `">=2.99.0"` 这类比较，多项 OR）。任一不匹配 → 状态「作用域不适用 / 宿主版本不适用」，既不启动也不报失败；安装时平台会把不匹配原因写进日志（仍然允许安装，方便为其它 PCL 版本备包）。 |
 | **日志** | 每行都有「日志」按钮：打开该模块自己的日志文件 `%APPDATA%\PCL2Swap\logs\modules\<id>.log`（256 KB 轮转一次，保留 `.1` 备份）。模块通过 `Api.Log/LogWarning/LogError` 写的一切、以及平台为它挂的每个钩子，都会记在这里；全局日志里同一行会带 `[<模块id>]` 前缀。 |
 | **崩溃隔离** | 模块 handler 抛异常时会**自动停用那个 handler**（不重试、不重复炸同一条宿主路径），宿主调用回退到原方法/下一个 Replace handler；失败次数记在模块行上（红色「钩子抛错 N 次」），细节写进模块日志。 |
 

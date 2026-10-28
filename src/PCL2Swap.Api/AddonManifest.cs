@@ -18,6 +18,14 @@ namespace PCL2Swap.Api
         public string Author { get; set; }
         public string Description { get; set; }
         public List<string> Shapes { get; set; } = new List<string>();
+
+        /// <summary>
+        /// Which PCL builds the module is scoped to. Entries are OR-ed; each is either an exact
+        /// version ("2.99.0.0"), a wildcard ("*") or a comparison (">=2.99.0", "&lt;3.0", "=2.99.0.1").
+        /// An empty list means "any build" (the Alpha 9 behaviour).
+        /// </summary>
+        public List<string> HostVersions { get; set; } = new List<string>();
+
         public List<string> Permissions { get; set; } = new List<string>();
         public bool DefaultEnabled { get; set; }
 

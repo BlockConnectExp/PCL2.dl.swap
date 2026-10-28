@@ -69,6 +69,8 @@ namespace PclDlSwap.Payload.Swap
 
             Probe("Host.SwapVersion", () => api.Host.SwapVersion);
             Probe("Host.ApiVersion", () => api.Host.ApiVersion);
+            Probe("Host.PclVersion", () => api.Host.PclVersion);
+            Probe("模块作用域判定", () => RunScopeProbe(api));
             Probe("Host.Shape", () => api.Host.Shape);
             Probe("Host.ProcessId", () => api.Host.ProcessId);
             Probe("Host.AddonDirectory", () => api.Host.AddonDirectory);
@@ -202,6 +204,20 @@ namespace PclDlSwap.Payload.Swap
             api.Pcl.Loader.Start(combo);
             var tasks = api.Pcl.Loader.ListTasks(combo, false);
             return $"{combo.GetType().Name} 已启动（任务 {tasks.Count} 个），状态/进度/PreviewFinish 事件异步写入日志";
+        }
+
+        /// <summary>
+        /// Read-only check of the module scope evaluator against the real host version: no
+        /// constraints and "*" must accept everything, an impossible range must reject.
+        /// </summary>
+        private static string RunScopeProbe(ISwapApi api)
+        {
+            var version = api.Host.PclVersion;
+            var none = AddonManager.HostVersionMatches(new List<string>(), version);
+            var wildcard = AddonManager.HostVersionMatches(new List<string> { "*" }, version);
+            var impossible = AddonManager.HostVersionMatches(new List<string> { ">=99.0" }, version);
+            var exact = AddonManager.HostVersionMatches(new List<string> { version }, version);
+            return $"宿主 {version}：空约束={none}，*= {wildcard}，精确匹配={exact}，\">=99.0\"={impossible}";
         }
 
         /// <summary>

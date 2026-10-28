@@ -143,6 +143,14 @@ namespace PclDlSwap.Payload.Swap
 
             var record = Unpack(storeCopy, manifest);
             _records.Add(record);
+
+            // Compatibility precheck: a package that does not fit *this* host still installs (the user
+            // may be preparing for another PCL build), but the mismatch is stated up front instead of
+            // showing up later as a silently skipped module.
+            var scope = DescribeScope(record);
+            if (scope != null)
+                SwapLog.Warn($"安装的模块不在当前宿主作用域内（仍然安装）：{record.Id} —— {scope}");
+
             SaveState();
 
             if (enable) EnableRecord(record);
@@ -341,13 +349,11 @@ namespace PclDlSwap.Payload.Swap
         /// </summary>
         private void EnableRecord(AddonRecord record)
         {
-            if (!IsShapeApplicable(record))
+            if (!IsInScope(record, out var scopeStatus, out var scopeReason))
             {
-                record.Status = "skipped-shape";
+                record.Status = scopeStatus;
                 record.Failure = null;
-                SwapLog.Info($"Addon 跳过（作用域不匹配）：{record.Id} 只声明了 " +
-                             string.Join(", ", record.Manifest?.Shapes ?? new List<string>()) +
-                             $"，当前形状 {SwapHost.Shape}。");
+                SwapLog.Info($"Addon 跳过（作用域不适用）：{record.Id} —— {scopeReason}");
                 return;
             }
 
@@ -379,13 +385,110 @@ namespace PclDlSwap.Payload.Swap
             }
         }
 
-        private static bool IsShapeApplicable(AddonRecord record)
+        /// <summary>
+        /// Module scope, the single-app equivalent of an LSPosed scope: which delivery <c>shapes</c>
+        /// the module runs in, and which PCL builds (<c>hostVersions</c>) it supports. A module that
+        /// declares neither runs everywhere; otherwise the host has to be inside the declared range
+        /// for the module to start (it is skipped with a status, never marked as failed).
+        /// </summary>
+        private bool IsInScope(AddonRecord record, out string status, out string reason)
         {
-            var shapes = record.Manifest?.Shapes;
-            if (shapes == null || shapes.Count == 0) return true;
-            var current = SwapHost.Shape.ToString();
-            return shapes.Any(shape =>
-                string.Equals(shape, current, StringComparison.OrdinalIgnoreCase) || shape == "*");
+            status = null;
+            reason = null;
+            var manifest = record.Manifest;
+            if (manifest == null) return true;
+
+            var shapes = manifest.Shapes;
+            if (shapes != null && shapes.Count > 0)
+            {
+                var current = SwapHost.Shape.ToString();
+                var matches = shapes.Any(shape =>
+                    string.Equals(shape, current, StringComparison.OrdinalIgnoreCase) || shape == "*");
+                if (!matches)
+                {
+                    status = "skipped-shape";
+                    reason = $"模块声明形状 {string.Join("/", shapes)}，当前宿主是 {current}";
+                    return false;
+                }
+            }
+
+            var hostVersions = manifest.HostVersions;
+            if (hostVersions != null && hostVersions.Count > 0)
+            {
+                var hostVersion = HostPclVersion;
+                if (string.IsNullOrEmpty(hostVersion))
+                {
+                    SwapLog.Warn($"模块 {record.Id} 声明了宿主版本作用域，但读不到宿主版本，按放行处理。");
+                    return true;
+                }
+                if (!HostVersionMatches(hostVersions, hostVersion))
+                {
+                    status = "skipped-host";
+                    reason = $"模块声明宿主版本 {string.Join("、", hostVersions)}，当前宿主是 {hostVersion}";
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>Human-readable scope mismatch, or null when the module fits this host.</summary>
+        private string DescribeScope(AddonRecord record) =>
+            IsInScope(record, out _, out var reason) ? null : reason;
+
+        private string HostPclVersion
+        {
+            get
+            {
+                try { return _api?.Host?.PclVersion ?? string.Empty; }
+                catch { return string.Empty; }
+            }
+        }
+
+        /// <summary>
+        /// Evaluates a module's <c>hostVersions</c> entries against the host version. Entries are
+        /// OR-ed; each is <c>*</c>, an exact version, or <c>&gt;=</c> / <c>&gt;</c> / <c>&lt;=</c> /
+        /// <c>&lt;</c> / <c>=</c> followed by a version (an unknown host version fails open).
+        /// </summary>
+        internal static bool HostVersionMatches(IReadOnlyList<string> constraints, string hostVersion)
+        {
+            if (constraints == null || constraints.Count == 0) return true;
+            if (!Version.TryParse(NormalizeVersion(hostVersion), out var host)) return true;
+
+            foreach (var raw in constraints)
+            {
+                var entry = (raw ?? string.Empty).Trim();
+                if (entry.Length == 0) continue;
+                if (entry == "*") return true;
+
+                var op = "=";
+                var text = entry;
+                foreach (var candidate in new[] { ">=", "<=", "==", ">", "<", "=" })
+                {
+                    if (!entry.StartsWith(candidate, StringComparison.Ordinal)) continue;
+                    op = candidate == "==" ? "=" : candidate;
+                    text = entry.Substring(candidate.Length).Trim();
+                    break;
+                }
+                if (!Version.TryParse(NormalizeVersion(text), out var target)) continue;
+
+                var comparison = host.CompareTo(target);
+                var match = op == ">=" ? comparison >= 0
+                    : op == "<=" ? comparison <= 0
+                    : op == ">" ? comparison > 0
+                    : op == "<" ? comparison < 0
+                    : comparison == 0;
+                if (match) return true;
+            }
+            return false;
+        }
+
+        /// <summary>Drops build metadata ("2.99.0.1-beta", "2.99.0.1+413") so Version can parse it.</summary>
+        private static string NormalizeVersion(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            var value = text.Trim();
+            var cut = value.IndexOfAny(new[] { '-', '+', ' ' });
+            return cut > 0 ? value.Substring(0, cut) : value;
         }
 
         // ------------------------------------------------------------------ module state

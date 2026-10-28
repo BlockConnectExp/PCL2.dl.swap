@@ -25,6 +25,13 @@ namespace PCL2Swap.Api
     {
         string SwapVersion { get; }
         string ApiVersion { get; }
+
+        /// <summary>
+        /// The PCL build the swap is bound to ("2.99.0.0"). Module scopes compare their
+        /// <c>hostVersions</c> manifest entries against this.
+        /// </summary>
+        string PclVersion { get; }
+
         SwapShape Shape { get; }
         int ProcessId { get; }
         string LogDirectory { get; }

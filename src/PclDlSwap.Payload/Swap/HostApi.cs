@@ -73,6 +73,35 @@ namespace PclDlSwap.Payload.Swap
 
             public string SwapVersion => SwapLog.ToolVersion;
             public string ApiVersion => HostApi.ApiVersion;
+
+            /// <summary>
+            /// PCL's own version, used as the module scope: product version when the host carries one
+            /// (PCL ships "2.99.0.0"), assembly version otherwise.
+            /// </summary>
+            public string PclVersion
+            {
+                get
+                {
+                    try
+                    {
+                        if (!(PclAssembly is Assembly assembly)) return string.Empty;
+                        var location = assembly.Location;
+                        if (!string.IsNullOrEmpty(location))
+                        {
+                            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(location);
+                            if (!string.IsNullOrEmpty(info.ProductVersion)) return info.ProductVersion;
+                            if (!string.IsNullOrEmpty(info.FileVersion)) return info.FileVersion;
+                        }
+                        var version = assembly.GetName().Version;
+                        return version == null ? string.Empty : version.ToString();
+                    }
+                    catch
+                    {
+                        return string.Empty;
+                    }
+                }
+            }
+
             public SwapShape Shape { get; }
             public int ProcessId => System.Diagnostics.Process.GetCurrentProcess().Id;
             public string LogDirectory => Path.GetDirectoryName(SwapLog.LogPath) ?? string.Empty;

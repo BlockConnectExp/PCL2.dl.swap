@@ -729,6 +729,10 @@ namespace PclDlSwap.ExLoaderHarness
             var pcl = api?.GetType().GetProperty("Pcl")?.GetValue(api);
             Expect("typed PCL access exposed on ISwapApi", pcl != null);
 
+            var hostInfo = api?.GetType().GetProperty("Host")?.GetValue(api);
+            var pclVersion = Convert.ToString(hostInfo?.GetType().GetProperty("PclVersion")?.GetValue(hostInfo));
+            Expect("Host.PclVersion reports the bound PCL build", !string.IsNullOrEmpty(pclVersion));
+
             var secret = pcl?.GetType().GetProperty("Secret")?.GetValue(pcl);
             Expect("Secret family exposed", secret != null);
             var before = Probes.UpdateStartCalls;
@@ -1392,6 +1396,30 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("a module scoped to another shape is skipped, not failed",
                     StatusOf(scopedRecord) == "skipped-shape");
 
+                // ---- host version scope: the single-app equivalent of an LSPosed scope ----
+                var hostVersion = typeof(PCL.ModMain).Assembly.GetName().Version?.ToString() ?? "1.0.0.0";
+                var hostScopeMethod = manager?.GetType().GetMethod("HostVersionMatches",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                Expect("host version scope matches the running host",
+                    Convert.ToBoolean(hostScopeMethod?.Invoke(null,
+                        new object[] { new List<string> { ">=" + hostVersion }, hostVersion }) ?? false));
+                Expect("host version scope rejects a build outside the range",
+                    !Convert.ToBoolean(hostScopeMethod?.Invoke(null,
+                        new object[] { new List<string> { ">=99.0" }, hostVersion }) ?? true));
+                Expect("the wildcard scope accepts any host",
+                    Convert.ToBoolean(hostScopeMethod?.Invoke(null,
+                        new object[] { new List<string> { "*" }, hostVersion }) ?? false));
+
+                var hostOut = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapHostScope-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                PackAddon(hostOut, "test.other-host", "Other Host", "1.0.0",
+                    "{\"schema\":1,\"id\":\"test.other-host\",\"name\":\"Other Host\"," +
+                    "\"version\":\"1.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
+                    "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"hostVersions\":[\">=99.0\"]}");
+                var otherHost = install?.Invoke(manager, new object[] { hostOut, true });
+                Expect("a module scoped to another PCL build is skipped, not failed",
+                    StatusOf(otherHost) == "skipped-host");
+
                 var removedOk = Convert.ToBoolean(uninstall?.Invoke(manager, new object[] { "test.installed" }));
                 Expect("uninstall drops the module from the list",
                     removedOk && !RecordIds().Contains("test.installed"));
@@ -1409,7 +1437,7 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("built-in modules refuse to uninstall",
                     !Convert.ToBoolean(uninstall?.Invoke(manager, new object[] { "swap.ota-protector" })));
 
-                foreach (var temp in new[] { external, broken, scopedOut })
+                foreach (var temp in new[] { external, broken, scopedOut, hostOut })
                 {
                     try { if (File.Exists(temp)) File.Delete(temp); } catch { }
                 }

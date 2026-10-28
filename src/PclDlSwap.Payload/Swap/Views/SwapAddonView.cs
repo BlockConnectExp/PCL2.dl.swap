@@ -116,7 +116,9 @@ namespace PclDlSwap.Payload.Swap.Views
             var scope = ScopeText(record);
             if (scope.Length > 0)
             {
-                var scopeText = SwapUi.Text(scope, 11, true, false);
+                // Wraps instead of clipping: a declared scope (shapes + host versions + permissions)
+                // is longer than one line once the action buttons take their share of the row.
+                var scopeText = SwapUi.Text(scope, 11, true);
                 scopeText.Margin = new Thickness(0, 3, 12, 0);
                 left.Children.Add(scopeText);
             }
@@ -319,6 +321,8 @@ namespace PclDlSwap.Payload.Swap.Views
             if (!string.IsNullOrEmpty(manifest.ApiVersion)) parts.Add("API " + manifest.ApiVersion);
             if (manifest.Shapes != null && manifest.Shapes.Count > 0)
                 parts.Add("形状 " + string.Join("/", manifest.Shapes));
+            if (manifest.HostVersions != null && manifest.HostVersions.Count > 0)
+                parts.Add("宿主 " + string.Join("、", manifest.HostVersions));
             if (manifest.Permissions != null && manifest.Permissions.Count > 0)
             {
                 var shown = manifest.Permissions.Take(3).ToList();
@@ -338,6 +342,7 @@ namespace PclDlSwap.Payload.Swap.Views
                 case "failed": return "启动失败";
                 case "unpacked": return "已解包（待启用）";
                 case "skipped-shape": return "作用域不适用";
+                case "skipped-host": return "宿主版本不适用";
                 case "removed": return "已卸载";
                 case "registered": return "已登记";
                 default: return record.Status ?? string.Empty;

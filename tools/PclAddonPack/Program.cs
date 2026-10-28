@@ -13,6 +13,8 @@ namespace PclDlSwap.PclAddonPack
     /// Packs a built addon project into a <c>.swapaddon</c> archive:
     ///   PclAddonPack --project &lt;dir&gt; --id &lt;id&gt; --name &lt;name&gt; --version &lt;ver&gt;
     ///                --entry &lt;type&gt; [--api "&gt;=1.0 &lt;2.0"] [--description "..."]
+    ///                [--shapes "injected,patched"] [--host-versions "&gt;=2.99.0"]
+    ///                [--permissions "host.hooks.attach"]
     ///                [--assets &lt;dir&gt;] [--out &lt;file&gt;]
     /// The entry type is validated with dnlib (no addon code is executed here), so a typo in
     /// --entry fails at packaging time instead of inside the launcher.
@@ -27,6 +29,7 @@ namespace PclDlSwap.PclAddonPack
 
             string project = null, id = null, name = null, version = null, entry = null;
             string api = ">=1.0 <2.0", description = null, assets = null, output = null;
+            string shapes = null, hostVersions = null, permissions = null;
 
             for (var i = 0; i < args.Length; i++)
             {
@@ -39,6 +42,9 @@ namespace PclDlSwap.PclAddonPack
                     case "--entry": entry = args[++i]; break;
                     case "--api": api = args[++i]; break;
                     case "--description": description = args[++i]; break;
+                    case "--shapes": shapes = args[++i]; break;
+                    case "--host-versions": hostVersions = args[++i]; break;
+                    case "--permissions": permissions = args[++i]; break;
                     case "--assets": assets = args[++i]; break;
                     case "--out": output = args[++i]; break;
                     default:
@@ -51,7 +57,10 @@ namespace PclDlSwap.PclAddonPack
             {
                 Console.Error.WriteLine(
                     "用法：PclAddonPack --project <dir> --id <id> --name <name> --version <ver> --entry <type>\n" +
-                    "                  [--api \">=1.0 <2.0\"] [--description \"...\"] [--assets <dir>] [--out <file>]");
+                    "                  [--api \">=1.0 <2.0\"] [--description \"...\"]\n" +
+                    "                  [--shapes \"injected,patched\"] [--host-versions \">=2.99.0\"]\n" +
+                    "                  [--permissions \"host.hooks.attach,host.settings.write\"]\n" +
+                    "                  [--assets <dir>] [--out <file>]");
                 return 2;
             }
             if (!Directory.Exists(project))
@@ -82,17 +91,24 @@ namespace PclDlSwap.PclAddonPack
             outputPath = Path.GetFullPath(outputPath);
             if (File.Exists(outputPath)) File.Delete(outputPath);
 
+            var fields = new List<string>
+            {
+                "  \"schema\": 1",
+                "  \"id\": " + Quote(id),
+                "  \"name\": " + Quote(name),
+                "  \"version\": " + Quote(version),
+                "  \"apiVersion\": " + Quote(api),
+                "  \"entry\": " + Quote(entry)
+            };
+            if (description != null) fields.Add("  \"description\": " + Quote(description));
+            AddList(fields, "shapes", shapes);
+            AddList(fields, "hostVersions", hostVersions);
+            AddList(fields, "permissions", permissions);
+
             var manifest = new StringBuilder();
             manifest.AppendLine("{");
-            manifest.AppendLine("  \"schema\": 1,");
-            manifest.AppendLine("  \"id\": " + Quote(id) + ",");
-            manifest.AppendLine("  \"name\": " + Quote(name) + ",");
-            manifest.AppendLine("  \"version\": " + Quote(version) + ",");
-            manifest.AppendLine("  \"apiVersion\": " + Quote(api) + ",");
-            manifest.AppendLine("  \"entry\": " + Quote(entry) +
-                                (description == null ? string.Empty : ","));
-            if (description != null)
-                manifest.AppendLine("  \"description\": " + Quote(description));
+            for (var index = 0; index < fields.Count; index++)
+                manifest.AppendLine(fields[index] + (index == fields.Count - 1 ? string.Empty : ","));
             manifest.AppendLine("}");
 
             using (var archive = ZipFile.Open(outputPath, ZipArchiveMode.Create))
@@ -163,6 +179,18 @@ namespace PclDlSwap.PclAddonPack
 
         private static string Quote(string value) =>
             "\"" + (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+
+        /// <summary>Adds a JSON string-array field from a comma-separated command-line value.</summary>
+        private static void AddList(List<string> fields, string key, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            var items = value
+                .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(item => item.Trim())
+                .Where(item => item.Length > 0)
+                .Select(Quote);
+            fields.Add("  \"" + key + "\": [" + string.Join(", ", items) + "]");
+        }
     }
 }
 

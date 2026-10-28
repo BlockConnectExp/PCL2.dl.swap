@@ -1346,6 +1346,26 @@ namespace PclDlSwap.ExLoaderHarness
                     "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"author\":\"harness\"," +
                     "\"description\":\"installed by the manager test\",\"permissions\":[\"host.read\"]}");
 
+                // ---- install preview: inspect without touching the store, then describe it ----
+                var inspectMethod = manager?.GetType().GetMethod("Inspect");
+                var describeMethod = manager?.GetType().GetMethod("DescribeForReview");
+                Expect("the manager can inspect a package before installing it",
+                    inspectMethod != null && describeMethod != null);
+
+                object inspected = null;
+                try { inspected = inspectMethod?.Invoke(manager, new object[] { external }); }
+                catch (Exception ex) { Console.WriteLine("[addon] inspect threw: " + SafeException(ex)); }
+                Expect("inspect reads the manifest without touching the addon store",
+                    Convert.ToString(inspected?.GetType().GetProperty("Id")?.GetValue(inspected)) == "test.installed");
+
+                var previewText = Convert.ToString(describeMethod?.Invoke(manager,
+                    new object[] { inspected, external })) ?? string.Empty;
+                Expect("the install preview names the module, its API range and its hash",
+                    previewText.Contains("test.installed") && previewText.Contains("API") &&
+                    previewText.Contains("SHA-256"));
+                Expect("the install preview repeats the declared permissions",
+                    previewText.Contains("权限声明") && previewText.Contains("host.read"));
+
                 object installed = null;
                 try
                 {

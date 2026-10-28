@@ -6,6 +6,29 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.28-19:40:00 Alpha 11: 安装前预览（信任审查）
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs          Inspect / DescribeForReview / ShortHash / 作用域判定按 manifest 重载
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs   安装流程改为「选包 → 预览确认 → 安装/更新」
+.\src\PclDlSwap.Payload\Swap\SwapHost.cs              e2e 预览钩子（PCL2SWAP_E2E_PREVIEW）
+.\src\PclDlSwap.ExLoaderHarness\Program.cs            4 项预览断言（可检视、不落盘、含 API/哈希、含权限）
+.\docs\swap-api.md                                    §11 安装语义 + e2e 环境变量
+.\src\Pcl2Swap.Shim\Shim.cpp + SwapLog.cs + Loader     版本号升 v26.0-Alpha 11
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|安装前预览|`AddonManager.Inspect` 在不落盘的前提下读包（同样的可读校验错误）；`DescribeForReview` 生成信任审查文本：名称/id/版本/API 范围/入口/作者/说明/形状作用域/宿主版本作用域/权限声明/包大小/SHA-256，作用域不符时追加「安装后不会启用」；已有同 id 时标题与文案切换为「更新（旧 → 新）」|2026.10.28-19:40:00|PCL2.dl.swap
+2|确认流程|「安装模块…」改为 选包 → 宿主原生 MyMsgBox 预览（按钮「安装」/「更新」与「取消」）→ 确认后才归档与解包；取消路径写日志（`安装模块已取消（预览阶段）`）|2026.10.28-19:40:00|PCL2.dl.swap
+3|e2e 支撑|新增 `PCL2SWAP_E2E_PREVIEW=<包>`：启动 9 秒后在宿主 UI 线程弹出同一条预览对话框，脚本可点按钮并核对返回码（1=确认，2=取消），用于真机验证预览 UI|2026.10.28-19:40:00|PCL2.dl.swap
+4|验证|harness：新增「可预览未安装的包」「预览不触碰模块目录」「预览含 API 范围与 SHA-256」「预览含权限声明」4 项断言，六套件全绿；真机 2.99.0：预览对话框原生渲染，完整列出 `形状作用域 injected、patched / 宿主版本 >=2.99.0 / 权限 host.hooks.attach、host.settings.write` 与包 SHA-256，点「取消」日志记录 `安装预览返回：2`|2026.10.28-19:40:00|PCL2.dl.swap
+
+---
 ## 2026.10.28-18:55:00 Alpha 10: 宿主版本作用域 + 安装前兼容预检
 
 GitCommitHash: tag v26.0-Alpha10（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha10.md）

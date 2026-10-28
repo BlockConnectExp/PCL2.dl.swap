@@ -350,7 +350,7 @@ handler 可以是实例委托（不再要求静态方法）；参数形状与宿
 
 | 动作 | 语义 |
 |---|---|
-| **安装模块…** | 选一个 `.swapaddon`（Windows 文件对话框）→ 校验 manifest → 归档到 `<数据根>\addons\<id>-<版本>.swapaddon` → 解包到 `<数据根>\addons\<id>\<版本>\` → 立即 `OnLoad/OnEnable`、注册页面并重建设置侧栏。**不需要重启 PCL。** |
+| **安装模块…** | 选一个 `.swapaddon`（Windows 文件对话框）→ **先弹预览确认**（名称 / id / API 范围 / 入口 / 形状与宿主版本作用域 / 权限声明 / 包大小与 SHA-256，作用域不符时当场提示"安装后不会启用"）→ 确认后校验 manifest → 归档到 `<数据根>\addons\<id>-<版本>.swapaddon` → 解包到 `<数据根>\addons\<id>\<版本>\` → 立即 `OnLoad/OnEnable`、注册页面并重建设置侧栏。**不需要重启 PCL。** |
 | **更新** | 安装同 id 的新版本 = 先停旧版、撤下它的页面，再装新版；模块自己的 `config.json` 保留。 |
 | **卸载** | `OnDisable`/`OnUnload` → 注销它注册的设置页（侧栏重建，若用户正在那一页会切回宿主默认页）→ 删除模块目录（含 `config.json`）与归档包。源包只在被复制进模块目录后才删，用户自己 Downloads 里的原文件保留。 |
 | **延迟删除** | 入口 DLL 已被 CLR 加载、文件被占用时，路径写进 `<数据根>\addons\.pending\*.txt`，下次启动先清理再扫描模块。 |
@@ -368,6 +368,7 @@ manifest 的 `shapes` / `permissions` 现在会被真正解析（Alpha 6 之前�
 ```powershell
 $env:PCL2SWAP_E2E_INSTALL   = "D:\包\demo.sample.swapaddon"   # 启动时安装（走页面同一条代码路径）
 $env:PCL2SWAP_E2E_UNINSTALL = "test.sample"                   # 可选：紧接着卸载
+$env:PCL2SWAP_E2E_PREVIEW   = "D:\包\demo.sample.swapaddon"   # 可选：9 秒后弹出安装预览对话框（脚本可点按钮验证）
 ```
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

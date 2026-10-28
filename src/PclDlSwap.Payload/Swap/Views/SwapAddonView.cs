@@ -217,6 +217,24 @@ namespace PclDlSwap.Payload.Swap.Views
                 var path = PickPackage();
                 if (string.IsNullOrEmpty(path)) return;
 
+                // Review-before-install: the manifest, the declared scope and the requested
+                // permissions are shown first, so a package never reaches the disk unannounced.
+                var manifest = addons.Inspect(path);
+                var preview = addons.DescribeForReview(manifest, path);
+                var existing = addons.Find(manifest.Id);
+                var answer = 1;
+                if (api != null)
+                {
+                    answer = api.Ui.MsgBox(preview,
+                        existing == null ? "PCL2 Swap · 安装模块" : "PCL2 Swap · 更新模块",
+                        existing == null ? "安装" : "更新", "取消");
+                }
+                if (answer != 1)
+                {
+                    SwapLog.Info("安装模块已取消（预览阶段）：" + manifest.Id);
+                    return;
+                }
+
                 var record = addons.Install(path);
                 PageRegistry.RefreshSidebar();
                 PageRegistry.InvalidatePage("swap-addons");

@@ -164,6 +164,57 @@ namespace PclDlSwap.Payload.Swap
         }
 
         /// <summary>
+        /// Reads a package without touching the addon store, so the install dialog can show what the
+        /// user is about to trust (id, version, API range, declared scope, requested permissions).
+        /// Throws the same readable errors as an install when the package is not usable.
+        /// </summary>
+        public AddonManifest Inspect(string archivePath)
+        {
+            if (string.IsNullOrWhiteSpace(archivePath) || !File.Exists(archivePath))
+                throw new FileNotFoundException("找不到模块包：" + archivePath);
+            return ReadManifest(archivePath);
+        }
+
+        /// <summary>Builds the install/update preview shown before a package is written to disk.</summary>
+        public string DescribeForReview(AddonManifest manifest, string archivePath)
+        {
+            if (manifest == null) throw new ArgumentNullException(nameof(manifest));
+            var existing = Find(manifest.Id);
+
+            var text = new StringBuilder();
+            text.AppendLine(existing == null
+                ? "即将安装这个模块："
+                : $"即将更新这个模块（{existing.Version} → {manifest.Version}）：");
+            text.AppendLine();
+            text.AppendLine("  名称：" + (string.IsNullOrEmpty(manifest.Name) ? manifest.Id : manifest.Name) +
+                            "  " + manifest.Version);
+            text.AppendLine("  id：" + manifest.Id);
+            text.AppendLine("  API：" + manifest.ApiVersion);
+            text.AppendLine("  入口：" + manifest.Entry);
+            if (!string.IsNullOrEmpty(manifest.Author)) text.AppendLine("  作者：" + manifest.Author);
+            if (!string.IsNullOrEmpty(manifest.Description)) text.AppendLine("  说明：" + manifest.Description);
+            if (manifest.Shapes != null && manifest.Shapes.Count > 0)
+                text.AppendLine("  形状作用域：" + string.Join("、", manifest.Shapes));
+            if (manifest.HostVersions != null && manifest.HostVersions.Count > 0)
+                text.AppendLine("  宿主版本：" + string.Join("、", manifest.HostVersions));
+            text.AppendLine("  权限声明：" + (manifest.Permissions == null || manifest.Permissions.Count == 0
+                ? "（未声明 —— 按兼容模式获得全部访问）"
+                : string.Join("、", manifest.Permissions)));
+            text.AppendLine();
+            text.AppendLine("  包文件：" + Path.GetFileName(archivePath) +
+                            "（" + new FileInfo(archivePath).Length + " 字节）");
+            text.AppendLine("  SHA-256：" + ShortHash(archivePath));
+
+            // State the scope mismatch before anything is written to disk.
+            if (!IsInScope(manifest, out _, out var scopeReason))
+            {
+                text.AppendLine();
+                text.AppendLine("  注意：" + scopeReason + " —— 安装后不会启用。");
+            }
+            return text.ToString();
+        }
+
+        /// <summary>
         /// Removes a module: stop it, drop its settings pages, delete the store copy and the
         /// unpacked files. A loaded entry assembly keeps its DLL locked for the rest of the
         /// process, so anything still locked is queued for deletion at the next start instead of
@@ -391,11 +442,13 @@ namespace PclDlSwap.Payload.Swap
         /// declares neither runs everywhere; otherwise the host has to be inside the declared range
         /// for the module to start (it is skipped with a status, never marked as failed).
         /// </summary>
-        private bool IsInScope(AddonRecord record, out string status, out string reason)
+        private bool IsInScope(AddonRecord record, out string status, out string reason) =>
+            IsInScope(record?.Manifest, out status, out reason);
+
+        private bool IsInScope(AddonManifest manifest, out string status, out string reason)
         {
             status = null;
             reason = null;
-            var manifest = record.Manifest;
             if (manifest == null) return true;
 
             var shapes = manifest.Shapes;
@@ -418,7 +471,7 @@ namespace PclDlSwap.Payload.Swap
                 var hostVersion = HostPclVersion;
                 if (string.IsNullOrEmpty(hostVersion))
                 {
-                    SwapLog.Warn($"模块 {record.Id} 声明了宿主版本作用域，但读不到宿主版本，按放行处理。");
+                    SwapLog.Warn($"模块 {manifest.Id} 声明了宿主版本作用域，但读不到宿主版本，按放行处理。");
                     return true;
                 }
                 if (!HostVersionMatches(hostVersions, hostVersion))
@@ -489,6 +542,26 @@ namespace PclDlSwap.Payload.Swap
             var value = text.Trim();
             var cut = value.IndexOfAny(new[] { '-', '+', ' ' });
             return cut > 0 ? value.Substring(0, cut) : value;
+        }
+
+        /// <summary>Full SHA-256 of a package, shown in the install preview so the user can verify it.</summary>
+        private static string ShortHash(string path)
+        {
+            try
+            {
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                using (var stream = File.OpenRead(path))
+                {
+                    var hash = sha.ComputeHash(stream);
+                    var text = new StringBuilder(hash.Length * 2);
+                    foreach (var value in hash) text.Append(value.ToString("x2"));
+                    return text.ToString();
+                }
+            }
+            catch (Exception ex)
+            {
+                return "(无法计算：" + ex.Message + ")";
+            }
         }
 
         // ------------------------------------------------------------------ module state

@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Threading;
 using PCL2Swap.Api;
 using PclDlSwap.Payload.Host;
 
@@ -79,6 +80,36 @@ namespace PclDlSwap.Payload.Swap
                         SwapLog.Info("[e2e] 卸载结果：" + Addons.Uninstall(uninstall));
                         PageRegistry.RefreshSidebar();
                     }
+                }
+
+                // Preview dialog (the install button's first half): shown once the launcher window
+                // exists, so a scripted run can confirm the review text and the confirm buttons.
+                var preview = Environment.GetEnvironmentVariable("PCL2SWAP_E2E_PREVIEW");
+                if (!string.IsNullOrWhiteSpace(preview) && Addons != null)
+                {
+                    var worker = new Thread(() =>
+                    {
+                        try { Thread.Sleep(9000); } catch { }
+                        try
+                        {
+                            SwapLog.Info("[e2e] 打开安装预览（PCL2SWAP_E2E_PREVIEW）：" + preview);
+                            var manifest = Addons.Inspect(preview);
+                            var text = Addons.DescribeForReview(manifest, preview);
+                            var answer = Api?.Ui.MsgBox(text,
+                                Addons.Find(manifest.Id) == null ? "PCL2 Swap · 安装模块" : "PCL2 Swap · 更新模块",
+                                "安装", "取消") ?? 1;
+                            SwapLog.Info("[e2e] 安装预览返回：" + answer);
+                        }
+                        catch (Exception ex)
+                        {
+                            SwapLog.Error("[e2e] 安装预览失败：" + ex);
+                        }
+                    })
+                    {
+                        IsBackground = true,
+                        Name = "PCL2Swap.E2ePreview"
+                    };
+                    worker.Start();
                 }
             }
             catch (Exception ex)

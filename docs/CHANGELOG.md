@@ -8,7 +8,7 @@
 ---
 ## 2026.10.28-08:35:00 Alpha 6: 设置子页面加固 + 页面度量对齐原生 + 补丁形状落地
 
-GitCommitHash: (unreleased)
+GitCommitHash: tag v26.0-Alpha6（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha6.md）
 
 ChangedFiles:
 ```
@@ -33,7 +33,7 @@ Num|File Name|Change Description|Change Time|Changer
 ---
 ## 2026.10.28-06:20:00 Alpha 6: out-of-the-box module settings
 
-GitCommitHash: (unreleased)
+GitCommitHash: tag v26.0-Alpha6（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha6.md）
 
 ChangedFiles:
 ```
@@ -56,7 +56,7 @@ Num|File Name|Change Description|Change Time|Changer
 ---
 ## 2026.10.28-06:00:00 Alpha 6: native-look page builders in the SDK
 
-GitCommitHash: (unreleased)
+GitCommitHash: tag v26.0-Alpha6（发布说明见 docs/RELEASE-NOTES-v26.0-Alpha6.md）
 
 ChangedFiles:
 ```

@@ -6,6 +6,35 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-02:20:00 v26.1-Alpha 3: WinUI 注入器 + 2.99.0.1 全量回归
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\tools\Pcl2Swap.Injector\                         新项目：WinUI 3 注入器（GUI + CLI）
+.\scripts\build-injector.ps1                       注入器打包脚本（self-contained + shim 种子）
+.\docs\injector.zh.md                              注入器使用说明
+.\docs\compat-matrix.zh.md                         宿主兼容矩阵（2.99.0 / 2.99.0.1）
+.\docs\versioning.md                               Release Checklist 增加注入器条目
+.\src\Pcl2Swap.Shim\Shim.cpp                       版本号升 v26.1-Alpha 3
+.\src\PclDlSwap.Loader\Program.cs                  版本号升 v26.1-Alpha 3
+.\src\PclDlSwap.Payload\Host\SwapLog.cs            版本号升 v26.1-Alpha 3
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|注入器（目标）|自动枚举运行中的 PCL2，读取文件版本/MVID/SHA-256 并按 `offset-manifest.json` 判定兼容性；支持手动选择可执行文件走「启动并注入」|2026.10.31-02:20:00|PCL2.dl.swap
+2|注入器（注入包）|通过 `gh api` 拉取 Releases 与 Release Note（轻量 markdown 渲染含图片）；随附 shim 优先、离线可用，其它版本按需下载并缓存到 `%LOCALAPPDATA%\PCL2Swap\Injector\shims\<tag>`|2026.10.31-02:20:00|PCL2.dl.swap
+3|注入器（注入）|复用 shim 的 `LoadLibraryW` 注入；启动路径等待主窗口出现后再注入以规避 CLR 未就绪；注入后轮询 `%TEMP%\PCL2Swap\*\pcl2swap.log` 验证「宿主匹配」|2026.10.31-02:20:00|PCL2.dl.swap
+4|注入器（失败）|失败对话框支持「提交 Issue」（`gh issue create`，附目标指纹/失败阶段/日志尾部）与「复制详情」；gh 不可用时保存到 `文档\PCL2Swap\reports\`|2026.10.31-02:20:00|PCL2.dl.swap
+5|注入器（CLI）|`--cli list` / `--cli inject --pid/--exe [--release/--shim] [--wait]`；退出码 0/1/2，输出 tee 到 `%TEMP%\pcl2swap-cli-last.txt`|2026.10.31-02:20:00|PCL2.dl.swap
+6|注入器（打包）|`scripts\build-injector.ps1` 产出 `PCL2.dl.swap-Injector-<ver>.zip`，内含 self-contained 运行时、`shim\`（与 ExLoader 同源）和 `data\offset-manifest.json`|2026.10.31-02:20:00|PCL2.dl.swap
+7|兼容矩阵|`docs\compat-matrix.zh.md` 记录 2.99.0.0（413）/ 2.99.0.1（415）的 MVID、验证状态与 2.99.0.1 四处历史坑位的修复方式|2026.10.31-02:20:00|PCL2.dl.swap
+8|验证|2.99.0.1 真机：注入自检 `ok=30 fail=0`；下载页侧栏恢复/关于页品牌卡/反馈分流/Swap Addon 与 Swap Settings 子页全部通过；注入器「运行中注入」与「启动并注入」两条路径均成功并完成日志验证|2026.10.31-02:20:00|PCL2.dl.swap
+
+---
 ## 2026.10.29-03:35:00 v26.1-Alpha 2: 包信任链（签名 + 负载哈希 + 版本级告警）
 
 GitCommitHash: (unreleased)

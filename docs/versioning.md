@@ -84,5 +84,9 @@ release file : PCL2.dl.swap-v26.0-Alpha1.zip
 7. Release notes carry screenshots: upload the PNGs as release assets and reference them by their
    `https://github.com/BlockConnectExp/PCL2.dl.swap/releases/download/<tag>/<file>` URL (imgur is not
    used - it is unreachable from the build host).
+8. Every release ships the injector: run `scripts/build-injector.ps1 -ToolVersion <ver>` and attach
+   `dist/PCL2.dl.swap-Injector-<ver>.zip` next to the shim pair.
+9. `docs/compat-matrix.zh.md` lists the host builds exercised for this release; a host that is not in
+   the matrix must be marked as untested in the release notes instead of being advertised as supported.
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

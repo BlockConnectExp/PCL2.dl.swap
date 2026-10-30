@@ -6,6 +6,30 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-05:00:00 v26.1-Alpha 9: Addon 模板工程与生命周期修复
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\examples\demo-addon\                     新目录：可编译的完整示例 Addon
+.\docs\addon-template.zh.md                模板使用文档
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs  更新暂存/序号目录修复
+.\src\PclDlSwap.Payload\Swap\SwapHost.cs    E2E 卸载钩子独立化
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs    临时探针目录清理
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|模板工程|`examples/demo-addon`：net48+WPF、参考 SDK、`build.ps1` 打包；覆盖两类页面/控件/双语/持久化/Clipboard/Shell/严格权限|2026.10.31-05:00:00|PCL2.dl.swap
+2|更新修复|同版本更新时新归档被 Retire 删除 → 先复制到 `.installing` 暂存，卸载后落正式归档名|2026.10.31-05:00:00|PCL2.dl.swap
+3|热更新修复|旧 DLL 被 CLR 锁定导致解包冲突 → 自动使用 `1.0.0-2/-3` 目录，旧目录排队延后删除|2026.10.31-05:00:00|PCL2.dl.swap
+4|E2E 修复|`PCL2SWAP_E2E_UNINSTALL` 独立于安装分支执行，并刷新设置/更多两个侧栏|2026.10.31-05:00:00|PCL2.dl.swap
+5|自检清理|权限探针创建的自检目录在 finally 中删除|2026.10.31-05:00:00|PCL2.dl.swap
+6|验证|安装 launch #1 → 同版本更新 launch #2（目录 1.0.0-2，无异常）→ 卸载结果 True（102/200 注销）→ 重启清理后只剩内置模块；每轮 ok=45 fail=0|2026.10.31-05:00:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-04:30:00 v26.1-Alpha 8: 英文覆盖深化（帮助/关于/下载页）
 
 GitCommitHash: (unreleased)

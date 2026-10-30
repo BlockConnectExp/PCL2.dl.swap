@@ -123,6 +123,17 @@ namespace PclDlSwap.Payload.Swap
                 {
                     return "blocked";
                 }
+                finally
+                {
+                    try
+                    {
+                        var probeDir = System.IO.Path.Combine(
+                            SwapPaths.AddonsDirectory, "selftest.perms.scoped");
+                        if (System.IO.Directory.Exists(probeDir))
+                            System.IO.Directory.Delete(probeDir, true);
+                    }
+                    catch { }
+                }
             });
             if (Environment.GetEnvironmentVariable("PCL2SWAP_SELFTEST_MORE") == "1")
             {

@@ -298,15 +298,50 @@ namespace PclDlSwap.Payload.Swap
                                                         : "（" + trust.Problems[0] + "）"));
 
             var existing = Find(manifest.Id);
+            string staging = null;
             if (existing != null)
             {
                 if (existing.BuiltIn)
                     throw new InvalidOperationException($"“{manifest.Id}”是内置模块，不能被同名包覆盖。");
                 SwapLog.Info($"Addon 更新：{manifest.Id} {existing.Version} -> {manifest.Version}");
+                // A same-id update can point at the exact archive path we just copied into the
+                // store; stage a private copy first so Retire() cannot delete the bytes we are
+                // about to unpack (field bug: demo.sample 1.0.0 -> 1.0.0 erased its own package).
+                staging = storeCopy + ".installing";
+                File.Copy(storeCopy, staging, true);
                 Retire(existing, removeArchive: true, keepSavedState: true);
+                storeCopy = staging;
             }
 
-            var record = Unpack(storeCopy, manifest);
+            AddonRecord record;
+            try
+            {
+                record = Unpack(storeCopy, manifest);
+            }
+            catch
+            {
+                try { if (staging != null && File.Exists(staging)) File.Delete(staging); } catch { }
+                throw;
+            }
+
+            if (staging != null)
+            {
+                // Retire removed the old store copy; move the staged package back under its
+                // canonical name so later scans and uninstalls see a stable archive path.
+                var finalArchive = Path.GetFullPath(Path.Combine(SwapPaths.AddonsDirectory,
+                    SwapPaths.Sanitize(manifest.Id + "-" + (manifest.Version ?? "0")) + ".swapaddon"));
+                try
+                {
+                    if (File.Exists(finalArchive)) File.Delete(finalArchive);
+                    File.Move(staging, finalArchive);
+                    record.ArchivePath = finalArchive;
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("Addon 更新后的归档整理失败（模块仍可用）：" + ex.Message);
+                }
+            }
+
             record.SourcePath = Path.GetFullPath(archivePath);
             record.InstalledAtUtc = DateTime.UtcNow;
             record.Signature = trust.Summary;
@@ -1022,8 +1057,39 @@ namespace PclDlSwap.Payload.Swap
                 Status = "unpacked"
             };
 
-            var targetRoot = Path.GetFullPath(Path.Combine(SwapPaths.AddonDirectory(manifest.Id),
+            var baseRoot = Path.GetFullPath(Path.Combine(SwapPaths.AddonDirectory(manifest.Id),
                 SwapPaths.Sanitize(manifest.Version ?? "0")));
+            var targetRoot = baseRoot;
+            try
+            {
+                // A hot update cannot unload the old assembly, so its directory can still be
+                // locked after Retire queued it for deletion. Unpacking over it would fail with
+                // "DemoAddon.dll is being used by another process"; use a sibling versioned
+                // directory instead and let the pending-removal pass clean the old one.
+                if (Directory.Exists(baseRoot) && Directory.GetFileSystemEntries(baseRoot).Length > 0)
+                {
+                    var suffix = 2;
+                    while (true)
+                    {
+                        var candidate = baseRoot + "-" + suffix;
+                        if (!Directory.Exists(candidate) ||
+                            Directory.GetFileSystemEntries(candidate).Length == 0)
+                        {
+                            targetRoot = candidate;
+                            break;
+                        }
+
+                        suffix++;
+                    }
+
+                    SwapLog.Warn($"Addon 版本目录被旧实例占用，改用 {targetRoot}（旧目录排队延后删除）。");
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("Addon 版本目录探测失败，仍使用默认路径：" + ex.Message);
+            }
+
             Directory.CreateDirectory(targetRoot);
 
             using (var zip = ZipFile.OpenRead(archive))

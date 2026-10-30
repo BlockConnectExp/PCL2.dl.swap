@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>DemoAddon</AssemblyName>
+    <RootNamespace>DemoAddon</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- Point this at a built PCL2Swap.Api.dll; the default matches the repository layout. -->
+    <ApiPath Condition="'$(ApiPath)' == ''">$(MSBuildThisFileDirectory)..\..\src\PCL2Swap.Api\bin\Release\net48\PCL2Swap.Api.dll</ApiPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="PCL2Swap.Api">
+      <HintPath>$(ApiPath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

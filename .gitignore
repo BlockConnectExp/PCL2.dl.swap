@@ -22,3 +22,6 @@ test/
 samples/
 _scratch/
 *.bundle
+
+# addon packages built by the demo/template projects
+*.swapaddon

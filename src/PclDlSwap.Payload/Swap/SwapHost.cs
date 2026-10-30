@@ -75,13 +75,18 @@ namespace PclDlSwap.Payload.Swap
                     var record = Addons.Install(install);
                     SwapLog.Info($"[e2e] 安装结果：{record.Id} {record.Version} 状态={record.Status}");
                     PageRegistry.RefreshSidebar();
-                    var uninstall = Environment.GetEnvironmentVariable("PCL2SWAP_E2E_UNINSTALL");
-                    if (!string.IsNullOrWhiteSpace(uninstall))
-                    {
-                        SwapLog.Info("[e2e] 立即卸载（PCL2SWAP_E2E_UNINSTALL）：" + uninstall);
-                        SwapLog.Info("[e2e] 卸载结果：" + Addons.Uninstall(uninstall));
-                        PageRegistry.RefreshSidebar();
-                    }
+                }
+
+                // Uninstall is deliberately independent of install: a cleanup run sets only
+                // PCL2SWAP_E2E_UNINSTALL (the old nested form silently skipped it).
+                var uninstall = Environment.GetEnvironmentVariable("PCL2SWAP_E2E_UNINSTALL");
+                if (!string.IsNullOrWhiteSpace(uninstall) && Addons != null)
+                {
+                    SwapLog.Info("[e2e] 卸载模块（PCL2SWAP_E2E_UNINSTALL）：" + uninstall);
+                    var ok = Addons.Uninstall(uninstall);
+                    SwapLog.Info("[e2e] 卸载结果：" + ok);
+                    PageRegistry.RefreshSidebar();
+                    MorePageRegistry.RefreshSidebar();
                 }
 
                 // Preview dialog (the install button's first half): shown once the launcher window

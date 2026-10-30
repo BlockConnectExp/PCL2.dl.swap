@@ -6,6 +6,25 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-04:30:00 v26.1-Alpha 8: 英文覆盖深化（帮助/关于/下载页）
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\I18n.cs   新增约 40 条词条与短语（帮助/关于/下载/常规设置/登录）
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|帮助页英文|Guides 三卡（Minecraft guide / Modpack guide / Resource install guide）及描述、Search help|2026.10.31-04:30:00|PCL2.dl.swap
+2|关于页英文|开发者/协力开发者说明、Check for updates、Sponsor PCL!、Special thanks 鸣谢行与按钮（Sponsor mirror / Open wiki / MCIM homepage）|2026.10.31-04:30:00|PCL2.dl.swap
+3|动态短语|最新正式版/预览版「发布于」行、Swap 卡描述（Version … · Download restore…）、当前版本行、BMCLAPI/MCIM 鸣谢行|2026.10.31-04:30:00|PCL2.dl.swap
+4|常规词汇|常规/高级/主题/深色/浅色/正版登录/离线登录/用户名/密码/登录/更多设置/启动器设置/游戏设置|2026.10.31-04:30:00|PCL2.dl.swap
+5|验证|2.99.0.1 真机：Help/About 页面英文化截图；I18n.Roundtrip 保持通过|2026.10.31-04:30:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-03:55:00 v26.1-Alpha 7: 权限 opt-in 严格门控
 
 GitCommitHash: (unreleased)

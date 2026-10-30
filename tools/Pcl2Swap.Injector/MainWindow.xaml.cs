@@ -18,7 +18,7 @@ namespace Pcl2Swap.Injector;
 
 public sealed partial class MainWindow : Window
 {
-    private static readonly string InjectorVersion = "v26.1-Alpha 7";
+    private static readonly string InjectorVersion = "v26.1-Alpha 8";
 
     private readonly List<TargetInfo> _targets = new();
     private readonly List<ReleaseInfo> _releases = new();

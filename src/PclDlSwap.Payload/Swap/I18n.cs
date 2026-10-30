@@ -78,6 +78,11 @@ namespace PclDlSwap.Payload.Swap
             var updated = text;
             foreach (var pair in PhraseEnglish)
                 updated = updated.Replace(pair.Key, pair.Value);
+
+            // Version rows keep Chinese full-width parentheses around numbers ("（415.50）");
+            // in English mode normalise just those numeric groups, leaving prose untouched.
+            updated = System.Text.RegularExpressions.Regex.Replace(
+                updated, "（(\\d+(?:\\.\\d+)*)）", "($1)");
             return updated;
         }
 

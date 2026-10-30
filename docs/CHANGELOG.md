@@ -6,6 +6,26 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-05:20:00 v26.1: 正式版（Alpha 1-10 汇总）
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\I18n.cs                    版本号全角括号在英文模式下归一化
+.\src\PclDlSwap.ExLoaderHarness\Program.cs             新增 zip-slip 防御断言
+.\docs\RELEASE-NOTES-v26.1.md                          正式版汇总说明
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|zip-slip 防御|harness 新增断言：包内 `../evil.txt` 不会写出到模块目录之外（Unpack 的越界路径检查已被覆盖测试）|2026.10.31-05:20:00|PCL2.dl.swap
+2|英文版本行|英文模式下把数字全角括号 `（415.50）` 归一化为 `(415.50)`，其余中文标点不动|2026.10.31-05:20:00|PCL2.dl.swap
+3|正式发布|版本号升 v26.1（非 Alpha），Release 作为正式版发布；汇总 Alpha 1-10 能力与验证矩阵|2026.10.31-05:20:00|PCL2.dl.swap
+4|验证|harness 六套件 PASS（含 zip-slip）；2.99.0.0/2.99.0.1 真机 `ok=45 fail=0`；Swap Settings 显示 Host version v26.1|2026.10.31-05:20:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-05:00:00 v26.1-Alpha 9: Addon 模板工程与生命周期修复
 
 GitCommitHash: (unreleased)

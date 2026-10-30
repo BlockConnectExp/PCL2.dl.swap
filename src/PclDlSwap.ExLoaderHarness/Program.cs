@@ -1519,6 +1519,28 @@ namespace PclDlSwap.ExLoaderHarness
                 catch (TargetInvocationException) { refusedTamper = true; }
                 Expect("a tampered package is refused at install", refusedTamper);
 
+                // Zip-slip: an entry escaping the module folder must never be written.
+                var slipOut = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapSlip-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                using (var zip = ZipFile.Open(slipOut, ZipArchiveMode.Create))
+                {
+                    WriteZipEntry(zip, "manifest.json", Encoding.UTF8.GetBytes(
+                        "{\"schema\":1,\"id\":\"test.slip\",\"name\":\"Slip\",\"version\":\"1.0.0\"," +
+                        "\"apiVersion\":\">=1.0 <2.0\",\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\"}"));
+                    WriteZipEntry(zip, "../evil.txt", Encoding.UTF8.GetBytes("escaped"));
+                    zip.CreateEntryFromFile(
+                        typeof(PCL2Swap.SampleAddon.SampleAddon).Assembly.Location, "SampleAddon.dll");
+                }
+                install?.Invoke(manager, new object[] { slipOut, true });
+                var escapedPaths = new[]
+                {
+                    Path.Combine(addonRoot, "test.slip", "evil.txt"),
+                    Path.Combine(addonRoot, "evil.txt"),
+                    Path.Combine(Path.GetDirectoryName(addonRoot) ?? addonRoot, "evil.txt")
+                };
+                Expect("zip-slip entries never escape the module folder",
+                    !escapedPaths.Any(File.Exists));
+
                 object installed = null;
                 try
                 {

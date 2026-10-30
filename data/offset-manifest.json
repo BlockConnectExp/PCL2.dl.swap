@@ -147,6 +147,35 @@
         "PCL.PageDownloadInstall.LoaderInit": "0x2df48",
         "PCL.PageDownloadLeft..ctor": "0x64beb"
       }
+    },
+    {
+      "id": "v2128-rel410",
+      "role": "extraction-baseline",
+      "buildType": "Release",
+      "version": "2.12.8.1",
+      "versionCode": 410,
+      "file": "Plain Craft Launcher 2.exe",
+      "sha256": "d4f3e8f789cfd449ae9902ccadbadf5f35f3ac1b88793db37db5744cfd158fac",
+      "mvid": "8558c9c3-b0f8-4e5c-8944-969432ccfb74",
+      "evidence": "data/methods-v2128-rel410.tsv",
+      "tokens": {
+        "PCL.ModSecret.UpdateStart": "0x06000419",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x06000420",
+        "PCL.ModSecret.UpdateCheckByButton": "0x06000418",
+        "PCL.ModSecret.UpdateRestart": "0x0600041a",
+        "PCL.ModSecret.UpdateReplace": "0x0600041b",
+        "PCL.PageDownloadInstall.LoaderInit": "0x0600050c",
+        "PCL.PageDownloadLeft..ctor": "0x06000bd6"
+      },
+      "rva": {
+        "PCL.ModSecret.UpdateStart": "0x268f4",
+        "PCL.ModSecret.get_HasUpdatePermission": "0x280ed",
+        "PCL.ModSecret.UpdateCheckByButton": "0x26820",
+        "PCL.ModSecret.UpdateRestart": "0x26a78",
+        "PCL.ModSecret.UpdateReplace": "0x26bb4",
+        "PCL.PageDownloadInstall.LoaderInit": "0x308ac",
+        "PCL.PageDownloadLeft..ctor": "0x64373"
+      }
     }
   ]
 }

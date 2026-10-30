@@ -6,6 +6,28 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-07:30:00 v26.2-Alpha 5: PCL 2.12.8.1 REA 基线
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\data\offset-manifest.json              新增 v2128-rel410（extraction-baseline）
+.\data\methods-v2128-rel410.tsv          全量方法表（6063 行）
+.\data\pcl-surface-2.12.8.json           全量 API 面（311 类型）
+.\tools\MethodDump\                      新工具：方法表导出
+.\docs\REA-2.12.8-baseline.md             REA 基线文档
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|2.12.8 基线|只读复制 owner 赞助版 2.12.8.1；SHA d4f3e8f7…、MVID 8558c9c3…；role extraction-baseline|2026.10.31-07:30:00|PCL2.dl.swap
+2|偏移清单|7 个关键方法 token/RVA 写入 manifest（UpdateStart 0x06000419 @0x268f4 等）|2026.10.31-07:30:00|PCL2.dl.swap
+3|工具|新增 `tools/MethodDump`，导出 token/RID/RVA/签名/标志的 TSV|2026.10.31-07:30:00|PCL2.dl.swap
+4|验证|harness --manifest：2.12.8 / 2.99.0 / 2.99.0.1 全部 PASS|2026.10.31-07:30:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-07:05:00 v26.2-Alpha 4: 索引签名校验
 
 GitCommitHash: (unreleased)

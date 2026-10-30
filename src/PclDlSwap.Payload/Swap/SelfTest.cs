@@ -111,6 +111,10 @@ namespace PclDlSwap.Payload.Swap
                     ? "ok"
                     : "modules=" + snapshot.Modules.Count + " error=" + (snapshot.Error ?? "(none)");
             });
+            Probe("仓库.版本比较", () =>
+                AddonRepository.CompareVersion("v26.0-Alpha 4", "v26.0-Alpha 3") > 0 &&
+                AddonRepository.CompareVersion("v1.0.0", "v1.0.0") == 0 &&
+                AddonRepository.CompareVersion("v1.0.0", "v1.1.0") < 0);
             Probe("权限.宽松(内置)", () =>
                 SwapHost.Addons.HasPermission("swap.download-mc", "hooks"));
             Probe("权限.严格判定", () =>

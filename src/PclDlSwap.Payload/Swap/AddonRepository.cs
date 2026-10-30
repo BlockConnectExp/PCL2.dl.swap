@@ -27,6 +27,10 @@ namespace PclDlSwap.Payload.Swap
 
         private static readonly object Gate = new object();
         private static Snapshot _current = new Snapshot();
+        private static readonly TimeSpan AutoRefreshAfter = TimeSpan.FromMinutes(30);
+
+        /// <summary>Last successfully downloaded index, kept for offline starts.</summary>
+        private static string CachePath => Path.Combine(SwapPaths.DataRoot, "repo", "addons-index.json");
 
         public sealed class RepoModule
         {
@@ -56,11 +60,29 @@ namespace PclDlSwap.Payload.Swap
         }
 
         /// <summary>Starts a background refresh; the callback runs on the caller's thread.</summary>
-        public static void RefreshAsync(Action<Snapshot> done = null)
+        public static void RefreshAsync(Action<Snapshot> done = null) => RefreshAsync(false, done);
+
+        /// <summary>
+        /// Refreshes the index. A snapshot younger than 30 minutes is returned immediately unless
+        /// <paramref name="force"/> is set (the page's Refresh button forces a network load).
+        /// </summary>
+        public static void RefreshAsync(bool force, Action<Snapshot> done = null)
         {
             lock (Gate)
             {
                 if (_current.Loading) return;
+                if (!force && _current.LoadedAt.HasValue &&
+                    DateTime.UtcNow - _current.LoadedAt.Value < AutoRefreshAfter)
+                {
+                    var fresh = _current;
+                    if (done != null)
+                    {
+                        try { done(fresh); } catch { }
+                    }
+
+                    return;
+                }
+
                 _current = new Snapshot
                 {
                     Modules = _current.Modules,
@@ -107,15 +129,71 @@ namespace PclDlSwap.Payload.Swap
                 {
                     http.DefaultRequestHeaders.UserAgent.ParseAdd("Pcl2Swap.Payload");
                     var json = http.GetStringAsync(url).GetAwaiter().GetResult();
-                    return Parse(json, url);
+                    var snapshot = Parse(json, url);
+                    if (snapshot.Error == null && snapshot.Modules.Count > 0)
+                    {
+                        try
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(CachePath) ?? SwapPaths.DataRoot);
+                            File.WriteAllText(CachePath, json, new UTF8Encoding(false));
+                        }
+                        catch (Exception ex)
+                        {
+                            SwapLog.Warn("[repo] 索引缓存写入失败：" + ex.Message);
+                        }
+                    }
+
+                    return snapshot;
                 }
             }
             catch (Exception ex)
             {
-                var snapshot = LoadBundled();
-                snapshot.Error = "仓库索引下载失败（已使用内置索引）：" + ex.Message;
+                var snapshot = LoadCache();
+                if (snapshot.Modules.Count == 0) snapshot = LoadBundled();
+                snapshot.Error = "仓库索引下载失败（已使用本地/内置索引）：" + ex.Message;
                 return snapshot;
             }
+        }
+
+        /// <summary>Disk cache written by the last successful online load.</summary>
+        public static Snapshot LoadCache()
+        {
+            try
+            {
+                if (!File.Exists(CachePath)) return new Snapshot();
+                var snapshot = Parse(File.ReadAllText(CachePath), "磁盘缓存");
+                snapshot.FromDisk = true;
+                return snapshot;
+            }
+            catch (Exception ex)
+            {
+                return new Snapshot { Error = "缓存索引读取失败：" + ex.Message };
+            }
+        }
+
+        /// <summary>
+        /// Numeric segment comparison for "v26.0-Alpha 4" / "2.99.0.1". Returns &gt;0 when
+        /// <paramref name="left"/> is newer.
+        /// </summary>
+        public static int CompareVersion(string left, string right)
+        {
+            int[] Numbers(string value) =>
+                System.Text.RegularExpressions.Regex.Matches(value ?? string.Empty, "\\d+")
+                    .Cast<System.Text.RegularExpressions.Match>()
+                    .Select(match => int.TryParse(match.Value, out var number) ? number : 0)
+                    .ToArray();
+
+            var a = Numbers(left);
+            var b = Numbers(right);
+            var length = Math.Max(a.Length, b.Length);
+            for (var i = 0; i < length; i++)
+            {
+                var x = i < a.Length ? a[i] : 0;
+                var y = i < b.Length ? b[i] : 0;
+                if (x != y) return x.CompareTo(y);
+            }
+
+            return 0;
         }
 
         public static Snapshot Parse(string json, string source = null)

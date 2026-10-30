@@ -513,8 +513,15 @@ namespace PclDlSwap.Payload.Swap.Views
             foreach (var module in snapshot.Modules)
             {
                 var installed = addons?.Find(module.Id);
+                var updateAvailable = installed != null &&
+                                      AddonRepository.CompareVersion(module.Version, installed.Version) > 0;
                 var title = module.Name + "  " + module.Version +
-                            (installed != null ? "  ·  " + i18n.T("已安装", "installed") : string.Empty);
+                            (installed != null
+                                ? updateAvailable
+                                    ? "  ·  " + i18n.T("可更新（已装 " + installed.Version + "）",
+                                        "update available (installed " + installed.Version + ")")
+                                    : "  ·  " + i18n.T("已安装", "installed")
+                                : string.Empty);
                 var row = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
                 row.Children.Add(SwapUi.Text(title, 13, false, false));
                 var meta = module.Author ?? string.Empty;
@@ -527,7 +534,9 @@ namespace PclDlSwap.Payload.Swap.Views
                 {
                     SwapUi.Button(installed == null
                             ? i18n.T("一键安装", "Install")
-                            : i18n.T("重新安装", "Reinstall"),
+                            : updateAvailable
+                                ? i18n.T("更新", "Update")
+                                : i18n.T("重新安装", "Reinstall"),
                         () => InstallFromRepository(api, addons, module))
                 };
                 if (!string.IsNullOrEmpty(module.Project))
@@ -540,7 +549,7 @@ namespace PclDlSwap.Payload.Swap.Views
             rows.Add(SwapUi.Buttons(
                 SwapUi.Button(i18n.T("刷新仓库", "Refresh repository"), () =>
                 {
-                    AddonRepository.RefreshAsync(_ =>
+                    AddonRepository.RefreshAsync(true, _ =>
                         PclUi.OnUiThread(() => PageRegistry.InvalidatePage("swap-addons")));
                     PageRegistry.InvalidatePage("swap-addons");
                 }),
@@ -557,18 +566,61 @@ namespace PclDlSwap.Payload.Swap.Views
             api?.Ui?.Hint(i18n.T("正在下载模块…", "Downloading module..."));
             var worker = new Thread(() =>
             {
-                var record = AddonRepository.Install(module, out var error);
+                var path = AddonRepository.Download(module, out var error);
+                if (path == null)
+                {
+                    PclUi.OnUiThread(() =>
+                        api?.Ui?.Hint((i18n.IsEnglish ? "Install failed: " : "安装失败：") + error));
+                    return;
+                }
+
+                AddonManager.PackageReview review;
+                try
+                {
+                    review = SwapHost.Addons.Review(path);
+                }
+                catch (Exception ex)
+                {
+                    PclUi.OnUiThread(() =>
+                        api?.Ui?.Hint((i18n.IsEnglish ? "Package rejected: " : "安装包被拒绝：") + ex.Message));
+                    return;
+                }
+
+                var manifest = review.Manifest;
                 PclUi.OnUiThread(() =>
                 {
-                    if (record == null)
+                    var text = (i18n.IsEnglish ? "Install " : "安装 ") +
+                               manifest.Name + " " + manifest.Version + "\n" +
+                               (i18n.IsEnglish ? "Permissions: " : "权限：") +
+                               (manifest.Permissions == null || manifest.Permissions.Count == 0
+                                   ? i18n.T("（未声明 —— 兼容模式）", "(none - compatibility mode)")
+                                   : string.Join(", ", manifest.Permissions)) + "\n" +
+                               (i18n.IsEnglish ? "Trust: " : "信任：") + review.Trust.Summary;
+                    var answer = api.Ui.MsgBox(text,
+                        i18n.T("安装模块", "Install module"),
+                        i18n.T("安装", "Install"), i18n.T("取消", "Cancel"));
+                    if (answer != 1)
                     {
-                        api?.Ui?.Hint((i18n.IsEnglish ? "Install failed: " : "安装失败：") + error);
+                        try { System.IO.File.Delete(path); } catch { }
+                        api.Ui.Hint(i18n.T("已取消安装。", "Install cancelled."));
                         return;
                     }
 
-                    api?.Ui?.Hint((i18n.IsEnglish ? "Installed: " : "已安装：") +
-                                  record.Name + " " + record.Version);
-                    PageRegistry.InvalidatePage("swap-addons");
+                    try
+                    {
+                        var record = SwapHost.Addons.Install(path);
+                        api.Ui.Hint((i18n.IsEnglish ? "Installed: " : "已安装：") +
+                                    record.Name + " " + record.Version);
+                        // The sidebar Info carries the module count; rebuild it so the label
+                        // matches the new list without waiting for a restart.
+                        PageRegistry.RefreshSidebar();
+                        MorePageRegistry.RefreshSidebar();
+                        PageRegistry.InvalidatePage("swap-addons");
+                    }
+                    catch (Exception ex)
+                    {
+                        api.Ui.Hint((i18n.IsEnglish ? "Install failed: " : "安装失败：") + ex.Message);
+                    }
                 });
             })
             {

@@ -6,6 +6,27 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-06:30:00 v26.2-Alpha 2: 仓库确认/缓存/更新检测
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\AddonRepository.cs      磁盘缓存/30 分钟节流/版本比较
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs  安装确认、更新按钮、侧栏计数刷新
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs             版本比较断言
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|安装确认|下载+校验+Review 后弹窗显示名称/版本/权限/信任，确认才安装；取消删除临时包|2026.10.31-06:30:00|PCL2.dl.swap
+2|更新检测|数字段版本比较；索引更高时显示「可更新」与 Update 按钮|2026.10.31-06:30:00|PCL2.dl.swap
+3|缓存与节流|成功索引写 `<数据根>\repo\addons-index.json`；失败按 缓存→内置 回落；30 分钟内自动刷新走缓存，按钮强制刷新|2026.10.31-06:30:00|PCL2.dl.swap
+4|侧栏计数|安装后 RefreshSidebar，`Manage Swap addons (N)` 立即更新|2026.10.31-06:30:00|PCL2.dl.swap
+5|验证|确认对话框+PCL2Themes 安装成功；缓存 607B；侧栏计数 4；`ok=49 fail=0`|2026.10.31-06:30:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-06:00:00 v26.2-Alpha 1: 模块仓库与权限兼容修复
 
 GitCommitHash: (unreleased)

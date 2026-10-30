@@ -46,6 +46,7 @@ namespace PclDlSwap.Payload.Swap
                     Addons.EnableAll();                       // third-party pages register from 102 on
 
                     PageRegistry.Install(HostAssembly);
+                    MorePageRegistry.Install(HostAssembly);
                     HostTranslator.StartWatching(HostAssembly);
                     SelfTest.RunIfRequested(Api);
                     RunScenarioHooks();

@@ -396,7 +396,10 @@ namespace PclDlSwap.Payload.Swap
             ScopedHook.RemoveAll(record.Id);
 
             foreach (var pageId in record.PageIds.ToList())
+            {
                 PageRegistry.UnregisterPage(pageId);
+                MorePageRegistry.Unregister(pageId);
+            }
             record.PageIds.Clear();
             record.Instance = null;
             record.Status = "removed";
@@ -1081,6 +1084,14 @@ namespace PclDlSwap.Payload.Swap
                               (string.IsNullOrEmpty(id) ? "page" + (_record.PageIds.Count + 1) : id);
                 _record.PageIds.Add(logical);
                 _inner.RegisterSettingsPage(logical, title, viewFactory);
+            }
+
+            public void RegisterMorePage(string id, string title, Func<FrameworkElement> viewFactory)
+            {
+                var logical = _record.Id + "/more/" +
+                              (string.IsNullOrEmpty(id) ? "page" + (_record.PageIds.Count + 1) : id);
+                _record.PageIds.Add(logical);
+                _inner.RegisterMorePage(logical, title, viewFactory);
             }
 
             public void Hint(string text) => _inner.Hint(text);

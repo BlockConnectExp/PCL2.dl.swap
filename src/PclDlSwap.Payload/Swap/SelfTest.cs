@@ -87,6 +87,21 @@ namespace PclDlSwap.Payload.Swap
             }
             Probe("Pcl.Logs.LogPath", () => api.Pcl.Logs.LogPath);
             Probe("Pcl.Ui.CurrentPage", () => api.Pcl.Ui.CurrentPage);
+            Probe("Pcl.Shell.Family", () => api.Pcl.Shell != null);
+            Probe("Pcl.Clipboard.Family", () => api.Pcl.Clipboard != null);
+            Probe("Pcl.Clipboard.GetText", () => api.Pcl.Clipboard.GetText() ?? string.Empty);
+            Probe("Ui.API1.2.RegisterMorePage",
+                () => typeof(IUi).GetMethod("RegisterMorePage") != null);
+            if (Environment.GetEnvironmentVariable("PCL2SWAP_SELFTEST_MORE") == "1")
+            {
+                Probe("Ui.RegisterMorePage(selftest)", () =>
+                {
+                    api.Ui.RegisterMorePage("selftest.more", "Swap Selftest",
+                        () => api.Ui.Card("Swap Selftest",
+                            api.Ui.Text("Registered through IUi.RegisterMorePage (API 1.2).")));
+                    return "registered";
+                });
+            }
 
             Probe("Surface.HostMvid", () => api.Surface.HostMvid);
             Probe("Surface.TypeCount", () => api.Surface.TypeCount);

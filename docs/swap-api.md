@@ -455,4 +455,33 @@ api.Ui.Separator();
 
 所有控件返回 `FrameworkElement`，可直接塞进 `Card`/`Text` 组成的页面。
 
+## 13. API 1.2（v26.1-Alpha 6 起）：更多页槽位与 Shell/Clipboard
+
+`Host.ApiVersion` 现在是 `1.2.0`（只增加成员，1.0/1.1 addon 不受影响）。
+
+### 13.1 `IUi.RegisterMorePage`（第二类页面槽位）
+
+```csharp
+api.Ui.RegisterMorePage("demo.more", "Demo Page", () =>
+    api.Ui.Card("Demo",
+        api.Ui.Text("This page lives in the More sidebar.")));
+```
+
+- 与 `RegisterSettingsPage` 完全对称：`ScopedUi` 会给 id 加模块前缀，卸载时自动注销；
+- 实现 detour `PCL.PageOtherLeft.PageCheck/PageGet`，复用宿主 `PageChangeRun`；
+- 模块页 id 固定 **200+ 段**，与设置页 100+ 不冲突；
+- 侧栏项单实例（watcher 只补缺，不重复插入）。
+
+### 13.2 `IPclAccess.Shell` / `IPclAccess.Clipboard`
+
+```csharp
+api.Pcl.Shell.OpenFolder(api.Host.AddonDirectory);   // ModBase.OpenExplorer
+api.Pcl.Shell.OpenFile(logPath);                     // shell execute
+
+string clip = api.Pcl.Clipboard.GetText();           // ModBase.ClipboardGetText
+bool ok = api.Pcl.Clipboard.SetText("copied");       // ModBase.ClipboardSet(text, false)
+```
+
+两者优先使用 PCL 自己的实现，失败时才回退到系统 API；`SetText` 在两条路径都失败时返回 false。
+
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

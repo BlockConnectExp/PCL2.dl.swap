@@ -55,6 +55,12 @@ namespace PCL2Swap.Api
     {
         /// <summary>Pages are inserted into 设置 sidebar as "Swap Addon" style entries.</summary>
         void RegisterSettingsPage(string id, string title, Func<FrameworkElement> viewFactory);
+
+        /// <summary>
+        /// Pages are inserted into the 更多 (More) sidebar. Ids live in a separate 200+ range, so
+        /// both slots can be used by the same module (API 1.2).
+        /// </summary>
+        void RegisterMorePage(string id, string title, Func<FrameworkElement> viewFactory);
         void Hint(string text);
         int MsgBox(string caption, string title, string button1 = "确定", string button2 = "");
 

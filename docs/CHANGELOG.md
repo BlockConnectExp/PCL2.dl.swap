@@ -6,6 +6,32 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-03:20:00 v26.1-Alpha 6: 更多页槽位 + Shell/Clipboard 后端（API 1.2）
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\MorePageRegistry.cs     新文件：更多页槽位（PageOtherLeft detour + 侧栏）
+.\src\PCL2Swap.Api\ISwapApi.cs                       IUi.RegisterMorePage
+.\src\PCL2Swap.Api\IPclAccess.cs                     IPclShellAccess / IPclClipboardAccess
+.\src\PclDlSwap.Payload\Swap\HostApi.cs              ApiVersion 1.2.0 + RegisterMorePage
+.\src\PclDlSwap.Payload\Swap\PclAccess.cs            Shell/Clipboard 实现
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs         卸载时同步清理更多页
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs             4 条 API 1.2 断言 + 可选更多页自检
+.\src\PclDlSwap.Payload\Swap\I18n.cs                 常规/高级/主题/登录等词条
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|更多页槽位|`IUi.RegisterMorePage`：detour `PageOtherLeft.PageCheck/PageGet`、复用宿主 `PageChangeRun`、PageID 200+ 段、单实例插入（`EnsureSidebarItems` 防重复）、卸载时与设置页一并清理|2026.10.31-03:20:00|PCL2.dl.swap
+2|Shell/Clipboard 后端|`IPclAccess.Shell.OpenFolder/OpenFile`（ModBase.OpenExplorer 优先）、`IPclAccess.Clipboard.GetText/SetText`（ModBase.ClipboardGetText/Set 优先，WPF 回退）|2026.10.31-03:20:00|PCL2.dl.swap
+3|英文扩充|新增常规设置与登录词汇（常规/高级/主题/深浅色/正版/离线登录/用户名/密码/登录等）|2026.10.31-03:20:00|PCL2.dl.swap
+4|缺陷修复|修复更多页 watcher 每 500ms 重复插入侧栏项的问题（改为只补缺并检测宿主重建）|2026.10.31-03:20:00|PCL2.dl.swap
+5|验证|harness 六套件 PASS（1.2.0）；2.99.0.1 真机 `ok=43 fail=0`；更多页 `Swap Selftest` 出现并可切换到 PageID 200 页面，本次会话仅插入一次|2026.10.31-03:20:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-02:45:00 v26.1-Alpha 5: PCL2 英文支持 + SDK API 1.1
 
 GitCommitHash: (unreleased)

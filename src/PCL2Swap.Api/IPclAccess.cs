@@ -21,6 +21,27 @@ namespace PCL2Swap.Api
         IPclLoaderAccess Loader { get; }
         IPclUiAccess Ui { get; }
         IPclLogAccess Logs { get; }
+        IPclShellAccess Shell { get; }
+        IPclClipboardAccess Clipboard { get; }
+    }
+
+    /// <summary>Host helpers for opening paths with the user's shell (API 1.2).</summary>
+    public interface IPclShellAccess
+    {
+        /// <summary>Opens a folder in Explorer through PCL's ModBase.OpenExplorer.</summary>
+        void OpenFolder(string path);
+
+        /// <summary>Opens a file with its default application (shell execute).</summary>
+        void OpenFile(string path);
+    }
+
+    /// <summary>Clipboard access through PCL's own helpers (API 1.2).</summary>
+    public interface IPclClipboardAccess
+    {
+        string GetText();
+
+        /// <summary>Sets text; returns false when the host helper and WPF both fail.</summary>
+        bool SetText(string text);
     }
 
     /// <summary>

@@ -31,6 +31,8 @@ namespace PclDlSwap.Payload.Swap
             Loader = new LoaderAccess(host);
             Ui = new UiAccess(host);
             Logs = new LogAccess(host);
+            Shell = new ShellAccess(host);
+            Clipboard = new ClipboardAccess(host);
         }
 
         public IPclSecretAccess Secret { get; }
@@ -44,6 +46,106 @@ namespace PclDlSwap.Payload.Swap
         public IPclLoaderAccess Loader { get; }
         public IPclUiAccess Ui { get; }
         public IPclLogAccess Logs { get; }
+        public IPclShellAccess Shell { get; }
+        public IPclClipboardAccess Clipboard { get; }
+
+        /// <summary>Open paths with PCL's own helpers (API 1.2).</summary>
+        private sealed class ShellAccess : IPclShellAccess
+        {
+            private readonly Assembly _host;
+
+            public ShellAccess(Assembly host) => _host = host;
+
+            public void OpenFolder(string path)
+            {
+                if (string.IsNullOrWhiteSpace(path)) return;
+                try
+                {
+                    var method = FindMethod(_host, "PCL.ModBase", "OpenExplorer",
+                        candidate => candidate.GetParameters().Length == 1);
+                    if (method != null)
+                    {
+                        method.Invoke(null, new object[] { path });
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("[shell] ModBase.OpenExplorer 失败，退回资源管理器：" + ex.Message);
+                }
+
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = "\"" + path + "\"",
+                    UseShellExecute = true
+                });
+            }
+
+            public void OpenFile(string path)
+            {
+                if (string.IsNullOrWhiteSpace(path)) return;
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
+                {
+                    UseShellExecute = true
+                });
+            }
+        }
+
+        /// <summary>Clipboard via ModBase helpers with a WPF fallback (API 1.2).</summary>
+        private sealed class ClipboardAccess : IPclClipboardAccess
+        {
+            private readonly Assembly _host;
+
+            public ClipboardAccess(Assembly host) => _host = host;
+
+            public string GetText()
+            {
+                try
+                {
+                    var method = FindMethod(_host, "PCL.ModBase", "ClipboardGetText",
+                        candidate => candidate.GetParameters().Length == 0);
+                    if (method != null) return method.Invoke(null, null) as string ?? string.Empty;
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("[clipboard] ModBase.ClipboardGetText 失败：" + ex.Message);
+                }
+
+                try { return System.Windows.Clipboard.GetText(); }
+                catch { return string.Empty; }
+            }
+
+            public bool SetText(string text)
+            {
+                text = text ?? string.Empty;
+                try
+                {
+                    var method = FindMethod(_host, "PCL.ModBase", "ClipboardSet",
+                        candidate => candidate.GetParameters().Length == 2);
+                    if (method != null)
+                    {
+                        // Second parameter is PCL's "show hint" flag; stay quiet for addon writes.
+                        method.Invoke(null, new object[] { text, false });
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("[clipboard] ModBase.ClipboardSet 失败：" + ex.Message);
+                }
+
+                try
+                {
+                    System.Windows.Clipboard.SetText(text);
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
 
         /// <summary>Live-UI reads plus the translation pass (API 1.1).</summary>
         private sealed class UiAccess : IPclUiAccess

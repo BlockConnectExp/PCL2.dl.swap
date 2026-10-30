@@ -18,7 +18,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.1.0";
+        public const string ApiVersion = "1.2.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -258,6 +258,9 @@ namespace PclDlSwap.Payload.Swap
         {
             public void RegisterSettingsPage(string id, string title, Func<System.Windows.FrameworkElement> viewFactory) =>
                 PageRegistry.RegisterPage(id, title, viewFactory);
+
+            public void RegisterMorePage(string id, string title, Func<System.Windows.FrameworkElement> viewFactory) =>
+                MorePageRegistry.Register(id, title, viewFactory);
 
             public void Hint(string text) => PclUi.Hint(text);
 

@@ -1179,7 +1179,7 @@ namespace PclDlSwap.ExLoaderHarness
 
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
-                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.1.0");
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.2.0");
 
                 // ---- module state: persisted, and it gates the built-in features ----
                 var isEnabled = manager?.GetType().GetMethod("IsEnabled");

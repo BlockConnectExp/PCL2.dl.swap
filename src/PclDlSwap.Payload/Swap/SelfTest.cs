@@ -92,6 +92,25 @@ namespace PclDlSwap.Payload.Swap
             Probe("Pcl.Clipboard.GetText", () => api.Pcl.Clipboard.GetText() ?? string.Empty);
             Probe("Ui.API1.2.RegisterMorePage",
                 () => typeof(IUi).GetMethod("RegisterMorePage") != null);
+            Probe("仓库.索引解析", () =>
+            {
+                const string json =
+                    "{\"schema\":1,\"modules\":[{\"id\":\"test.module\",\"name\":\"Test\"," +
+                    "\"version\":\"1.0.0\",\"download\":\"https://example.com/x.swapaddon\"," +
+                    "\"sha256\":\"abc\",\"size\":123}]}";
+                var snapshot = AddonRepository.Parse(json, "selftest");
+                return snapshot.Modules.Count == 1 && snapshot.Modules[0].Id == "test.module"
+                    ? "ok"
+                    : "modules=" + snapshot.Modules.Count + " error=" + (snapshot.Error ?? "(none)");
+            });
+            Probe("仓库.内置索引", () =>
+            {
+                var snapshot = AddonRepository.LoadBundled();
+                return snapshot.Modules.Count >= 1 &&
+                       !string.IsNullOrEmpty(snapshot.Modules[0].Download)
+                    ? "ok"
+                    : "modules=" + snapshot.Modules.Count + " error=" + (snapshot.Error ?? "(none)");
+            });
             Probe("权限.宽松(内置)", () =>
                 SwapHost.Addons.HasPermission("swap.download-mc", "hooks"));
             Probe("权限.严格判定", () =>
@@ -134,6 +153,20 @@ namespace PclDlSwap.Payload.Swap
                     }
                     catch { }
                 }
+            });
+            Probe("权限.别名归一化", () =>
+            {
+                var record = new AddonManager.AddonRecord
+                {
+                    Id = "selftest.perms.alias",
+                    Manifest = new AddonManifest
+                    {
+                        Permissions = new List<string> { "host.hooks.attach", "host.ui.pages" }
+                    }
+                };
+                return SwapHost.Addons.HasPermission(record, "hooks") &&
+                       SwapHost.Addons.HasPermission(record, "pages") &&
+                       !SwapHost.Addons.HasPermission(record, "secret");
             });
             if (Environment.GetEnvironmentVariable("PCL2SWAP_SELFTEST_MORE") == "1")
             {

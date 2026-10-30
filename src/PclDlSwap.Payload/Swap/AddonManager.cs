@@ -83,7 +83,7 @@ namespace PclDlSwap.Payload.Swap
         internal static readonly string[] KnownPermissions =
         {
             "hooks", "pages", "files", "clipboard", "network", "logs",
-            "reflection", "secret", "launch", "settings", "instance"
+            "secret", "launch", "settings", "instance"
         };
 
         private static bool ForceStrict
@@ -117,10 +117,52 @@ namespace PclDlSwap.Payload.Swap
             if (record == null) return true;
             if (!IsStrict(record)) return true;
             if (string.IsNullOrWhiteSpace(permission)) return true;
+            var wanted = NormalizePermission(permission);
             return record.Manifest?.Permissions != null &&
                    record.Manifest.Permissions.Any(entry =>
-                       string.Equals(entry?.Trim(), permission, StringComparison.OrdinalIgnoreCase) ||
-                       entry?.Trim() == "*");
+                       NormalizePermission(entry) == wanted || NormalizePermission(entry) == "*");
+        }
+
+        /// <summary>
+        /// Permission aliases: early third-party modules used namespaced spellings
+        /// ("host.hooks.attach", "host.ui.pages", "host.settings.write"). Normalise both the
+        /// declaration and the gate name so strict mode never rejects a legitimate module.
+        /// </summary>
+        private static string NormalizePermission(string value)
+        {
+            var permission = (value ?? string.Empty).Trim().ToLowerInvariant();
+            if (permission.StartsWith("host.", StringComparison.Ordinal))
+                permission = permission.Substring(5);
+            switch (permission)
+            {
+                case "hooks.attach":
+                case "hooks.install":
+                case "hooks": return "hooks";
+                case "ui.pages":
+                case "pages.register":
+                case "pages": return "pages";
+                case "settings.read":
+                case "settings.write":
+                case "settings": return "settings";
+                case "clipboard.read":
+                case "clipboard.write":
+                case "clipboard": return "clipboard";
+                case "files.read":
+                case "files.write":
+                case "shell":
+                case "files": return "files";
+                case "network.download":
+                case "network": return "network";
+                case "logs.read":
+                case "logs": return "logs";
+                case "reflect":
+                case "reflection": return "reflection";
+                case "update":
+                case "secret": return "secret";
+                case "launch": return "launch";
+                case "instance": return "instance";
+                default: return permission;
+            }
         }
 
         internal bool HasPermission(string addonId, string permission) =>
@@ -1184,23 +1226,12 @@ namespace PclDlSwap.Payload.Swap
             public IHooks Hooks { get; }
             public IUi Ui { get; }
             public IData Data { get; }
-            public IReflection Reflect
-            {
-                get
-                {
-                    SwapHost.Addons?.RequirePermission(_record, "reflection");
-                    return _inner.Reflect;
-                }
-            }
-
-            public ISwapSurface Surface
-            {
-                get
-                {
-                    SwapHost.Addons?.RequirePermission(_record, "reflection");
-                    return _inner.Surface;
-                }
-            }
+            // Reflection stays ungated on purpose: modules run in-process and can always reflect,
+            // and ecosystem modules (e.g. PCL2Themes) build on Reflect/Surface without declaring
+            // anything. Gating it only broke legitimate modules; permissions constrain side
+            // effects (hooks/pages/files/network/...), not the escape hatch itself.
+            public IReflection Reflect => _inner.Reflect;
+            public ISwapSurface Surface => _inner.Surface;
 
             public IPclAccess Pcl { get; }
             public II18n I18n => _inner.I18n;

@@ -34,6 +34,9 @@
     <!-- The PclSurface dumps travel with the payload so addons can query the host surface. -->
     <EmbeddedResource Include="..\..\data\pcl-surface-2.99.0.json" LogicalName="PclDlSwap.Payload.data.pcl-surface-2.99.0.json" />
     <EmbeddedResource Include="..\..\data\pcl-surface-2.99.0.1.json" LogicalName="PclDlSwap.Payload.data.pcl-surface-2.99.0.1.json" />
+    <!-- The addon repository index travels with the payload so the page can show a bundled entry
+         even when the network is down. -->
+    <EmbeddedResource Include="..\..\data\addons-index.json" LogicalName="PclDlSwap.Payload.data.addons-index.json" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Web.Extensions" />
@@ -48,5 +51,6 @@
     <Reference Include="System.Xaml" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
 </Project>

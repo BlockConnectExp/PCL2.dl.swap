@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "updated": "2026-10-31",
+  "modules": [
+    {
+      "id": "com.starsailsclover.pcl2themes",
+      "name": "PCL2 Themes",
+      "version": "v26.0-Alpha4",
+      "author": "StarsailsClover",
+      "description": "Theme editor and live themes for PCL2 (settings page + per-theme colors).",
+      "project": "https://github.com/StarsailsClover/PCL2Themes",
+      "download": "https://github.com/StarsailsClover/PCL2Themes/releases/download/v26.0-Alpha4/pcl2themes.swapaddon",
+      "sha256": "d6eba902d36fbe906b8e8ce017a8f18357f3dd61f0420d4a399f6fa5a14cc535",
+      "size": 26771
+    }
+  ]
+}

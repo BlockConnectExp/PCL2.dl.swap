@@ -509,6 +509,15 @@ bool ok = api.Pcl.Clipboard.SetText("copied");       // ModBase.ClipboardSet(tex
 
 声明 `"*"` 表示全部允许。Loader/Animation/Base/Download/Ui/I18n/Data/Log 不门控。
 
+**畔名兼容（v26.2-Alpha 1 起）**：第三方模块常见的命名会自动归一化——去掉 `host.` 前缀后，
+`hooks.attach`→`hooks`、`ui.pages`→`pages`、`settings.read/write`→`settings`、
+`clipboard.read/write`→`clipboard`、`files.read/write`→`files`、`network.download`→`network`、
+`logs.read`→`logs`、`update`→`secret`。
+
+**反射不门控**：`Reflect` / `Surface` 不再要求 `reflection` 权限。模块与宿主同进程，无法真正
+沙箱化反射；权限只约束有副作用的能力（hooks/pages/files/clipboard/network/logs/secret/launch/
+settings/instance）。
+
 示例 manifest：
 
 ```json

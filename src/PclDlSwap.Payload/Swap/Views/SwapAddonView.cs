@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -50,6 +51,8 @@ namespace PclDlSwap.Payload.Swap.Views
                     SwapUi.Button("安装模块…", () => InstallFromDialog(api, addons)),
                     SwapUi.Button("打开 Addon 目录", () => OpenFolder(api?.Host.AddonDirectory)),
                     SwapUi.Button("刷新", () => PageRegistry.InvalidatePage("swap-addons")))));
+
+            page.Children.Add(RepositoryCard(api, addons));
 
             var chains = ScopedHook.Snapshot();
             if (chains.Count > 0)
@@ -482,6 +485,98 @@ namespace PclDlSwap.Payload.Swap.Views
         }
 
         // ------------------------------------------------------------------ chrome
+
+        /// <summary>
+        /// Module repository card: lists the JSON index, installs one entry through the normal
+        /// installer (review/trust/permissions still apply on the manager side).
+        /// </summary>
+        private static FrameworkElement RepositoryCard(ISwapApi api, AddonManager addons)
+        {
+            var i18n = SwapI18n.Current;
+            var snapshot = AddonRepository.Current;
+            if (snapshot.LoadedAt == null && !snapshot.Loading)
+            {
+                AddonRepository.RefreshAsync(_ =>
+                    PclUi.OnUiThread(() => PageRegistry.InvalidatePage("swap-addons")));
+            }
+
+            var rows = new List<FrameworkElement>();
+            if (snapshot.Loading)
+                rows.Add(SwapUi.Note(i18n.T("正在读取模块仓库…", "Loading module repository...")));
+            else if (!string.IsNullOrEmpty(snapshot.Error))
+                rows.Add(SwapUi.Note(snapshot.Error));
+
+            if (snapshot.Modules.Count == 0 && !snapshot.Loading &&
+                string.IsNullOrEmpty(snapshot.Error))
+                rows.Add(SwapUi.Note(i18n.T("仓库目前没有模块。", "The repository has no modules yet.")));
+
+            foreach (var module in snapshot.Modules)
+            {
+                var installed = addons?.Find(module.Id);
+                var title = module.Name + "  " + module.Version +
+                            (installed != null ? "  ·  " + i18n.T("已安装", "installed") : string.Empty);
+                var row = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
+                row.Children.Add(SwapUi.Text(title, 13, false, false));
+                var meta = module.Author ?? string.Empty;
+                if (module.Size > 0) meta += (meta.Length > 0 ? " · " : string.Empty) + (module.Size / 1024) + " KB";
+                if (meta.Length > 0) row.Children.Add(SwapUi.Note(meta));
+                if (!string.IsNullOrEmpty(module.Description))
+                    row.Children.Add(SwapUi.Note(module.Description));
+
+                var buttons = new List<FrameworkElement>
+                {
+                    SwapUi.Button(installed == null
+                            ? i18n.T("一键安装", "Install")
+                            : i18n.T("重新安装", "Reinstall"),
+                        () => InstallFromRepository(api, addons, module))
+                };
+                if (!string.IsNullOrEmpty(module.Project))
+                    buttons.Add(SwapUi.Button(i18n.T("项目主页", "Project page"),
+                        () => PclUi.OpenWebsite(module.Project)));
+                row.Children.Add(SwapUi.Buttons(buttons.ToArray()));
+                rows.Add(row);
+            }
+
+            rows.Add(SwapUi.Buttons(
+                SwapUi.Button(i18n.T("刷新仓库", "Refresh repository"), () =>
+                {
+                    AddonRepository.RefreshAsync(_ =>
+                        PclUi.OnUiThread(() => PageRegistry.InvalidatePage("swap-addons")));
+                    PageRegistry.InvalidatePage("swap-addons");
+                }),
+                SwapUi.Button(i18n.T("打开索引", "Open index"),
+                    () => PclUi.OpenWebsite(AddonRepository.DefaultIndexUrl))));
+
+            return SwapUi.Card(i18n.T("模块仓库", "Module repository"), rows.ToArray());
+        }
+
+        private static void InstallFromRepository(ISwapApi api, AddonManager addons,
+            AddonRepository.RepoModule module)
+        {
+            var i18n = SwapI18n.Current;
+            api?.Ui?.Hint(i18n.T("正在下载模块…", "Downloading module..."));
+            var worker = new Thread(() =>
+            {
+                var record = AddonRepository.Install(module, out var error);
+                PclUi.OnUiThread(() =>
+                {
+                    if (record == null)
+                    {
+                        api?.Ui?.Hint((i18n.IsEnglish ? "Install failed: " : "安装失败：") + error);
+                        return;
+                    }
+
+                    api?.Ui?.Hint((i18n.IsEnglish ? "Installed: " : "已安装：") +
+                                  record.Name + " " + record.Version);
+                    PageRegistry.InvalidatePage("swap-addons");
+                });
+            })
+            {
+                IsBackground = true,
+                Name = "PCL2Swap.RepoInstall"
+            };
+            worker.Start();
+        }
 
         /// <summary>
         /// PCL's animation helpers only recognise its own MyScrollViewer for the scroll-bar

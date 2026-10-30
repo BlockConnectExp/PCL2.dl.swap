@@ -6,6 +6,30 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-06:00:00 v26.2-Alpha 1: 模块仓库与权限兼容修复
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\data\addons-index.json                          新文件：模块仓库索引（首条 PCL2Themes）
+.\src\PclDlSwap.Payload\Swap\AddonRepository.cs   新文件：索引解析/下载/校验/安装
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs  模块仓库卡片与一键安装
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs      权限别名归一化；reflection 不再门控
+.\docs\addon-repository.zh.md                     仓库格式与发布流程
+.\docs\swap-api.md                                权限别名与反射说明
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|模块仓库|`data/addons-index.json` + 平台加载（默认 raw.githubusercontent / 失败回落内置索引）+ Swap Addon 页「Module repository」卡片（Install/Reinstall/Project/Refresh/Open index）|2026.10.31-06:00:00|PCL2.dl.swap
+2|安装链路|一键安装：后台下载 → SHA-256 校验（不匹配删除）→ 正常安装器（信任链/权限/作用域照常）→ 刷新页面|2026.10.31-06:00:00|PCL2.dl.swap
+3|权限别名|`host.hooks.attach`/`host.ui.pages`/`host.settings.write` 等归一化为平台权限名|2026.10.31-06:00:00|PCL2.dl.swap
+4|反射门控|`Reflect`/`Surface` 不再要求 `reflection` 权限（同进程不可沙箱化，权限只约束副作用）|2026.10.31-06:00:00|PCL2.dl.swap
+5|验证|索引解析/内置索引 ok；PCL2Themes 一键安装成功并完整运行（钩子/主题/backdrop/music，侧栏页面出现）；`ok=48 fail=0`|2026.10.31-06:00:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-05:20:00 v26.1: 正式版（Alpha 1-10 汇总）
 
 GitCommitHash: (unreleased)

@@ -6,6 +6,26 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-03:55:00 v26.1-Alpha 7: 权限 opt-in 严格门控
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs   权限策略 / ScopedPclAccess / 门控点
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs       3 条权限断言
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs  严格模式标注
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|权限策略|manifest.permissions 非空 → 严格模式；空 → 兼容模式；`<数据根>\security.json` 的 `"forceStrict":true` 可全局强制。未授权访问抛 UnauthorizedAccessException 并写入模块日志|2026.10.31-03:55:00|PCL2.dl.swap
+2|门控点|`hooks`（Attach）、`pages`（两类页面）、`reflection`（Reflect/Surface）、`files`、`clipboard`、`network`、`logs`、`secret`、`launch`、`settings`、`instance`；Loader/Animation/Base/Download/Ui/I18n/Data/Log 透传|2026.10.31-03:55:00|PCL2.dl.swap
+3|UI|模块行「（严格）」、详情「严格门控/兼容模式」、安装预览严格提示|2026.10.31-03:55:00|PCL2.dl.swap
+4|验证|harness 六套件 PASS（无权限模块兼容回归）；真机 `ok=45 fail=0`；宽松=True、严格判定正确、Scoped 拦截=blocked|2026.10.31-03:55:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-03:20:00 v26.1-Alpha 6: 更多页槽位 + Shell/Clipboard 后端（API 1.2）
 
 GitCommitHash: (unreleased)

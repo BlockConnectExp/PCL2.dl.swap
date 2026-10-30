@@ -247,7 +247,7 @@ namespace PclDlSwap.Payload.Swap.Views
                     : string.Join("、", manifest.HostVersions)));
                 content.Add(SwapUi.InfoRow("权限声明", manifest.Permissions.Count == 0
                     ? "（未声明 —— 兼容模式，全部访问）"
-                    : string.Join("、", manifest.Permissions)));
+                    : string.Join("、", manifest.Permissions) + "（严格门控）"));
             }
 
             var chains = ScopedHook.Snapshot()
@@ -459,6 +459,7 @@ namespace PclDlSwap.Payload.Swap.Views
                 var shown = manifest.Permissions.Take(3).ToList();
                 var text = "权限 " + string.Join("、", shown);
                 if (manifest.Permissions.Count > shown.Count) text += " 等 " + manifest.Permissions.Count + " 项";
+                text += "（严格）";
                 parts.Add(text);
             }
             return parts.Count == 0 ? string.Empty : string.Join(" · ", parts);

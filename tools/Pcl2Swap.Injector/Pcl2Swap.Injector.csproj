@@ -21,7 +21,7 @@
     <ApplicationTitle>PCL2 Swap Injector</ApplicationTitle>
     <Version>26.1.0.0</Version>
     <FileVersion>26.1.0.0</FileVersion>
-    <InformationalVersion>v26.1-Alpha 6</InformationalVersion>
+    <InformationalVersion>v26.1-Alpha 7</InformationalVersion>
   </PropertyGroup>
 
   <!--

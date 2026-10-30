@@ -92,6 +92,38 @@ namespace PclDlSwap.Payload.Swap
             Probe("Pcl.Clipboard.GetText", () => api.Pcl.Clipboard.GetText() ?? string.Empty);
             Probe("Ui.API1.2.RegisterMorePage",
                 () => typeof(IUi).GetMethod("RegisterMorePage") != null);
+            Probe("权限.宽松(内置)", () =>
+                SwapHost.Addons.HasPermission("swap.download-mc", "hooks"));
+            Probe("权限.严格判定", () =>
+            {
+                var record = new AddonManager.AddonRecord
+                {
+                    Id = "selftest.perms",
+                    Manifest = new AddonManifest { Permissions = new List<string> { "hooks" } }
+                };
+                return SwapHost.Addons.IsStrict(record) &&
+                       SwapHost.Addons.HasPermission(record, "hooks") &&
+                       !SwapHost.Addons.HasPermission(record, "pages");
+            });
+            Probe("权限.Scoped 拦截", () =>
+            {
+                var record = new AddonManager.AddonRecord
+                {
+                    Id = "selftest.perms.scoped",
+                    Manifest = new AddonManifest { Permissions = new List<string> { "pages" } }
+                };
+                var scoped = SwapHost.Addons.CreateScopedApi(record);
+                try
+                {
+                    scoped.Hooks.Attach("PCL.ModBase", "ToUnixTimestampUtc", "selftest.perm",
+                        (Func<DateTime, long>)(_ => 1L), HookMode.Replace);
+                    return "NOT BLOCKED";
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    return "blocked";
+                }
+            });
             if (Environment.GetEnvironmentVariable("PCL2SWAP_SELFTEST_MORE") == "1")
             {
                 Probe("Ui.RegisterMorePage(selftest)", () =>

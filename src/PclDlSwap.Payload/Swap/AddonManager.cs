@@ -70,6 +70,86 @@ namespace PclDlSwap.Payload.Swap
 
         public IReadOnlyList<AddonRecord> Records => _records;
 
+        // ---------------------------------------------------------------- permissions (API 1.3)
+        //
+        // A module that declares permissions in its manifest runs in strict mode: any gated call
+        // without the matching declaration throws. A module with an empty list keeps the old
+        // behaviour (compatibility mode) so pre-permission packages keep working. The global
+        // security.json switch forces strict mode for every module.
+
+        private static readonly object PermissionGate = new object();
+        private static bool? _forceStrict;
+
+        internal static readonly string[] KnownPermissions =
+        {
+            "hooks", "pages", "files", "clipboard", "network", "logs",
+            "reflection", "secret", "launch", "settings", "instance"
+        };
+
+        private static bool ForceStrict
+        {
+            get
+            {
+                lock (PermissionGate)
+                {
+                    if (_forceStrict.HasValue) return _forceStrict.Value;
+                    try
+                    {
+                        var path = Path.Combine(SwapPaths.DataRoot, "security.json");
+                        var text = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+                        _forceStrict = text.IndexOf("\"forceStrict\":true", StringComparison.OrdinalIgnoreCase) >= 0;
+                    }
+                    catch
+                    {
+                        _forceStrict = false;
+                    }
+
+                    return _forceStrict.Value;
+                }
+            }
+        }
+
+        internal bool IsStrict(AddonRecord record) =>
+            record != null && (ForceStrict || (record.Manifest?.Permissions?.Count ?? 0) > 0);
+
+        internal bool HasPermission(AddonRecord record, string permission)
+        {
+            if (record == null) return true;
+            if (!IsStrict(record)) return true;
+            if (string.IsNullOrWhiteSpace(permission)) return true;
+            return record.Manifest?.Permissions != null &&
+                   record.Manifest.Permissions.Any(entry =>
+                       string.Equals(entry?.Trim(), permission, StringComparison.OrdinalIgnoreCase) ||
+                       entry?.Trim() == "*");
+        }
+
+        internal bool HasPermission(string addonId, string permission) =>
+            HasPermission(Find(addonId), permission);
+
+        internal void RequirePermission(string addonId, string permission)
+        {
+            RequirePermission(Find(addonId), permission, addonId);
+        }
+
+        internal void RequirePermission(AddonRecord record, string permission)
+        {
+            RequirePermission(record, permission, record?.Id ?? "(unknown)");
+        }
+
+        private void RequirePermission(AddonRecord record, string permission, string addonId)
+        {
+            if (HasPermission(record, permission)) return;
+
+            ModuleLog.Write(addonId, "warn",
+                $"权限被拒绝：{permission}（manifest.permissions = {string.Join(",", record?.Manifest?.Permissions ?? new List<string>())}）");
+            throw new UnauthorizedAccessException(
+                $"模块 {addonId} 未声明权限 \"{permission}\"。严格模式由 manifest.permissions 非空启用；" +
+                "声明需要的权限（或 \"*\"）后重新打包安装。");
+        }
+
+        /// <summary>Builds a scoped API for tests and for the permission self-check.</summary>
+        internal ISwapApi CreateScopedApi(AddonRecord record) => new ScopedApi(_api, record);
+
         /// <summary>
         /// The user's enable state for an addon. Hooks installed by the host keep their detours
         /// (nothing hot-unloads yet) but consult this flag before acting, so a disabled addon
@@ -311,7 +391,7 @@ namespace PclDlSwap.Payload.Swap
                 text.AppendLine("  宿主版本：" + string.Join("、", manifest.HostVersions));
             text.AppendLine("  权限声明：" + (manifest.Permissions == null || manifest.Permissions.Count == 0
                 ? "（未声明 —— 按兼容模式获得全部访问）"
-                : string.Join("、", manifest.Permissions)));
+                : string.Join("、", manifest.Permissions) + "（严格门控：未声明的敏感访问会被拒绝）"));
             text.AppendLine();
             text.AppendLine("  包文件：" + Path.GetFileName(archivePath) +
                             "（" + new FileInfo(archivePath).Length + " 字节）");
@@ -1029,17 +1109,34 @@ namespace PclDlSwap.Payload.Swap
                 _inner = inner;
                 _record = record;
                 Data = new AddonDataStore(record.Id);
-                Hooks = new ScopedHooks(inner.Hooks, inner as HostApi, record.Id);
+                Hooks = new ScopedHooks(inner.Hooks, inner as HostApi, record.Id, record);
                 Ui = new ScopedUi(inner.Ui, record);
+                Pcl = new ScopedPclAccess(inner.Pcl, record.Id);
             }
 
             public IHostInfo Host => _inner.Host;
             public IHooks Hooks { get; }
             public IUi Ui { get; }
             public IData Data { get; }
-            public IReflection Reflect => _inner.Reflect;
-            public ISwapSurface Surface => _inner.Surface;
-            public IPclAccess Pcl => _inner.Pcl;
+            public IReflection Reflect
+            {
+                get
+                {
+                    SwapHost.Addons?.RequirePermission(_record, "reflection");
+                    return _inner.Reflect;
+                }
+            }
+
+            public ISwapSurface Surface
+            {
+                get
+                {
+                    SwapHost.Addons?.RequirePermission(_record, "reflection");
+                    return _inner.Surface;
+                }
+            }
+
+            public IPclAccess Pcl { get; }
             public II18n I18n => _inner.I18n;
 
             // Module lines keep their own file (LSPosed-style per-module log) and are tagged with the
@@ -1067,6 +1164,43 @@ namespace PclDlSwap.Payload.Swap
         /// Per-addon UI view. Settings pages are namespaced with the module id and remembered on the
         /// record, so an uninstall can drop exactly the pages that module added - and nothing else.
         /// </summary>
+        /// <summary>
+        /// Per-addon PCL access. Gated families check the module's declared permissions in strict
+        /// mode; harmless reads (loader progress, animation, download-source lookups) pass through.
+        /// </summary>
+        private sealed class ScopedPclAccess : IPclAccess
+        {
+            private readonly IPclAccess _inner;
+            private readonly string _addonId;
+
+            public ScopedPclAccess(IPclAccess inner, string addonId)
+            {
+                _inner = inner;
+                _addonId = addonId;
+            }
+
+            private void Require(string permission) =>
+                SwapHost.Addons?.RequirePermission(_addonId, permission);
+
+            public IPclSecretAccess Secret { get { Require("secret"); return _inner.Secret; } }
+            public IPclNetAccess Net { get { Require("network"); return _inner.Net; } }
+            public IPclAnimationAccess Animation => _inner.Animation;
+            public IPclSettingsAccess Settings { get { Require("settings"); return _inner.Settings; } }
+            public IPclBaseAccess Base => _inner.Base;
+            public IPclInstanceAccess Instance { get { Require("instance"); return _inner.Instance; } }
+            public IPclDownloadAccess Download => _inner.Download;
+            public IPclLaunchAccess Launch { get { Require("launch"); return _inner.Launch; } }
+            public IPclLoaderAccess Loader => _inner.Loader;
+            public IPclUiAccess Ui => _inner.Ui;
+            public IPclLogAccess Logs { get { Require("logs"); return _inner.Logs; } }
+            public IPclShellAccess Shell { get { Require("files"); return _inner.Shell; } }
+            public IPclClipboardAccess Clipboard { get { Require("clipboard"); return _inner.Clipboard; } }
+        }
+
+        /// <summary>
+        /// Per-addon UI view. Settings pages are namespaced with the module id and remembered on the
+        /// record, so an uninstall can drop exactly the pages that module added - and nothing else.
+        /// </summary>
         private sealed class ScopedUi : IUi
         {
             private readonly IUi _inner;
@@ -1080,6 +1214,7 @@ namespace PclDlSwap.Payload.Swap
 
             public void RegisterSettingsPage(string id, string title, Func<FrameworkElement> viewFactory)
             {
+                SwapHost.Addons?.RequirePermission(_record, "pages");
                 var logical = _record.Id + "/" +
                               (string.IsNullOrEmpty(id) ? "page" + (_record.PageIds.Count + 1) : id);
                 _record.PageIds.Add(logical);
@@ -1088,6 +1223,7 @@ namespace PclDlSwap.Payload.Swap
 
             public void RegisterMorePage(string id, string title, Func<FrameworkElement> viewFactory)
             {
+                SwapHost.Addons?.RequirePermission(_record, "pages");
                 var logical = _record.Id + "/more/" +
                               (string.IsNullOrEmpty(id) ? "page" + (_record.PageIds.Count + 1) : id);
                 _record.PageIds.Add(logical);
@@ -1142,12 +1278,14 @@ namespace PclDlSwap.Payload.Swap
             private readonly IHooks _inner;
             private readonly HostApi _host;
             private readonly string _addonId;
+            private readonly AddonRecord _record;
 
-            public ScopedHooks(IHooks inner, HostApi host, string addonId)
+            public ScopedHooks(IHooks inner, HostApi host, string addonId, AddonRecord record)
             {
                 _inner = inner;
                 _host = host;
                 _addonId = addonId;
+                _record = record;
             }
 
             public event EventHandler<DownloadEventArgs> DownloadCompleted
@@ -1171,6 +1309,7 @@ namespace PclDlSwap.Payload.Swap
             public IDisposable Attach(string declaringType, string methodName, string hookId,
                 Delegate handler, HookMode mode)
             {
+                SwapHost.Addons?.RequirePermission(_record, "hooks");
                 try
                 {
                     var token = _host == null

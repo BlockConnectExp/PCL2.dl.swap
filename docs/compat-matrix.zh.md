@@ -31,6 +31,7 @@
 | 内置 Addon（Download MC / OTA Protector / Cancel Button） | ✅ | ✅ | 三张卡片均为「已启用」 |
 | 英文支持（运行时翻译） | ✅ | ✅ | 导航/按钮/设置卡片/启动日志/Swap 页面英文化，语言可切回中文 |
 | 更多页槽位（PageOtherLeft） | ✅ | ✅ | 自检页 `Swap Selftest` 插入更多侧栏并切换到 PageID 200 |
+| 权限严格门控（opt-in） | ✅ | ✅ | 声明 permissions 的模块未授权访问被拦截；无声明模块保持兼容模式 |
 
 ## 3 2.99.0.1 特殊适配（历史坑位）
 

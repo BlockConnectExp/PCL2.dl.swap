@@ -484,4 +484,41 @@ bool ok = api.Pcl.Clipboard.SetText("copied");       // ModBase.ClipboardSet(tex
 
 两者优先使用 PCL 自己的实现，失败时才回退到系统 API；`SetText` 在两条路径都失败时返回 false。
 
+## 14. 权限严格门控（v26.1-Alpha 7 起）
+
+`manifest.permissions` 从「展示」升级为「可执行」：
+
+- **声明了 permissions（非空）→ 严格模式**：未声明的 gated 访问抛
+  `UnauthorizedAccessException`，并写入该模块日志；
+- **未声明/空 → 兼容模式**：保持旧行为（全部允许）；
+- `<数据根>\security.json` 写 `{"forceStrict":true}` 可强制全部模块严格。
+
+| 权限名 | 门控点 |
+|---|---|
+| `hooks` | `IHooks.Attach` |
+| `pages` | `Ui.RegisterSettingsPage` / `RegisterMorePage` |
+| `reflection` | `Reflect` / `Surface` |
+| `files` | `Pcl.Shell.OpenFolder/OpenFile` |
+| `clipboard` | `Pcl.Clipboard.GetText/SetText` |
+| `network` | `Pcl.Net.*` |
+| `logs` | `Pcl.Logs.LogPath/Tail` |
+| `secret` | `Pcl.Secret.*` |
+| `launch` | `Pcl.Launch.*` |
+| `settings` | `Pcl.Settings.*` |
+| `instance` | `Pcl.Instance.*` |
+
+声明 `"*"` 表示全部允许。Loader/Animation/Base/Download/Ui/I18n/Data/Log 不门控。
+
+示例 manifest：
+
+```json
+{
+  "schema": 1,
+  "id": "demo.module",
+  "permissions": ["hooks", "pages", "files"]
+}
+```
+
+该模块若调用 `api.Pcl.Clipboard.GetText()` 将被拒绝；在模块管理页会显示「严格」标记。
+
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

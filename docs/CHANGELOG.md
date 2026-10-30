@@ -6,6 +6,31 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-01:30:00 v26.1-Alpha 4: 注入器瘦身与 CLI 失败诊断
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\tools\Pcl2Swap.Injector\Pcl2Swap.Injector.csproj  改用最小 WASDK 子包（WinUI + Runtime）
+.\tools\Pcl2Swap.Injector\Cli.cs                    注入失败时输出/保存诊断
+.\scripts\build.ps1                                 新增 -DistDir
+.\src\Pcl2Swap.Shim\build.ps1                       新增 -OutDir
+.\scripts\build-injector.ps1                        新增 -DistDir
+.\src\Pcl2Swap.Shim\Shim.cpp                        版本号升 v26.1-Alpha 4
+.\src\PclDlSwap.Loader\Program.cs                   版本号升 v26.1-Alpha 4
+.\src\PclDlSwap.Payload\Host\SwapLog.cs             版本号升 v26.1-Alpha 4
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|注入器瘦身|不再引用 `Microsoft.WindowsAppSDK` 元包，只引用 `Microsoft.WindowsAppSDK.WinUI` + `.Runtime`，移除 onnxruntime/DirectML/semantic-index 等约 62 MB AI 组件；解压输出 225.6→163.5 MB，发布 zip 90.7→66.0 MB|2026.10.31-01:30:00|PCL2.dl.swap
+2|CLI 失败诊断|`--cli inject` 失败时打印完整诊断段落并保存到 `文档\PCL2Swap\reports\`，与 GUI 失败对话框共用 `Diagnostics` 生成逻辑；退出码保持 0/1/2|2026.10.31-01:30:00|PCL2.dl.swap
+3|并行构建|三个构建脚本新增输出目录参数（`-DistDir` / `-OutDir`），并行会话的注入实例锁住 `dist\exloader` 时不再互相破坏；`.gitignore` 忽略 `dist-*/`|2026.10.31-01:30:00|PCL2.dl.swap
+4|验证|harness 六套件全 PASS；2.99.0.0 与 2.99.0.1 真机启动并注入均 `ok=30 fail=0`（日志 v26.1-Alpha4）；瘦身后 GUI/CLI 正常；CLI 无效 PID 失败诊断 `exit=2` 且报告落盘|2026.10.31-01:30:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-02:20:00 v26.1-Alpha 3: WinUI 注入器 + 2.99.0.1 全量回归
 
 GitCommitHash: (unreleased)

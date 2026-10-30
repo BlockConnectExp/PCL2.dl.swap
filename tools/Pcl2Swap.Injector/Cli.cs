@@ -168,11 +168,12 @@ public static class Cli
         var printer = new Progress<string>(Console.WriteLine);
         InjectionResult result;
         int injectedPid;
+        TargetInfo? targetInfo = null;
         if (pid > 0)
         {
             injectedPid = pid;
-            var probe = TargetProbe.DescribeProcess(pid);
-            Console.WriteLine($"目标：PID {pid} · {probe.VersionLabel} · {probe.SupportLabel}");
+            targetInfo = TargetProbe.DescribeProcess(pid);
+            Console.WriteLine($"目标：PID {pid} · {targetInfo.VersionLabel} · {targetInfo.SupportLabel}");
             result = await InjectorEngine.InjectAsync(pid, shim, printer, default);
         }
         else
@@ -188,6 +189,25 @@ public static class Cli
         Console.WriteLine($"结果：{(result.Success ? "成功" : "失败")} · 阶段 {result.Stage} · PID {injectedPid}");
         Console.WriteLine(result.Detail);
         if (result.Verified) Console.WriteLine("日志验证：通过（" + result.LogPath + "）");
+        if (!result.Success)
+        {
+            var context = new InjectionContext
+            {
+                InjectorVersion = "v26.1-Alpha 4",
+                Target = targetInfo ?? (string.IsNullOrEmpty(exe) ? null : TargetProbe.DescribeFile(exe!)),
+                Release = release,
+                Result = result,
+                ShimPath = shim
+            };
+            var title = Diagnostics.BuildTitle(context);
+            var body = Diagnostics.BuildBody(context);
+            Console.WriteLine();
+            Console.WriteLine("---- 诊断（可直接粘贴到 Issue）----");
+            Console.WriteLine(body);
+            var saved = Diagnostics.SaveLocally(title, body);
+            Console.WriteLine("诊断已保存：" + saved);
+        }
+
         return result.Success ? 0 : 2;
     }
 

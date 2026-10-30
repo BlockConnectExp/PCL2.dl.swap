@@ -17,12 +17,15 @@ param(
     [string]$Configuration = 'Release',
     [switch]$SkipProfiler,
     [string]$TargetPcl = '2.99.0',
-    [string]$ToolVersion = 'v26.0-Alpha1'
+    [string]$ToolVersion = 'v26.0-Alpha1',
+    # Non-default output roots let two agent sessions build in parallel without fighting over
+    # the shared dist folder (a running injected PCL locks its shim copy).
+    [string]$DistDir = 'dist'
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$dist = Join-Path $root 'dist'
+$dist = if ([System.IO.Path]::IsPathRooted($DistDir)) { $DistDir } else { Join-Path $root $DistDir }
 
 Write-Host "[build] root      = $root"
 Write-Host "[build] dist      = $dist"

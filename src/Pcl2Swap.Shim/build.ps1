@@ -19,14 +19,17 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [switch]$SkipPayloadBuild
+    [switch]$SkipPayloadBuild,
+    # Mirrors scripts\build.ps1 -DistDir so parallel builds do not share dist\exloader.
+    [string]$OutDir = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $shimDir = $PSScriptRoot
 $workDir = Join-Path $shimDir 'obj'
-$outDir = Join-Path $root 'dist\exloader'
+if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = 'dist\exloader' }
+$outDir = if ([System.IO.Path]::IsPathRooted($OutDir)) { $OutDir } else { Join-Path $root $OutDir }
 
 $payloadDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\PclDlSwap.Payload.dll"
 $wrapperDll = Join-Path $root "src\PclDlSwap.Payload\bin\$Configuration\Gee.External.Capstone.dll"

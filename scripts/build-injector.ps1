@@ -15,13 +15,15 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [string]$ToolVersion = 'v26.1-Alpha3'
+    [string]$ToolVersion = 'v26.1-Alpha3',
+    [string]$DistDir = 'dist'
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root 'tools\Pcl2Swap.Injector\Pcl2Swap.Injector.csproj'
-$out = Join-Path $root 'dist\injector'
+$dist = if ([System.IO.Path]::IsPathRooted($DistDir)) { $DistDir } else { Join-Path $root $DistDir }
+$out = Join-Path $dist 'injector'
 
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Path $out -Force | Out-Null
@@ -31,7 +33,7 @@ Write-Host "[injector] publishing $project"
 if ($LASTEXITCODE -ne 0) { throw 'injector publish failed' }
 
 # Ship the same shim pair the ExLoader card uses, so the injector works offline.
-$shimSrc = Join-Path $root 'dist\exloader'
+$shimSrc = Join-Path $dist 'exloader'
 $shimOut = Join-Path $out 'shim'
 New-Item -ItemType Directory -Path $shimOut -Force | Out-Null
 foreach ($name in 'Pcl2Swap.Shim.x64.dll', 'Pcl2Swap.Shim.x64.dat') {
@@ -47,7 +49,7 @@ $dataOut = Join-Path $out 'data'
 New-Item -ItemType Directory -Path $dataOut -Force | Out-Null
 Copy-Item (Join-Path $root 'data\offset-manifest.json') $dataOut -Force
 
-$zip = Join-Path $root ("dist\PCL2.dl.swap-Injector-$compact.zip")
+$zip = Join-Path $dist ("PCL2.dl.swap-Injector-$compact.zip")
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Write-Host "[injector] compressing $zip"
 Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -CompressionLevel Optimal

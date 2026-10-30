@@ -37,6 +37,8 @@
     <!-- The addon repository index travels with the payload so the page can show a bundled entry
          even when the network is down. -->
     <EmbeddedResource Include="..\..\data\addons-index.json" LogicalName="PclDlSwap.Payload.data.addons-index.json" />
+    <!-- Official public key for signing the addon index (private half stays out of the repo). -->
+    <EmbeddedResource Include="..\..\data\index-key.pub.xml" LogicalName="PclDlSwap.Payload.data.index-key.pub.xml" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Web.Extensions" />

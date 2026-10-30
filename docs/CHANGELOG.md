@@ -6,6 +6,29 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-07:05:00 v26.2-Alpha 4: 索引签名校验
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\IndexTrust.cs            新文件：索引签名校验
+.\src\PclDlSwap.Payload\Swap\AddonRepository.cs       本地/在线索引验签
+.\src\PclDlSwap.Payload\PclDlSwap.Payload.csproj      嵌入官方公钥
+.\data\index-key.pub.xml                              官方索引公钥
+.\data\addons-index.json.sig                          索引签名
+.\scripts\sign-index.ps1                              签名脚本
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs              签名/篡改断言
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|索引签名|RSA-SHA256 覆盖索引原始字节；信任 = 内置官方公钥 + trusted-keys；Unsigned 放行、无效拒绝并回落缓存/内置|2026.10.31-07:05:00|PCL2.dl.swap
+2|签名工具|`scripts/sign-index.ps1` 使用本地私钥生成 `.sig`；私钥 gitignore|2026.10.31-07:05:00|PCL2.dl.swap
+3|验证|自检签名/篡改断言 True；真机 `签名有效（keyId 465f48e7b01ca238，内置公钥）`；`ok=51 fail=0`|2026.10.31-07:05:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-06:45:00 v26.2-Alpha 3: 自定义仓库源与下载重试
 
 GitCommitHash: (unreleased)

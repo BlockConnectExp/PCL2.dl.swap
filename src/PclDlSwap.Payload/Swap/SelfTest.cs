@@ -137,6 +137,38 @@ namespace PclDlSwap.Payload.Swap
                     try { System.IO.File.Delete(temp); } catch { }
                 }
             });
+            Probe("仓库.签名校验", () =>
+            {
+                using (var rsa = System.Security.Cryptography.RSA.Create())
+                {
+                    rsa.KeySize = 2048;
+                    var trustedDir = PackageTrust.TrustedKeyDirectory;
+                    System.IO.Directory.CreateDirectory(trustedDir);
+                    var keyFile = System.IO.Path.Combine(trustedDir, "selftest-index.xml");
+                    System.IO.File.WriteAllText(keyFile, rsa.ToXmlString(false));
+                    try
+                    {
+                        var json = System.Text.Encoding.UTF8.GetBytes(
+                            "{\"schema\":1,\"modules\":[]}");
+                        var signature = rsa.SignData(json,
+                            System.Security.Cryptography.HashAlgorithmName.SHA256,
+                            System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+                        var keyId = PackageTrust.KeyIdFor(rsa);
+                        var sigJson = System.Text.Encoding.UTF8.GetBytes(
+                            "{\"algorithm\":\"RSA-SHA256\",\"keyId\":\"" + keyId +
+                            "\",\"signature\":\"" + Convert.ToBase64String(signature) + "\"}");
+                        var good = IndexTrust.Verify(json, sigJson);
+                        var tampered = System.Text.Encoding.UTF8.GetBytes(
+                            "{\"schema\":1,\"modules\":[{\"id\":\"evil\"}]}");
+                        var bad = IndexTrust.Verify(tampered, sigJson);
+                        return good.Ok && !bad.Ok;
+                    }
+                    finally
+                    {
+                        try { System.IO.File.Delete(keyFile); } catch { }
+                    }
+                }
+            });
             Probe("权限.宽松(内置)", () =>
                 SwapHost.Addons.HasPermission("swap.download-mc", "hooks"));
             Probe("权限.严格判定", () =>

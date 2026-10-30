@@ -75,6 +75,13 @@ https://raw.githubusercontent.com/BlockConnectExp/PCL2.dl.swap/main/data/addons-
 - `sha256` 只保证「下载内容与索引声明一致」，不替代包内签名；
 - 所有安装仍受模块权限严格门控约束（声明了 permissions 的模块）。
 
+### 索引签名
+
+- 可选文件 `addons-index.json.sig`（`{algorithm,keyId,signature}`，RSA-SHA256 覆盖索引原始字节）；
+- 信任来源：payload 内置官方公钥（keyId `465f48e7b01ca238`）+ `<数据根>\trusted-keys\*.xml`；
+- 无 `.sig` = Unsigned（兼容放行）；签名无效 = 拒绝该索引并回落缓存/内置；
+- 生成：`.\scripts\sign-index.ps1 -PrivateKey keys\index-signing.key.xml`（私钥不入库）。
+
 ## 5 当前索引
 
 首个条目：PCL2 Themes v26.0-Alpha4（`StarsailsClover/PCL2Themes`）。

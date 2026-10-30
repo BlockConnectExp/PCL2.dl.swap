@@ -181,7 +181,17 @@ namespace PclDlSwap.Payload.Swap
             {
                 if (File.Exists(url))
                 {
-                    var local = Parse(File.ReadAllText(url), "本地索引:" + url);
+                    var bytes = File.ReadAllBytes(url);
+                    var sigPath = url + ".sig";
+                    if (File.Exists(sigPath))
+                    {
+                        var trust = IndexTrust.Verify(bytes, File.ReadAllBytes(sigPath));
+                        if (!trust.Ok)
+                            return new Snapshot { Error = "索引签名校验失败：" + trust.Message };
+                        SwapLog.Info("[repo] " + trust.Message);
+                    }
+
+                    var local = Parse(Encoding.UTF8.GetString(bytes), "本地索引:" + url);
                     local.FromDisk = true;
                     return local;
                 }
@@ -196,6 +206,25 @@ namespace PclDlSwap.Payload.Swap
                         {
                             http.DefaultRequestHeaders.UserAgent.ParseAdd("Pcl2Swap.Payload");
                             var json = http.GetStringAsync(url).GetAwaiter().GetResult();
+                            byte[] signature = null;
+                            try
+                            {
+                                signature = http.GetByteArrayAsync(url + ".sig")
+                                    .GetAwaiter().GetResult();
+                            }
+                            catch
+                            {
+                                // No .sig next to the index: treat it as unsigned (compatibility).
+                            }
+
+                            if (signature != null)
+                            {
+                                var trust = IndexTrust.Verify(Encoding.UTF8.GetBytes(json), signature);
+                                if (!trust.Ok)
+                                    return new Snapshot { Error = "索引签名校验失败：" + trust.Message };
+                                SwapLog.Info("[repo] " + trust.Message);
+                            }
+
                             var snapshot = Parse(json, url);
                             if (snapshot.Error == null && snapshot.Modules.Count > 0)
                             {

@@ -25,3 +25,6 @@ _scratch/
 
 # addon packages built by the demo/template projects
 *.swapaddon
+
+# local signing keys (public half lives in data/)
+keys/

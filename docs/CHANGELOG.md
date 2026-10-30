@@ -6,6 +6,26 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-06:45:00 v26.2-Alpha 3: 自定义仓库源与下载重试
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\AddonRepository.cs      自定义源、本地索引、下载重试
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs  Source 行 + Custom source 输入
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs             自定义源断言
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|自定义源|`<数据根>\repo\source.txt` 保存自定义索引；空值恢复默认；支持本地 JSON 文件路径|2026.10.31-06:45:00|PCL2.dl.swap
+2|UI|仓库卡片显示 Source 行、Custom source 输入框与「Save source & refresh」按钮|2026.10.31-06:45:00|PCL2.dl.swap
+3|重试|索引下载失败自动重试一次（600ms），再回落 缓存 → 内置|2026.10.31-06:45:00|PCL2.dl.swap
+4|验证|自检 `仓库.自定义源 = True`；UI 截图；`ok=50 fail=0`|2026.10.31-06:45:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-06:30:00 v26.2-Alpha 2: 仓库确认/缓存/更新检测
 
 GitCommitHash: (unreleased)

@@ -556,6 +556,21 @@ namespace PclDlSwap.Payload.Swap.Views
                 SwapUi.Button(i18n.T("打开索引", "Open index"),
                     () => PclUi.OpenWebsite(AddonRepository.DefaultIndexUrl))));
 
+            rows.Add(SwapUi.Separator());
+            rows.Add(SwapUi.Note((i18n.IsEnglish ? "Source: " : "仓库源：") +
+                                 AddonRepository.CurrentIndexUrl));
+            var pendingSource = AddonRepository.CurrentIndexUrl;
+            rows.Add(SwapUi.TextInput(i18n.T("自定义源", "Custom source"),
+                AddonRepository.CurrentIndexUrl, value => pendingSource = value));
+            rows.Add(SwapUi.Buttons(
+                SwapUi.Button(i18n.T("保存源并刷新", "Save source & refresh"), () =>
+                {
+                    AddonRepository.SetSource(pendingSource);
+                    AddonRepository.RefreshAsync(true, _ =>
+                        PclUi.OnUiThread(() => PageRegistry.InvalidatePage("swap-addons")));
+                    PageRegistry.InvalidatePage("swap-addons");
+                })));
+
             return SwapUi.Card(i18n.T("模块仓库", "Module repository"), rows.ToArray());
         }
 

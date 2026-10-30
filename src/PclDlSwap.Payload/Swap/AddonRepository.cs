@@ -32,6 +32,61 @@ namespace PclDlSwap.Payload.Swap
         /// <summary>Last successfully downloaded index, kept for offline starts.</summary>
         private static string CachePath => Path.Combine(SwapPaths.DataRoot, "repo", "addons-index.json");
 
+        /// <summary>Optional override (mirror / intranet index), one line of text.</summary>
+        private static string SourcePath => Path.Combine(SwapPaths.DataRoot, "repo", "source.txt");
+
+        private static string _currentUrl;
+
+        /// <summary>The index the page refreshes: custom source when set, default otherwise.</summary>
+        public static string CurrentIndexUrl
+        {
+            get
+            {
+                if (!string.IsNullOrWhiteSpace(_currentUrl)) return _currentUrl;
+                try
+                {
+                    if (File.Exists(SourcePath))
+                    {
+                        var custom = File.ReadAllText(SourcePath).Trim();
+                        if (!string.IsNullOrWhiteSpace(custom)) return _currentUrl = custom;
+                    }
+                }
+                catch
+                {
+                    // fall through to the default
+                }
+
+                return _currentUrl = DefaultIndexUrl;
+            }
+        }
+
+        /// <summary>Persists a custom index URL; an empty value restores the default.</summary>
+        public static void SetSource(string url)
+        {
+            try
+            {
+                var trimmed = (url ?? string.Empty).Trim();
+                Directory.CreateDirectory(Path.GetDirectoryName(SourcePath) ?? SwapPaths.DataRoot);
+                if (string.IsNullOrEmpty(trimmed))
+                {
+                    if (File.Exists(SourcePath)) File.Delete(SourcePath);
+                    _currentUrl = DefaultIndexUrl;
+                }
+                else
+                {
+                    File.WriteAllText(SourcePath, trimmed, new UTF8Encoding(false));
+                    _currentUrl = trimmed;
+                }
+
+                lock (Gate) _current = new Snapshot();
+                SwapLog.Info("[repo] 仓库源：" + CurrentIndexUrl);
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("[repo] 仓库源保存失败：" + ex.Message);
+            }
+        }
+
         public sealed class RepoModule
         {
             public string Id { get; set; }
@@ -96,7 +151,7 @@ namespace PclDlSwap.Payload.Swap
                 Snapshot next;
                 try
                 {
-                    next = Load(DefaultIndexUrl);
+                    next = Load(CurrentIndexUrl);
                 }
                 catch (Exception ex)
                 {
@@ -124,27 +179,48 @@ namespace PclDlSwap.Payload.Swap
         {
             try
             {
-                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-                using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) })
+                if (File.Exists(url))
                 {
-                    http.DefaultRequestHeaders.UserAgent.ParseAdd("Pcl2Swap.Payload");
-                    var json = http.GetStringAsync(url).GetAwaiter().GetResult();
-                    var snapshot = Parse(json, url);
-                    if (snapshot.Error == null && snapshot.Modules.Count > 0)
+                    var local = Parse(File.ReadAllText(url), "本地索引:" + url);
+                    local.FromDisk = true;
+                    return local;
+                }
+
+                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                Exception last = null;
+                for (var attempt = 0; attempt < 2; attempt++)
+                {
+                    try
                     {
-                        try
+                        using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) })
                         {
-                            Directory.CreateDirectory(Path.GetDirectoryName(CachePath) ?? SwapPaths.DataRoot);
-                            File.WriteAllText(CachePath, json, new UTF8Encoding(false));
-                        }
-                        catch (Exception ex)
-                        {
-                            SwapLog.Warn("[repo] 索引缓存写入失败：" + ex.Message);
+                            http.DefaultRequestHeaders.UserAgent.ParseAdd("Pcl2Swap.Payload");
+                            var json = http.GetStringAsync(url).GetAwaiter().GetResult();
+                            var snapshot = Parse(json, url);
+                            if (snapshot.Error == null && snapshot.Modules.Count > 0)
+                            {
+                                try
+                                {
+                                    Directory.CreateDirectory(Path.GetDirectoryName(CachePath) ?? SwapPaths.DataRoot);
+                                    File.WriteAllText(CachePath, json, new UTF8Encoding(false));
+                                }
+                                catch (Exception ex)
+                                {
+                                    SwapLog.Warn("[repo] 索引缓存写入失败：" + ex.Message);
+                                }
+                            }
+
+                            return snapshot;
                         }
                     }
-
-                    return snapshot;
+                    catch (Exception ex)
+                    {
+                        last = ex;
+                        if (attempt == 0) Thread.Sleep(600);
+                    }
                 }
+
+                throw last ?? new InvalidOperationException("索引下载失败");
             }
             catch (Exception ex)
             {

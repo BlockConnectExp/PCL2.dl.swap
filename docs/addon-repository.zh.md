@@ -54,6 +54,13 @@ https://raw.githubusercontent.com/BlockConnectExp/PCL2.dl.swap/main/data/addons-
    30 分钟内自动刷新使用缓存，「Refresh repository」强制网络刷新；
 6. 「打开索引」按钮可查看索引原文。
 
+### 自定义源
+
+- 卡片底部 `Custom source` 输入框可填任意 HTTP(S) 地址或**本地 JSON 文件路径**；
+- 「Save source & refresh」写入 `<数据根>\repo\source.txt` 并强制刷新；
+- 清空输入框保存即恢复默认（GitHub raw 索引）；
+- 自定义源同样走 SHA-256 校验、包信任链与权限门控。
+
 ## 3 发布一个模块
 
 1. 用 `examples/demo-addon` 或自己的工程构建 `.swapaddon`；

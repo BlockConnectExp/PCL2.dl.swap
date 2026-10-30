@@ -115,6 +115,28 @@ namespace PclDlSwap.Payload.Swap
                 AddonRepository.CompareVersion("v26.0-Alpha 4", "v26.0-Alpha 3") > 0 &&
                 AddonRepository.CompareVersion("v1.0.0", "v1.0.0") == 0 &&
                 AddonRepository.CompareVersion("v1.0.0", "v1.1.0") < 0);
+            Probe("仓库.自定义源", () =>
+            {
+                var before = AddonRepository.CurrentIndexUrl;
+                var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                    "pcl2swap-index-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    System.IO.File.WriteAllText(temp,
+                        "{\"schema\":1,\"modules\":[{\"id\":\"local.module\",\"name\":\"Local\"," +
+                        "\"version\":\"1.0.0\",\"download\":\"https://example.com/x.swapaddon\"}]}");
+                    AddonRepository.SetSource(temp);
+                    var snapshot = AddonRepository.Load(AddonRepository.CurrentIndexUrl);
+                    return AddonRepository.CurrentIndexUrl == temp && snapshot.Modules.Count == 1;
+                }
+                finally
+                {
+                    AddonRepository.SetSource(
+                        string.Equals(before, AddonRepository.DefaultIndexUrl, StringComparison.Ordinal)
+                            ? string.Empty : before);
+                    try { System.IO.File.Delete(temp); } catch { }
+                }
+            });
             Probe("权限.宽松(内置)", () =>
                 SwapHost.Addons.HasPermission("swap.download-mc", "hooks"));
             Probe("权限.严格判定", () =>

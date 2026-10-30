@@ -19,6 +19,40 @@ namespace PCL2Swap.Api
         IPclDownloadAccess Download { get; }
         IPclLaunchAccess Launch { get; }
         IPclLoaderAccess Loader { get; }
+        IPclUiAccess Ui { get; }
+        IPclLogAccess Logs { get; }
+    }
+
+    /// <summary>
+    /// Read access to the launcher's live UI: which page is showing, the main window, and the
+    /// runtime translation pass that turns Chinese PCL text into English.
+    /// </summary>
+    public interface IPclUiAccess
+    {
+        /// <summary>The type name of the page PCL currently shows ("PageSetupLaunch", ...).</summary>
+        string CurrentPage { get; }
+
+        /// <summary>The host's main window object (WPF Window), or null before it exists.</summary>
+        object MainWindow { get; }
+
+        /// <summary>Finds a cached host page object such as "FrmSetupLeft" or "FrmDownloadInstall".</summary>
+        object FindPage(string memberName);
+
+        /// <summary>Translates every matching text in the given visual tree; returns the hit count.</summary>
+        int Translate(object visualRoot);
+
+        /// <summary>Reverts the strings this session translated under the given visual tree.</summary>
+        int Restore(object visualRoot);
+    }
+
+    /// <summary>PCL's own log file, so addons can show why the launcher last failed.</summary>
+    public interface IPclLogAccess
+    {
+        /// <summary>Full path of the current PCL log, or an empty string when none exists yet.</summary>
+        string LogPath { get; }
+
+        /// <summary>Last <paramref name="lines"/> lines of the log (empty when unavailable).</summary>
+        string Tail(int lines = 120);
     }
 
     /// <summary>

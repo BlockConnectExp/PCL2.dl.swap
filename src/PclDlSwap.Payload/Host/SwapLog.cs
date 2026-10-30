@@ -13,10 +13,10 @@ namespace PclDlSwap.Payload.Host
         private static bool _hostLoggerProbed;
 
         /// <summary>Displayed version of the tool, reused by the About page entry.</summary>
-        public const string ToolVersion = "v26.1-Alpha 4";
+        public const string ToolVersion = "v26.1-Alpha 5";
 
         /// <summary>File-system friendly form of <see cref="ToolVersion"/>.</summary>
-        public const string ToolVersionCompact = "v26.1-Alpha4";
+        public const string ToolVersionCompact = "v26.1-Alpha5";
 
         /// <summary>
         /// Primary log lives under %TEMP% so the injected form always has a writable, predictable

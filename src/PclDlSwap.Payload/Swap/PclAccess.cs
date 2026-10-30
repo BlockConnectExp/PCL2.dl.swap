@@ -29,6 +29,8 @@ namespace PclDlSwap.Payload.Swap
             Download = new DownloadAccess(host);
             Launch = new LaunchAccess(host);
             Loader = new LoaderAccess(host);
+            Ui = new UiAccess(host);
+            Logs = new LogAccess(host);
         }
 
         public IPclSecretAccess Secret { get; }
@@ -40,6 +42,100 @@ namespace PclDlSwap.Payload.Swap
         public IPclDownloadAccess Download { get; }
         public IPclLaunchAccess Launch { get; }
         public IPclLoaderAccess Loader { get; }
+        public IPclUiAccess Ui { get; }
+        public IPclLogAccess Logs { get; }
+
+        /// <summary>Live-UI reads plus the translation pass (API 1.1).</summary>
+        private sealed class UiAccess : IPclUiAccess
+        {
+            private readonly Assembly _host;
+
+            public UiAccess(Assembly host) => _host = host;
+
+            public string CurrentPage
+            {
+                get
+                {
+                    try
+                    {
+                        var main = PclUi.GetMember(_host?.GetType("PCL.ModMain", false), "FrmMain");
+                        var page = PclUi.GetMember(main, "PageCurrent")
+                                   ?? PclUi.GetMember(main, "PageNow")
+                                   ?? PclUi.GetMember(main, "PageCurrentType");
+                        return page?.GetType().Name ?? string.Empty;
+                    }
+                    catch
+                    {
+                        return string.Empty;
+                    }
+                }
+            }
+
+            public object MainWindow =>
+                PclUi.GetMember(_host?.GetType("PCL.ModMain", false), "FrmMain");
+
+            public object FindPage(string memberName) =>
+                PclUi.GetMember(_host?.GetType("PCL.ModMain", false), memberName);
+
+            public int Translate(object visualRoot) => HostTranslator.Apply(visualRoot);
+
+            public int Restore(object visualRoot) => HostTranslator.Restore(visualRoot);
+        }
+
+        /// <summary>PCL's own log file (API 1.1).</summary>
+        private sealed class LogAccess : IPclLogAccess
+        {
+            private readonly Assembly _host;
+
+            public LogAccess(Assembly host) => _host = host;
+
+            public string LogPath
+            {
+                get
+                {
+                    try
+                    {
+                        var location = _host?.Location;
+                        if (string.IsNullOrEmpty(location)) return string.Empty;
+                        var side = System.IO.Path.Combine(
+                            System.IO.Path.GetDirectoryName(location) ?? string.Empty, "PCL", "Log1.txt");
+                        return System.IO.File.Exists(side) ? side : string.Empty;
+                    }
+                    catch
+                    {
+                        return string.Empty;
+                    }
+                }
+            }
+
+            public string Tail(int lines = 120)
+            {
+                var path = LogPath;
+                if (string.IsNullOrEmpty(path)) return string.Empty;
+                try
+                {
+                    var capacity = Math.Max(1, lines);
+                    var queue = new Queue<string>(capacity);
+                    using (var stream = new System.IO.FileStream(path, System.IO.FileMode.Open,
+                               System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite))
+                    using (var reader = new System.IO.StreamReader(stream, System.Text.Encoding.UTF8))
+                    {
+                        string line;
+                        while ((line = reader.ReadLine()) != null)
+                        {
+                            if (queue.Count == capacity) queue.Dequeue();
+                            queue.Enqueue(line);
+                        }
+                    }
+
+                    return string.Join(Environment.NewLine, queue);
+                }
+                catch
+                {
+                    return string.Empty;
+                }
+            }
+        }
 
         // ------------------------------------------------------------------ helpers
 

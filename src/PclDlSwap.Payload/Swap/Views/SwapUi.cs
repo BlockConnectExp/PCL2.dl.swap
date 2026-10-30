@@ -110,7 +110,10 @@ namespace PclDlSwap.Payload.Swap.Views
             // every control starts 134px further right. A fixed column (110 + 24 gap) keeps our
             // rows on the same grid as the shipped pages; an Auto column silently grows to the
             // widest label of the whole page and leaves a hole in the middle of the card.
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(110) });
+            // English captions ("Addon directory") are wider than the Chinese originals; widen the
+            // caption column while English is active instead of clipping the row label.
+            var captionWidth = SwapI18n.Current.IsEnglish ? 150.0 : 110.0;
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(captionWidth) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             var caption = Text(label, 12.5, false, false);
@@ -317,6 +320,101 @@ namespace PclDlSwap.Payload.Swap.Views
             combo.VerticalAlignment = VerticalAlignment.Center;
             combo.SelectionChanged += (sender, args) => RelayInt(onChange, combo.SelectedIndex);
             return Row(label, combo);
+        }
+
+        /// <summary>Labelled slider row with a live numeric readout (API 1.1).</summary>
+        internal static FrameworkElement Slider(string label, double min, double max, double step,
+            double initial, Action<double> onChange)
+        {
+            var slider = new Slider
+            {
+                Minimum = min,
+                Maximum = max,
+                SmallChange = step <= 0 ? 0.01 : step,
+                LargeChange = (step <= 0 ? 0.01 : step) * 5,
+                Value = initial,
+                Width = 260,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var readout = Text(initial.ToString("0.##"), 12.5, true, false);
+            readout.MinWidth = 48;
+            readout.VerticalAlignment = VerticalAlignment.Center;
+
+            slider.ValueChanged += (sender, args) =>
+            {
+                try
+                {
+                    readout.Text = args.NewValue.ToString("0.##");
+                    onChange?.Invoke(args.NewValue);
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("SwapUi：滑块回调失败：" + ex.Message);
+                }
+            };
+
+            var strip = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            strip.Children.Add(slider);
+            strip.Children.Add(new Border { Width = 10 });
+            strip.Children.Add(readout);
+            return Row(label, strip);
+        }
+
+        /// <summary>Labelled text field row; uses the host MyTextBox when available (API 1.1).</summary>
+        internal static FrameworkElement TextInput(string label, string initial, Action<string> onChange)
+        {
+            TextBox box = null;
+            var boxType = HostType("PCL.MyTextBox");
+            if (boxType != null)
+            {
+                try { box = Activator.CreateInstance(boxType) as TextBox; }
+                catch (Exception ex) { SwapLog.Warn("SwapUi：MyTextBox 构建失败，退回标准输入框：" + ex.Message); }
+            }
+            if (box == null) box = new TextBox();
+
+            box.Text = initial ?? string.Empty;
+            box.Height = 35;
+            box.HorizontalAlignment = HorizontalAlignment.Stretch;
+            box.VerticalAlignment = VerticalAlignment.Center;
+            box.TextChanged += (sender, args) =>
+            {
+                try { onChange?.Invoke(box.Text); }
+                catch (Exception ex) { SwapLog.Warn("SwapUi：输入回调失败：" + ex.Message); }
+            };
+            return Row(label, box);
+        }
+
+        /// <summary>Underlined link that opens through PCL's own OpenWebsite helper (API 1.1).</summary>
+        internal static FrameworkElement Link(string text, string url)
+        {
+            var block = Text(text, 12.5, false);
+            block.TextDecorations = TextDecorations.Underline;
+            block.Cursor = System.Windows.Input.Cursors.Hand;
+            block.MouseLeftButtonUp += (sender, args) => PclUi.OpenWebsite(url);
+            return block;
+        }
+
+        /// <summary>Themed hairline between groups, matching the shipped card rhythm (API 1.1).</summary>
+        internal static FrameworkElement Separator()
+        {
+            var line = new Border
+            {
+                Height = 1,
+                Margin = new Thickness(0, 6, 0, 12)
+            };
+            try
+            {
+                line.SetResourceReference(Border.BackgroundProperty, "ColorBrush7");
+            }
+            catch
+            {
+                line.Background = new SolidColorBrush(Color.FromArgb(30, 0, 0, 0));
+            }
+            return line;
         }
 
         private sealed class CheckRelay

@@ -6,6 +6,35 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-02:45:00 v26.1-Alpha 5: PCL2 英文支持 + SDK API 1.1
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\II18n.cs                         新文件：SwapLanguage / II18n
+.\src\PCL2Swap.Api\IPclAccess.cs                    新增 IPclUiAccess / IPclLogAccess
+.\src\PCL2Swap.Api\ISwapApi.cs                      ISwapApi.I18n + IUi 四个新控件
+.\src\PclDlSwap.Payload\Swap\I18n.cs                新文件：词典、短语表、语言持久化
+.\src\PclDlSwap.Payload\Swap\HostTranslator.cs      新文件：WPF 视觉树运行时翻译
+.\src\PclDlSwap.Payload\Swap\Views\SwapSettingsView.cs  语言卡与双语文案
+.\src\PclDlSwap.Payload\Swap\Views\SwapUi.cs        Slider/TextInput/Link/Separator + 英文标签列宽
+.\src\PclDlSwap.Payload\Swap\PclAccess.cs           Ui/Logs 实现
+.\src\PclDlSwap.Payload\Swap\PageRegistry.cs        侧栏 Info 双语
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs            8 条新断言
+.\docs\i18n.zh.md                                   英文支持文档
+.\docs\swap-api.md                                  §12 API 1.1
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|英文支持|运行时翻译层：语言设置（Auto/中文/English，存 `<数据根>\ui.json`）、约 110 条内置词典、磁盘覆盖 `<数据根>\i18n\en-US.json`、动态短语表；`HostTranslator` 翻译 TextBlock/Run、只读 TextBox、RichTextBox、Content/Header/Title/ToolTip 与 `Text`/`Info` 属性，切回中文可逆|2026.10.31-02:45:00|PCL2.dl.swap
+2|Swap 页面双语|Swap Settings 新增 Language 卡（切换 + Translate now + Restore original Chinese）；页面、宿主信息、查毒策略、目录卡片与侧栏 Info 全部双语；英文时标签列宽 110→150 避免截断|2026.10.31-02:45:00|PCL2.dl.swap
+3|SDK API 1.1|新增 `ISwapApi.I18n`（T/Register/SetLanguage/IsEnglish）、`IPclAccess.Ui`（CurrentPage/MainWindow/FindPage/Translate/Restore）、`IPclAccess.Logs`（LogPath/Tail）与 `IUi` 四个控件（Slider/TextInput/Link/Separator）；仅加成员，1.0 addon 兼容|2026.10.31-02:45:00|PCL2.dl.swap
+4|验证|harness 六套件 PASS（示例 addon 读到 1.1.0）；2.99.0.1 真机 `ok=38 fail=0`；I18n 往返 `EN→Host information / ZH→宿主信息`；主界面、设置页、Swap Settings、侧栏 Info、启动日志行均实测英文|2026.10.31-02:45:00|PCL2.dl.swap
+
+---
 ## 2026.10.31-01:30:00 v26.1-Alpha 4: 注入器瘦身与 CLI 失败诊断
 
 GitCommitHash: (unreleased)

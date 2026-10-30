@@ -93,6 +93,23 @@ namespace PCL2Swap.Api
         /// </summary>
         FrameworkElement Combo(string label, IReadOnlyList<string> options, int selectedIndex,
             Action<int> onChange);
+
+        // ---- wider front-end builders (API 1.1) -----------------------------------------------
+        // The panel shapes addons kept re-implementing by hand. Slider, TextInput and Link mirror
+        // the settings rows; Separator is the hairline between groups.
+
+        /// <summary>A labelled slider row; onChange receives the live value.</summary>
+        FrameworkElement Slider(string label, double min, double max, double step, double initial,
+            Action<double> onChange);
+
+        /// <summary>A labelled text field row; onChange fires on every edit.</summary>
+        FrameworkElement TextInput(string label, string initial, Action<string> onChange);
+
+        /// <summary>An underlined link that opens the URL through the launcher's own helper.</summary>
+        FrameworkElement Link(string text, string url);
+
+        /// <summary>A themed 1px separator with the page's vertical rhythm.</summary>
+        FrameworkElement Separator();
     }
 
     /// <summary>Per-addon persisted key/value store.</summary>
@@ -123,6 +140,8 @@ namespace PCL2Swap.Api
         ISwapSurface Surface { get; }
         /// <summary>Readable wrappers over PCL's own subsystems (Secret / Net / Animation).</summary>
         IPclAccess Pcl { get; }
+        /// <summary>Bilingual text surface shared with the running launcher.</summary>
+        II18n I18n { get; }
         void Log(string message);
         void LogWarning(string message);
         void LogError(string message, Exception exception = null);

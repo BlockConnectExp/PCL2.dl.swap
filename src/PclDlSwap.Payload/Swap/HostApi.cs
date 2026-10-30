@@ -18,7 +18,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.0.0";
+        public const string ApiVersion = "1.1.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -43,6 +43,7 @@ namespace PclDlSwap.Payload.Swap
         public IReflection Reflect => _reflect;
         public ISwapSurface Surface => _surface;
         public IPclAccess Pcl => _pcl;
+        public II18n I18n => SwapI18n.Current;
 
         public IData Data { get; private set; }
 
@@ -287,6 +288,18 @@ namespace PclDlSwap.Payload.Swap
             public System.Windows.FrameworkElement Combo(string label,
                 System.Collections.Generic.IReadOnlyList<string> options, int selectedIndex,
                 Action<int> onChange) => Views.SwapUi.Combo(label, options, selectedIndex, onChange);
+
+            public System.Windows.FrameworkElement Slider(string label, double min, double max,
+                double step, double initial, Action<double> onChange) =>
+                Views.SwapUi.Slider(label, min, max, step, initial, onChange);
+
+            public System.Windows.FrameworkElement TextInput(string label, string initial,
+                Action<string> onChange) => Views.SwapUi.TextInput(label, initial, onChange);
+
+            public System.Windows.FrameworkElement Link(string text, string url) =>
+                Views.SwapUi.Link(text, url);
+
+            public System.Windows.FrameworkElement Separator() => Views.SwapUi.Separator();
         }
 
         private sealed class ReflectionImpl : IReflection

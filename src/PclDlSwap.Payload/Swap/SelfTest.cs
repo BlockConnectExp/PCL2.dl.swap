@@ -76,6 +76,18 @@ namespace PclDlSwap.Payload.Swap
             Probe("Host.AddonDirectory", () => api.Host.AddonDirectory);
             Probe("Host.LogDirectory", () => api.Host.LogDirectory);
 
+            Probe("I18n.Explicit", () => api.I18n.T("启动", "Launch"));
+            Probe("I18n.Roundtrip", () => RunI18nProbe(api));
+            if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
+            {
+                Probe("Ui.API1.1.Slider", () => api.Ui.Slider("v", 0, 10, 1, 5, _ => { }) != null);
+                Probe("Ui.API1.1.TextInput", () => api.Ui.TextInput("t", "x", _ => { }) != null);
+                Probe("Ui.API1.1.Link", () => api.Ui.Link("link", "https://example.com") != null);
+                Probe("Ui.API1.1.Separator", () => api.Ui.Separator() != null);
+            }
+            Probe("Pcl.Logs.LogPath", () => api.Pcl.Logs.LogPath);
+            Probe("Pcl.Ui.CurrentPage", () => api.Pcl.Ui.CurrentPage);
+
             Probe("Surface.HostMvid", () => api.Surface.HostMvid);
             Probe("Surface.TypeCount", () => api.Surface.TypeCount);
             Probe("Surface.FindMethod(ModSecret.UpdateStart)",
@@ -255,6 +267,28 @@ namespace PclDlSwap.Payload.Swap
                 return $"enabled={(enabled == 42 ? "handler" : "original")}，" +
                        $"disabled={(disabled == 42 ? "handler" : "original")}，" +
                        $"reEnabled={(reEnabled == 42 ? "handler" : "original")}，handler 命中 {hits} 次";
+            }
+        }
+
+        /// <summary>Switches to English and back, proving the dictionary and switch are wired.</summary>
+        private static object RunI18nProbe(ISwapApi api)
+        {
+            var original = api.I18n.Language;
+            try
+            {
+                api.I18n.SetLanguage(SwapLanguage.English);
+                var english = api.I18n.T("宿主信息");
+                api.I18n.SetLanguage(SwapLanguage.Chinese);
+                var chinese = api.I18n.T("宿主信息");
+                if (english != "Host information")
+                    throw new InvalidOperationException("EN = " + english);
+                if (chinese != "宿主信息")
+                    throw new InvalidOperationException("ZH = " + chinese);
+                return $"EN→{english}；ZH→{chinese}";
+            }
+            finally
+            {
+                api.I18n.SetLanguage(original);
             }
         }
     }

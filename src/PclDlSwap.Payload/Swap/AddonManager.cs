@@ -1037,6 +1037,7 @@ namespace PclDlSwap.Payload.Swap
             public IReflection Reflect => _inner.Reflect;
             public ISwapSurface Surface => _inner.Surface;
             public IPclAccess Pcl => _inner.Pcl;
+            public II18n I18n => _inner.I18n;
 
             // Module lines keep their own file (LSPosed-style per-module log) and are tagged with the
             // module id in the global log, so "which module did this" never needs guessing.
@@ -1107,6 +1108,17 @@ namespace PclDlSwap.Payload.Swap
 
             public FrameworkElement Combo(string label, IReadOnlyList<string> options, int selectedIndex,
                 Action<int> onChange) => _inner.Combo(label, options, selectedIndex, onChange);
+
+            public FrameworkElement Slider(string label, double min, double max, double step,
+                double initial, Action<double> onChange) =>
+                _inner.Slider(label, min, max, step, initial, onChange);
+
+            public FrameworkElement TextInput(string label, string initial, Action<string> onChange) =>
+                _inner.TextInput(label, initial, onChange);
+
+            public FrameworkElement Link(string text, string url) => _inner.Link(text, url);
+
+            public FrameworkElement Separator() => _inner.Separator();
         }
 
         /// <summary>

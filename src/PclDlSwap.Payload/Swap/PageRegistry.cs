@@ -575,11 +575,13 @@ namespace PclDlSwap.Payload.Swap
 
         private static string BuildItemInfo(PageEntry entry)
         {
+            var i18n = SwapI18n.Current;
             if (entry.LogicalId == "swap-addons")
-                return "管理 Swap 插件（" + (SwapHost.Addons?.Records.Count ?? 0) + "）";
+                return i18n.T("管理 Swap 插件", "Manage Swap addons") +
+                       " (" + (SwapHost.Addons?.Records.Count ?? 0) + ")";
             if (entry.LogicalId == "swap-settings")
-                return "宿主信息与 Swap 设置";
-            return "Swap 扩展页面";
+                return i18n.T("宿主信息与 Swap 设置", "Host info & Swap settings");
+            return i18n.T("Swap 扩展页面", "Swap extension page");
         }
 
         /// <summary>

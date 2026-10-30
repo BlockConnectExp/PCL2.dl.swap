@@ -407,4 +407,52 @@ $env:PCL2SWAP_E2E_UNINSTALL = "test.sample"                   # 可选：紧接�
 $env:PCL2SWAP_E2E_PREVIEW   = "D:\包\demo.sample.swapaddon"   # 可选：9 秒后弹出安装预览对话框（脚本可点按钮验证）
 ```
 
+## 12. API 1.1（v26.1-Alpha 5 起）：双语与更宽的前后端
+
+`Host.ApiVersion` 现在是 `1.1.0`。本次只**增加**成员，1.0 的 addon 不需要改动，
+`apiVersion: ">=1.0 <2.0"` 继续有效。
+
+### 12.1 `ISwapApi.I18n`（新）
+
+```csharp
+string en = api.I18n.T("宿主信息");            // English 时返回 Host information
+string v  = api.I18n.T("中文", "English");     // 显式双语，不查词典
+api.I18n.Register("同步完成", "Sync finished");// 运行时扩词典
+api.I18n.SetLanguage(SwapLanguage.English);    // Auto / Chinese / English
+bool isEn = api.I18n.IsEnglish;
+```
+
+完整说明见 `docs/i18n.zh.md`。
+
+### 12.2 `IPclAccess.Ui` / `IPclAccess.Logs`（新后端）
+
+```csharp
+string page = api.Pcl.Ui.CurrentPage;        // 当前页面类型名
+object win  = api.Pcl.Ui.MainWindow;         // WPF Window（未创建时 null）
+object left = api.Pcl.Ui.FindPage("FrmSetupLeft");
+int hits    = api.Pcl.Ui.Translate(win);     // 对宿主子树翻译，返回替换数
+int back    = api.Pcl.Ui.Restore(win);       // 回退
+
+string path = api.Pcl.Logs.LogPath;          // PCL\Log1.txt
+string tail = api.Pcl.Logs.Tail(120);        // 最近 120 行
+```
+
+`Logs` 只读、无副作用；`Ui.Translate/Restore` 与内置英文层使用同一词典与幂等规则。
+
+### 12.3 `IUi` 新前端控件（4 个）
+
+```csharp
+api.Ui.Slider("音量", 0, 100, 1, 50, value => api.Log("volume=" + value));
+api.Ui.TextInput("路径", "C:\\demo", text => api.Data.Set("path", text));
+api.Ui.Link("打开主页", "https://github.com/BlockConnectExp/PCL2.dlswap");
+api.Ui.Separator();
+```
+
+- `Slider`：标签 + 滑杆 + 数值读数，使用 PCL 设置页的行网格；
+- `TextInput`：优先宿主 `MyTextBox`，退回标准 WPF `TextBox`；
+- `Link`：下划线链接，走宿主 `OpenWebsite`；
+- `Separator`：主题色 1px 分隔线。
+
+所有控件返回 `FrameworkElement`，可直接塞进 `Card`/`Text` 组成的页面。
+
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

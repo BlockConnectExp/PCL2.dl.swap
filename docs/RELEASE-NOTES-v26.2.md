@@ -82,9 +82,20 @@ injector for local/direct injection.
 | `PCL2.dl.swap-v26.2.zip` | ExLoader-facing shim `.dll` + `.dat` + checksums |
 | `PCL2.dl.swap-Loader-v26.2.zip` | Disk-patch shape |
 | `pcl2swap-2.99.0-v26.2.dll` | Patch-engine release artifact |
+| `Pcl2Swap.Shim.x64.dll` | Raw ExLoader injection DLL |
+| `Pcl2Swap.Shim.x64.dat` | Raw ExLoader payload container |
 | `source-v26.2.zip` | Source snapshot at the signed tag |
 | `shot-english-v262.png` | English host/page evidence |
 | `shot-sdk18.png` | API 1.8 management/UI evidence |
 | `shot-safe-mode-v262.png` | Safe mode recovery evidence |
+
+| Artifact SHA-256 | Value |
+|---|---|
+| Injector zip | `a1cc2dc1ca33a54171ba115091b06d81f37b02179bad9171f921f15a76838c7e` |
+| ExLoader zip | `25f9cb1d2eb536492747ddc86ad0830c55160aa178959756c37d1fc272dbb5bb` |
+| Loader zip | `82be477474d36e073d78227bec9fb5f13e2ba82ed07eb38d296661c811f76715` |
+| Patch engine | `2fa0cac6b63fb7e4f48a112d6c5571bcdd9352fec9437ab85f72d14e595fef58` |
+| Raw shim DLL | `daf2df569d51c800b37f21ddd953cac5aaaef1f6d27c81c7bfecd260304e5900` |
+| Raw shim DAT | `13fc5ea3dcfb95e3d0b69ba91a108967acaeb4d76bf6c39182ca5619c54e6247` |
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

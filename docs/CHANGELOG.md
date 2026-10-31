@@ -8,7 +8,7 @@
 ---
 ## 2026.10.31-15:55:00 v26.3-Alpha 1: 功能作用域与 API 1.9
 
-GitCommitHash: (unreleased)
+GitCommitHash: be78f31
 
 ChangedFiles:
 ```

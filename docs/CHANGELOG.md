@@ -8,7 +8,7 @@
 ---
 ## 2026.10.31-20:00:00 v26.3-Alpha 3: 英文性能、包资产与 API 1.11
 
-GitCommitHash: pending
+GitCommitHash: a1cf349
 
 ChangedFiles:
 ```

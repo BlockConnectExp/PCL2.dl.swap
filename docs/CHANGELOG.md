@@ -8,7 +8,7 @@
 ---
 ## 2026.10.31-11:57:40 v26.2: 英文支持与 API 1.8 正式版
 
-GitCommitHash: (release commit pending)
+GitCommitHash: f9e6d62
 
 ChangedFiles:
 ```

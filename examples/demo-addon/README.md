@@ -1,8 +1,9 @@
 # Demo Addon
 
 The smallest complete PCL2 Swap addon: one settings page, one More page, persisted data and the
-API 1.9 surfaces: editable feature scopes, scoped hooks, live scope events, Table / EmptyState /
-CodeBlock, private files, module messaging, themed form widgets and two sidebar page slots.
+API 1.10 surfaces: versioned atomic config, cross-module services, editable feature scopes,
+scoped hooks, live scope events, Table / EmptyState / CodeBlock, private files, module messaging,
+themed form widgets and two sidebar page slots.
 
 ## Build and pack
 
@@ -19,12 +20,13 @@ The build references `src\PCL2Swap.Api\bin\Release\net48\PCL2Swap.Api.dll` by de
 - PCL2 Swap → Swap Addon → 安装模块… → choose `demo.sample.swapaddon`, or
 - drop it into `<数据根>\addons` and restart PCL.
 
-The manifest declares `permissions: ["pages","files","clipboard","messaging"]`, so this module runs in strict
+The manifest declares `permissions: ["pages","files","clipboard","messaging","services"]`, so this module runs in strict
 mode; calling a gated API it did not declare (for example `Pcl.Secret.*`) is rejected.
 
-It also declares `demo.core` (default on) and `demo.advanced` (default off). Edit them in
-Swap Addon → module details. `demo.core` controls the message backend and page body;
-`demo.advanced` controls the optional data/diagnostic front end.
+It also declares `demo.core` (default on), `demo.advanced` (default off), and registers
+`demo.sample.echo` through `api.Services`. Edit scopes in Swap Addon → module details.
+`demo.core` controls the message/service backend and page body; `demo.advanced` controls the
+optional data/diagnostic front end.
 
 ## What to copy into your own module
 

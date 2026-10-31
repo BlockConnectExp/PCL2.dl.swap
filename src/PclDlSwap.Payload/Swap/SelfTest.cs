@@ -74,6 +74,12 @@ namespace PclDlSwap.Payload.Swap
             Probe("IModuleScopes", () => api.Scopes != null
                 ? "ready (" + api.Scopes.Scopes.Count + " host scopes)"
                 : throw new InvalidOperationException("api.Scopes is null"));
+            Probe("IAddonConfig", () => api.Config != null
+                ? "schema " + api.Config.SchemaVersion + " (" + api.Config.Keys.Count + " keys)"
+                : throw new InvalidOperationException("api.Config is null"));
+            Probe("IAddonServices", () => api.Services != null
+                ? "ready (" + api.Services.Services.Count + " services)"
+                : throw new InvalidOperationException("api.Services is null"));
             Probe("Host.Shape", () => api.Host.Shape);
             Probe("Host.ProcessId", () => api.Host.ProcessId);
             Probe("Host.AddonDirectory", () => api.Host.AddonDirectory);

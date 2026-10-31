@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Web.Script.Serialization;
 using PCL2Swap.Api;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
@@ -18,7 +16,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.9.0";
+        public const string ApiVersion = "1.10.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -41,6 +39,8 @@ namespace PclDlSwap.Payload.Swap
             Scopes = new HostScopesAccess();
             Files = new AddonFileStore(Path.Combine(SwapPaths.DataRoot, "files", "host"));
             Messaging = new MessagingAccess("host");
+            Services = new ServicesAccess("host");
+            Data = new AddonDataStore("host");
         }
 
         public IHostInfo Host { get; }
@@ -56,8 +56,10 @@ namespace PclDlSwap.Payload.Swap
         public IModuleScopes Scopes { get; }
         public IAddonFiles Files { get; }
         public IAddonMessaging Messaging { get; }
+        public IAddonServices Services { get; }
 
         public IData Data { get; private set; }
+        public IAddonConfig Config => Data as IAddonConfig;
 
         internal void AttachData(AddonDataStore store) => Data = store;
 
@@ -631,58 +633,6 @@ namespace PclDlSwap.Payload.Swap
         }
     }
 
-    /// <summary>Simple per-addon key/value store persisted next to the addon.</summary>
-    internal sealed class AddonDataStore : IData
-    {
-        private readonly string _path;
-        private readonly Dictionary<string, string> _values = new Dictionary<string, string>(StringComparer.Ordinal);
-
-        public AddonDataStore(string addonId)
-        {
-            var directory = SwapPaths.AddonDirectory(addonId);
-            try { Directory.CreateDirectory(directory); } catch { }
-            _path = Path.Combine(directory, "config.json");
-            TryLoad();
-        }
-
-        public string Get(string key, string fallback = null) =>
-            key != null && _values.TryGetValue(key, out var value) ? value : fallback;
-
-        public void Set(string key, string value)
-        {
-            if (string.IsNullOrEmpty(key)) return;
-            _values[key] = value ?? string.Empty;
-        }
-
-        public void Save()
-        {
-            try
-            {
-                var serializer = new JavaScriptSerializer();
-                File.WriteAllText(_path, serializer.Serialize(_values), new UTF8Encoding(false));
-            }
-            catch (Exception ex)
-            {
-                SwapLog.Warn($"Addon 配置写入失败（{_path}）：" + ex.Message);
-            }
-        }
-
-        private void TryLoad()
-        {
-            try
-            {
-                if (!File.Exists(_path)) return;
-                var serializer = new JavaScriptSerializer();
-                var map = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(_path));
-                if (map == null) return;
-                foreach (var pair in map) _values[pair.Key] = Convert.ToString(pair.Value);
-            }
-            catch (Exception ex)
-            {
-                SwapLog.Warn($"Addon 配置读取失败（{_path}）：" + ex.Message);
-            }
-        }
-    }
 }
 
 

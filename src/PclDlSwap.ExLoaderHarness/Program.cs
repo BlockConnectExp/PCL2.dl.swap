@@ -955,8 +955,8 @@ namespace PclDlSwap.ExLoaderHarness
             var hostInfo = api?.GetType().GetProperty("Host")?.GetValue(api);
             var pclVersion = Convert.ToString(hostInfo?.GetType().GetProperty("PclVersion")?.GetValue(hostInfo));
             Expect("Host.PclVersion reports the bound PCL build", !string.IsNullOrEmpty(pclVersion));
-            Expect("Host.ApiVersion reports the additive 1.9 contract",
-                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.9.0");
+            Expect("Host.ApiVersion reports the additive 1.10 contract",
+                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.10.0");
 
             var recovery = api?.GetType().GetProperty("Recovery")?.GetValue(api);
             var recoveryDiagnostics = Convert.ToString(recovery?.GetType().GetMethod("Diagnostics")
@@ -1562,7 +1562,7 @@ namespace PclDlSwap.ExLoaderHarness
 
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
-                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.9.0");
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.10.0");
                 Expect("sample addon sees only the default-enabled feature scope",
                     StaticString("LastEnabledScopes") == "sample.hooks");
 
@@ -1631,6 +1631,8 @@ namespace PclDlSwap.ExLoaderHarness
                     BindingFlags.NonPublic | BindingFlags.Instance);
                 var scopedApi = createScopedApi?.Invoke(manager, new[] { sample }) as PCL2Swap.Api.ISwapApi;
                 Expect("scoped API exposes IModuleScopes", scopedApi?.Scopes != null);
+                Expect("scoped API exposes IAddonConfig", scopedApi?.Config != null);
+                Expect("scoped API exposes IAddonServices", scopedApi?.Services != null);
                 Expect("scope catalog localizes names and descriptions",
                     scopedApi?.Scopes.Scopes.Count == 2 &&
                     scopedApi.Scopes.Scopes[0].Name == "演示钩子" &&
@@ -1640,6 +1642,72 @@ namespace PclDlSwap.ExLoaderHarness
                     scopedApi?.Scopes.IsEnabled("sample.hooks") == true &&
                     scopedApi.Scopes.IsEnabled("sample.optional") == false &&
                     scopedApi.Scopes.Enabled.SequenceEqual(new[] { "sample.hooks" }));
+
+                var sampleConfigPath = PCL2Swap.Api.SwapPaths.AddonConfigFile("test.sample");
+                File.WriteAllText(sampleConfigPath, "{\"loaded\":\"legacy\",\"legacyKey\":\"yes\"}");
+                var configApi = createScopedApi?.Invoke(manager, new[] { sample }) as PCL2Swap.Api.ISwapApi;
+                var configEvents = 0;
+                EventHandler configHandler = (sender, args) => configEvents++;
+                if (configApi?.Config != null) configApi.Config.Changed += configHandler;
+                Expect("legacy flat config loads as schema 1",
+                    configApi?.Config.SchemaVersion == 1 &&
+                    configApi.Config.Get("legacyKey") == "yes");
+                var migrated = configApi?.Config.Migrate(2, transaction =>
+                {
+                    transaction.Set("demo.refreshIndex", "0");
+                    transaction.Remove("loaded");
+                    transaction.Remove("legacyKey");
+                }) == true;
+                var configDisk = File.Exists(sampleConfigPath) ? File.ReadAllText(sampleConfigPath) : string.Empty;
+                Expect("config migration stages, commits and rewrites the schema envelope",
+                    migrated && configApi.Config.SchemaVersion == 2 &&
+                    configApi.Config.Get("demo.refreshIndex") == "0" &&
+                    configApi.Config.Get("loaded") == null &&
+                    configApi.Config.Get("legacyKey") == null &&
+                    configDisk.Contains("\"_schema\":2") &&
+                    configDisk.Contains("\"_values\"") &&
+                    File.Exists(sampleConfigPath + ".bak"));
+                Expect("config migration raises one change event", configEvents == 1);
+                var rollbackError = false;
+                try
+                {
+                    configApi.Config.Migrate(3, transaction =>
+                    {
+                        transaction.Set("rollbackProbe", "must-not-commit");
+                        throw new InvalidOperationException("migration failure");
+                    });
+                }
+                catch (InvalidOperationException)
+                {
+                    rollbackError = true;
+                }
+                Expect("failed config migration leaves schema and values unchanged",
+                    rollbackError && configApi.Config.SchemaVersion == 2 &&
+                    configApi.Config.Get("rollbackProbe") == null);
+                if (configApi?.Config != null) configApi.Config.Changed -= configHandler;
+
+                var serviceEvents = 0;
+                EventHandler<PCL2Swap.Api.SwapServiceChangedEventArgs> serviceHandler =
+                    (sender, args) => serviceEvents++;
+                if (scopedApi?.Services != null) scopedApi.Services.Changed += serviceHandler;
+                var configInfo = catalog?.Find("test.sample");
+                Expect("module catalog reflects the migrated config",
+                    configInfo?.ConfigSchemaVersion == 2 && configInfo.ConfigKeyCount >= 1);
+                var serviceToken = scopedApi?.Services.Register(
+                    "services/test.sample/probe", new object(), "1.0", "harness service");
+                Expect("module services register, query by contract and report provenance",
+                    serviceToken != null &&
+                    scopedApi.Services.TryGet<object>("services/test.sample/probe", out var registeredService) &&
+                    registeredService != null &&
+                    scopedApi.Services.Services.Any(info =>
+                        info.ServiceId == "services/test.sample/probe" &&
+                        info.Provider == "test.sample"));
+                Expect("service registration raises the registry event", serviceEvents == 1);
+                var disposableService = scopedApi?.Services.Register(
+                    "services/test.sample/disposable", new object(), "1.0", "disposable service");
+                disposableService?.Dispose();
+                Expect("disposing a service token unregisters exactly that registration",
+                    scopedApi?.Services.TryGet<object>("services/test.sample/disposable", out _) == false);
 
                 var scopeEvents = 0;
                 EventHandler scopeHandler = (sender, args) => scopeEvents++;
@@ -1694,11 +1762,23 @@ namespace PclDlSwap.ExLoaderHarness
                 var forwarded = PCL.HookTarget.Ping(5);
                 Expect("disabled module forwards to the original",
                     HookHandlers.SampleCalls == handlerBefore + 2 && forwarded == 10);
+                Expect("disabling a module removes every service it published",
+                    api.Services.TryGet<object>("services/test.sample/probe", out _) == false &&
+                    serviceEvents >= 2);
+                var disabledServiceAccess = false;
+                try { _ = scopedApi?.Services.Services; }
+                catch (InvalidOperationException) { disabledServiceAccess = true; }
+                Expect("a disabled module cannot query or publish services", disabledServiceAccess);
 
                 setEnabled?.Invoke(manager, new object[] { "test.sample", true });
                 var again = PCL.HookTarget.Ping(5);
                 Expect("re-enabled module hooks again",
                     HookHandlers.SampleCalls == handlerBefore + 3 && again == 105);
+                Expect("re-enabling a module republishes its own service",
+                    api.Services.TryGet<object>("services/test.sample/echo", out _) == true &&
+                    serviceEvents >= 3);
+                serviceToken?.Dispose();
+                if (scopedApi != null) scopedApi.Services.Changed -= serviceHandler;
 
                 token?.Dispose();
                 var afterDispose = PCL.HookTarget.Ping(5);
@@ -2056,7 +2136,7 @@ namespace PclDlSwap.ExLoaderHarness
                     "\"version\":\"2.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
                     "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"author\":\"harness\"," +
                     "\"description\":\"installed by the manager test\"," +
-                    "\"permissions\":[\"settings\",\"hooks\",\"files\",\"messaging\"]," +
+                    "\"permissions\":[\"settings\",\"hooks\",\"files\",\"messaging\",\"services\"]," +
                     "\"scopes\":[" +
                     "{\"id\":\"installed.core\",\"name\":\"核心\",\"nameEn\":\"Core\"," +
                     "\"description\":\"核心功能\",\"descriptionEn\":\"Core features\",\"defaultEnabled\":true}," +
@@ -2209,8 +2289,25 @@ namespace PclDlSwap.ExLoaderHarness
                     installedInfo.Scopes[0].DescriptionEnglish == "Core features" &&
                     installedInfo.Scopes[0].Enabled &&
                     !installedInfo.Scopes[1].Enabled);
+                Expect("installed module publishes its service and catalog metadata",
+                    installedInfo?.Services.Count == 1 &&
+                    installedInfo.Services[0].Provider == "test.installed" &&
+                    installedInfo.Services[0].ServiceId == "services/test.installed/echo");
                 var governedScopedApi = createScopedApi?.Invoke(manager,
                     new[] { installed }) as PCL2Swap.Api.ISwapApi;
+                Expect("services are discoverable across module boundaries",
+                    governedScopedApi?.Services.TryGet<object>("services/test.sample/echo", out _) == true);
+                var duplicateServiceRejected = false;
+                try
+                {
+                    governedScopedApi?.Services.Register(
+                        "services/test.sample/echo", new object(), "1.0", "duplicate");
+                }
+                catch (InvalidOperationException)
+                {
+                    duplicateServiceRejected = true;
+                }
+                Expect("duplicate service ids are rejected", duplicateServiceRejected);
                 var governedHookHits = 0;
                 var governedHook = governedScopedApi?.Hooks.Attach(
                     new PCL2Swap.Api.SwapMethodTarget
@@ -2277,6 +2374,13 @@ namespace PclDlSwap.ExLoaderHarness
                 catch (UnauthorizedAccessException) { messagingDenied = true; }
                 Expect("revoking messaging immediately gates IAddonMessaging",
                     messagingRevoked && messagingDenied);
+                var servicesRevoked = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "services", false }) ?? false);
+                var servicesDenied = false;
+                try { governedScopedApi?.Services.Get("services/test.installed/echo", typeof(object)); }
+                catch (UnauthorizedAccessException) { servicesDenied = true; }
+                Expect("revoking services immediately gates IAddonServices",
+                    servicesRevoked && servicesDenied);
                 var hooksRevoked = Convert.ToBoolean(setPermission?.Invoke(manager,
                     new object[] { "test.installed", "hooks", false }) ?? false);
                 var hooksBeforeRevocation = governedHookHits;
@@ -2316,14 +2420,18 @@ namespace PclDlSwap.ExLoaderHarness
                     new object[] { "test.installed", "settings", true }) ?? false);
                 var hooksRegranted = Convert.ToBoolean(setPermission?.Invoke(manager,
                     new object[] { "test.installed", "hooks", true }) ?? false);
+                var servicesRegranted = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "services", true }) ?? false);
                 Expect("a revoked permission can be granted again",
-                    regranted && hooksRegranted && catalog?.Find("test.installed")
+                    regranted && hooksRegranted && servicesRegranted && catalog?.Find("test.installed")
                         ?.GrantedPermissions.Contains("settings") == true &&
                     catalog?.Find("test.installed")?.GrantedPermissions.Contains("hooks") == true);
                 Expect("regranting immediately restores scoped access",
                     governedScopedApi?.Pcl.Settings != null);
                 Expect("regranting hook permission immediately restores installed handlers",
                     PCL.HookTarget.Ping(2) == 1002);
+                Expect("regranting services immediately restores service access",
+                    governedScopedApi?.Services.Get("services/test.installed/echo", typeof(object)) != null);
                 governedHook?.Dispose();
 
                 var permissionUpdatePath = Path.Combine(Path.GetTempPath(),
@@ -2917,7 +3025,7 @@ namespace PclDlSwap.ExLoaderHarness
                 }
             }));
             frontendDone.Wait(TimeSpan.FromSeconds(10));
-            Console.WriteLine("[uitest] API 1.9 frontends=" + (frontendOk ? "PASS" : "FAIL"));
+            Console.WriteLine("[uitest] API 1.10 frontends=" + (frontendOk ? "PASS" : "FAIL"));
             if (!frontendOk)
             {
                 Console.WriteLine("[uitest] frontend detail: " + frontendDetail);

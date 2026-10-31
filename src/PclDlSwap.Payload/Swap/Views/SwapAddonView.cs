@@ -425,6 +425,14 @@ namespace PclDlSwap.Payload.Swap.Views
                     manifest.Scopes.Count == 0
                         ? i18n.T("（未声明）", "(not declared)")
                         : manifest.Scopes.Count + i18n.T(" 项，可在下方启停", " declared; edit below")));
+                content.Add(SwapUi.InfoRow(i18n.T("配置 schema", "Config schema"),
+                    record.ConfigStore == null
+                        ? i18n.T("（模块尚未加载）", "(module not loaded)")
+                        : "v" + record.ConfigStore.SchemaVersion + i18n.T(
+                            "，" + record.ConfigStore.Keys.Count + " 项",
+                            ", " + record.ConfigStore.Keys.Count + " keys")));
+                content.Add(SwapUi.InfoRow(i18n.T("发布服务", "Published services"),
+                    AddonServiceRegistry.Snapshot(record.Id).Count.ToString()));
                 content.Add(SwapUi.InfoRow(i18n.T("权限声明", "Permissions"), manifest.Permissions.Count == 0
                     ? i18n.T("（未声明 —— 兼容模式，全部访问）",
                         "(not declared - compatibility mode, all access)")
@@ -479,6 +487,32 @@ namespace PclDlSwap.Payload.Swap.Views
                                 panel.Children.Add(SwapUi.Note(scopeDescription));
                         }
                         return panel;
+                    }));
+            }
+
+            var serviceList = AddonServiceRegistry.Snapshot(record.Id);
+            if (serviceList.Count > 0)
+            {
+                content.Add(SwapUi.Expander(
+                    i18n.T("模块服务", "Module services"), true,
+                    () =>
+                    {
+                        var rows = serviceList.Select(service => (IReadOnlyList<string>)new[]
+                        {
+                            service.ServiceId,
+                            service.Version,
+                            service.ContractType,
+                            service.Description
+                        }).ToList();
+                        return SwapUi.Table(
+                            new[]
+                            {
+                                i18n.T("服务", "Service"),
+                                i18n.T("版本", "Version"),
+                                i18n.T("契约类型", "Contract"),
+                                i18n.T("说明", "Description")
+                            },
+                            rows, new[] { 1.2, 0.6, 1.4, 1.6 }, 220);
                     }));
             }
 
@@ -805,6 +839,11 @@ namespace PclDlSwap.Payload.Swap.Views
                 text += i18n.T("（严格）", " (strict)");
                 parts.Add(text);
             }
+            var serviceCount = AddonServiceRegistry.Snapshot(record.Id).Count;
+            if (serviceCount > 0)
+                parts.Add(i18n.T("服务 ", "services ") + serviceCount);
+            if (record.ConfigStore != null)
+                parts.Add(i18n.T("配置 v", "config v") + record.ConfigStore.SchemaVersion);
             return parts.Count == 0 ? string.Empty : string.Join(" · ", parts);
         }
 

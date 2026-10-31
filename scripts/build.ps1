@@ -10,14 +10,14 @@
       dist\data\offset-manifest.json
 
     Usage:
-      .\scripts\build.ps1 [-Configuration Release] [-SkipProfiler] [-PayloadVersion "26.0.0.0"] [-TargetPcl "2.99.0"] [-ToolVersion "v26.3-Alpha1"]
+      .\scripts\build.ps1 [-Configuration Release] [-SkipProfiler] [-PayloadVersion "26.0.0.0"] [-TargetPcl "2.99.0"] [-ToolVersion "v26.3-Alpha2"]
 #>
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
     [switch]$SkipProfiler,
     [string]$TargetPcl = '2.99.0',
-    [string]$ToolVersion = 'v26.3-Alpha1',
+    [string]$ToolVersion = 'v26.3-Alpha2',
     # Non-default output roots let two agent sessions build in parallel without fighting over
     # the shared dist folder (a running injected PCL locks its shim copy).
     [string]$DistDir = 'dist'

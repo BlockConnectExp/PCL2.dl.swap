@@ -258,6 +258,8 @@ namespace PCL2Swap.Api
         IHooks Hooks { get; }
         IUi Ui { get; }
         IData Data { get; }
+        /// <summary>Versioned, atomic configuration backend for this module (API 1.10).</summary>
+        IAddonConfig Config { get; }
         IReflection Reflect { get; }
         /// <summary>Machine-readable index of every callable host member (tools/PclSurface dump).</summary>
         ISwapSurface Surface { get; }
@@ -277,6 +279,8 @@ namespace PCL2Swap.Api
         IAddonFiles Files { get; }
         /// <summary>In-process module message bus (API 1.8).</summary>
         IAddonMessaging Messaging { get; }
+        /// <summary>Cross-module service registry (API 1.10).</summary>
+        IAddonServices Services { get; }
         void Log(string message);
         void LogWarning(string message);
         void LogError(string message, Exception exception = null);

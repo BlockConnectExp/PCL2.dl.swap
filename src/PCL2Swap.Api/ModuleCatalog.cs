@@ -35,6 +35,9 @@ namespace PCL2Swap.Api
         public IReadOnlyList<string> Shapes { get; set; }
         public IReadOnlyList<string> HostVersions { get; set; }
         public IReadOnlyList<SwapScopeInfo> Scopes { get; set; }
+        public int ConfigSchemaVersion { get; set; }
+        public int ConfigKeyCount { get; set; }
+        public IReadOnlyList<SwapServiceInfo> Services { get; set; }
         public IReadOnlyList<string> RequestedPermissions { get; set; }
         public IReadOnlyList<string> GrantedPermissions { get; set; }
         public IReadOnlyList<string> DeniedPermissions { get; set; }

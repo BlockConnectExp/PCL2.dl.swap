@@ -32,7 +32,7 @@ $packArgs = @(
     '--version', $Version,
     '--entry', 'DemoAddon.DemoAddon',
     '--description', 'PCL2 Swap demo addon: settings page, More page, widgets and persisted data.',
-    '--permissions', 'pages,files,clipboard,messaging',
+    '--permissions', 'pages,files,clipboard,messaging,services',
     '--scope', 'demo.core;Core features;Page body and module messaging;true;Core features;Page body and module messaging',
     '--scope', 'demo.advanced;Advanced tools;Scope API, data table, empty state and code-block examples;false;Advanced tools;Scope API, data table, empty state and code-block examples',
     '--out', $out

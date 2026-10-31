@@ -6,6 +6,38 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-16:20:00 v26.3-Alpha 2: 可靠配置与模块服务
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\AddonConfig.cs                  schema / 原子迁移 / Changed 契约
+.\src\PCL2Swap.Api\AddonServices.cs                跨模块服务注册与发现契约
+.\src\PCL2Swap.Api\ISwapApi.cs                     Config / Services（API 1.10）
+.\src\PCL2Swap.Api\ModuleCatalog.cs                配置与服务治理快照
+.\src\PclDlSwap.Payload\Swap\AddonDataStore.cs     线程安全配置、legacy 读取、原子替换、备份
+.\src\PclDlSwap.Payload\Swap\AddonServiceRegistry.cs 服务生命周期、类型查询、事件隔离
+.\src\PclDlSwap.Payload\Swap\HostApi.cs            API 1.10 根后端
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs       scope/config/service 治理与清理
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs 配置/服务模块详情
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs           API 1.10 真机探针
+.\src\PclDlSwap.ExLoaderHarness\Program.cs         配置迁移、回滚、服务发现与权限回归
+.\src\PCL2Swap.SampleAddon\SampleAddon.cs          API 1.10 示例服务
+.\examples\demo-addon\DemoAddon.cs                 公共配置/服务模板
+.\examples\demo-addon\build.ps1                     services 权限与 scope 打包
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|配置后端|`IAddonConfig` 提供 schema、Keys、Changed、Remove、事务 Migrate；旧扁平 config.json 自动读为 schema 1；新格式临时文件 + File.Replace + .bak|2026.10.31-16:20:00|PCL2.dlswap
+2|模块服务|`IAddonServices` 提供模块归属的唯一服务注册、typed TryGet/Get、重复 id 拒绝、全局 Changed 与类型契约诊断|2026.10.31-16:20:00|PCL2.dlswap
+3|生命周期|服务 token、模块禁用、重载、失败清理和卸载都会撤销服务；`services` 权限实时门控注册、查询和订阅|2026.10.31-16:20:00|PCL2.dlswap
+4|前端与模板|模块详情显示 config schema/key count 与 published services 表；Demo 使用 demo.core 控制服务注册/撤销|2026.10.31-16:20:00|PCL2.dlswap
+5|验证|全量构建、八套 harness、2.99.0.0/2.99.0.1 真机自检 `ok=76 fail=0`；配置迁移/回滚、跨模块服务、权限撤销与英文 UI 通过|2026.10.31-16:20:00|PCL2.dlswap
+
+---
 ## 2026.10.31-15:55:00 v26.3-Alpha 1: 功能作用域与 API 1.9
 
 GitCommitHash: be78f31

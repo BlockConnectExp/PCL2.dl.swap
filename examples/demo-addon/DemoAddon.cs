@@ -15,9 +15,20 @@ namespace DemoAddon
     {
         private SwapContext _context;
         private IDisposable _messageSubscription;
+        private IDisposable _serviceToken;
         private int _launches;
         private int _messageHits;
         private double _volume = 50;
+
+        public interface IDemoService
+        {
+            string Ping(string name);
+        }
+
+        private sealed class DemoService : IDemoService
+        {
+            public string Ping(string name) => "demo:" + (name ?? "anonymous");
+        }
 
         public void OnLoad(SwapContext context)
         {
@@ -26,6 +37,22 @@ namespace DemoAddon
             _launches = int.Parse(api.Data.Get("launches", "0")) + 1;
             api.Data.Set("launches", _launches.ToString());
             api.Data.Save();
+            try
+            {
+                if (api.Config.SchemaVersion < 2)
+                {
+                    api.Config.Migrate(2, transaction =>
+                    {
+                        if (transaction.Get("volume") == null)
+                            transaction.Set("volume", "50");
+                        transaction.Remove("legacyVolume");
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                api.LogWarning("Demo config migration failed: " + ex.Message);
+            }
             try
             {
                 api.Files.WriteText("demo/launch.txt",
@@ -59,6 +86,8 @@ namespace DemoAddon
             if (api != null) api.Scopes.Changed -= OnScopesChanged;
             _messageSubscription?.Dispose();
             _messageSubscription = null;
+            _serviceToken?.Dispose();
+            _serviceToken = null;
             api?.Log("Demo addon disabled.");
         }
 
@@ -82,7 +111,22 @@ namespace DemoAddon
             {
                 _messageSubscription?.Dispose();
                 _messageSubscription = null;
+                _serviceToken?.Dispose();
+                _serviceToken = null;
                 return;
+            }
+            if (_serviceToken == null)
+            {
+                try
+                {
+                    _serviceToken = api.Services.Register(
+                        "demo.sample.echo", new DemoService(), "1.0",
+                        "Echo service provided by the public Demo Addon.");
+                }
+                catch (Exception ex)
+                {
+                    api.LogWarning("Demo service registration failed: " + ex.Message);
+                }
             }
             if (_messageSubscription != null) return;
             try
@@ -109,6 +153,7 @@ namespace DemoAddon
                 api.Ui.InfoRow(api.I18n.T("宿主版本", "Host version"), api.Host.SwapVersion),
                 api.Ui.InfoRow(api.I18n.T("API 版本", "API version"), api.Host.ApiVersion),
                 api.Ui.InfoRow(api.I18n.T("交付形状", "Delivery shape"), api.Host.Shape.ToString()),
+                api.Ui.InfoRow(api.I18n.T("配置 schema", "Config schema"), "v" + api.Config.SchemaVersion),
                 api.Ui.InfoRow(api.I18n.T("加载次数", "Launch count"), _launches.ToString())));
 
             var scopeRows = new List<IReadOnlyList<string>>();
@@ -178,7 +223,7 @@ namespace DemoAddon
             if (api.Scopes.IsEnabled("demo.advanced"))
             {
                 page.Children.Add(api.Ui.Card(
-                    api.I18n.T("API 1.9 前后端", "API 1.9 back end and front end"),
+                    api.I18n.T("API 1.10 前后端", "API 1.10 back end and front end"),
                     api.Ui.Table(
                         new[]
                         {
@@ -187,6 +232,10 @@ namespace DemoAddon
                         },
                         new IReadOnlyList<string>[]
                         {
+                            new[] { "IAddonConfig", "schema " + api.Config.SchemaVersion },
+                            new[] { "IAddonServices", _serviceToken == null
+                                ? api.I18n.T("未注册", "inactive")
+                                : api.I18n.T("已注册", "registered") },
                             new[] { "IModuleScopes", api.I18n.T("可用", "available") },
                             new[] { "IAddonFiles", api.I18n.T("可用", "available") },
                             new[] { "IAddonMessaging", _messageHits + api.I18n.T(" 条消息", " message(s)") },

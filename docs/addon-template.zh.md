@@ -2,7 +2,7 @@
 
 > Summary: the smallest complete, buildable PCL2 Swap addon. Copy `examples/demo-addon`, rename
 > the id, and you have a module with two page slots, widgets, persisted data, strict permissions,
-> bilingual feature scopes and a live scope-event consumer.
+> bilingual feature scopes, versioned config, cross-module services and a live scope-event consumer.
 
 ---
 
@@ -39,12 +39,14 @@ cd examples\demo-addon
 | 控件 | `api.Ui.Slider` / `TextInput` / `Link` / `Badge` / `Expander` / `Tabs` / `Button(s)` / `Note` |
 | 双语 | `api.I18n.T("中文", "English")` |
 | 持久化 | `api.Data.Get/Set/Save` |
+| 可靠配置 | `api.Config.SchemaVersion/Keys/Changed/Remove/Migrate`；旧扁平 JSON 自动作为 schema 1 读取 |
 | 后端 | `api.Pcl.Clipboard.SetText` / `api.Pcl.Shell.OpenFolder` |
-| 权限 | manifest 请求 `["pages","files","clipboard"]`，用户可在模块详情逐项授予/撤销 |
+| 权限 | manifest 请求 `["pages","files","clipboard","messaging","services"]`，用户可在模块详情逐项授予/撤销 |
 | 模块目录 | `api.Modules.Modules` / `Find` / `Changed` |
 | 签名钩子 | `api.Hooks.FindTargets` + `SwapMethodTarget` 精确选择重载 |
 | 诊断时间线 | `api.Diagnostics.Recent/Export/Changed` + `api.Ui.Timeline` |
 | 模块消息 | `api.Messaging.Subscribe/Publish`（`messaging` 权限） |
+| 模块服务 | `api.Services.Register/TryGet/Get/Changed`（`services` 权限） |
 | 私有文件 | `api.Files.Read/Write/List/Delete`（`files` 权限，路径限制在模块根目录） |
 | 数据前端 | `api.Ui.Table` / `EmptyState` / `CodeBlock` / `Scroll` |
 | 功能作用域 | `api.Scopes.Scopes/Enabled/IsEnabled/Changed`；manifest `scopes[]` 支持 `nameEn` / `descriptionEn` |

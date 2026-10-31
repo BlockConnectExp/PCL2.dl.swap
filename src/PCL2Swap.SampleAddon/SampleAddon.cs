@@ -35,15 +35,28 @@ namespace PCL2Swap.SampleAddon
         private ISwapApi _api;
         private IDisposable _hook;
         private IDisposable _messageSubscription;
+        private IDisposable _serviceToken;
         private DispatcherTimer _timer;
         private TextBlock _liveLabel;
         private IProgressView _progress;
         private bool _countHook = true;
+        private string _serviceId;
+
+        public interface ISampleService
+        {
+            string Echo(string value);
+        }
+
+        private sealed class SampleService : ISampleService
+        {
+            public string Echo(string value) => "sample:" + (value ?? string.Empty);
+        }
 
         public void OnLoad(SwapContext context)
         {
             LoadCalls++;
             _api = context?.Api;
+            _serviceId = "services/" + (context?.Manifest?.Id ?? "sample") + "/echo";
             LastApiVersion = _api?.Host?.ApiVersion;
             _countHook = AddonSettings.GetBool(_api?.Data, "demo.countHook", true);
             _api?.Data?.Set("loaded", "1");
@@ -85,6 +98,15 @@ namespace PCL2Swap.SampleAddon
             {
                 _api.LogWarning("模块消息总线演示失败：" + ex.Message);
             }
+            try
+            {
+                _serviceToken = _api.Services.Register(_serviceId, new SampleService(), "1.0",
+                    "Reference echo service from the sample addon.");
+            }
+            catch (Exception ex)
+            {
+                _api.LogWarning("模块服务注册失败：" + ex.Message);
+            }
 
             AttachDemoHook(hooks);
             RegisterPage();
@@ -106,6 +128,8 @@ namespace PCL2Swap.SampleAddon
             _hook = null;
             _messageSubscription?.Dispose();
             _messageSubscription = null;
+            _serviceToken?.Dispose();
+            _serviceToken = null;
             StopTimer();
         }
 
@@ -268,7 +292,7 @@ namespace PCL2Swap.SampleAddon
                 _api.Ui.Expander("高级信息", false, () =>
                     _api.Ui.Note("这个区域由 IUi.Expander 构建；诊断时间线来自有界结构化日志。"))));
 
-            page.Children.Add(_api.Ui.Card("API 1.9 模块协作与作用域",
+            page.Children.Add(_api.Ui.Card("API 1.10 模块协作与作用域",
                 _api.Ui.Badge("消息 " + MessageEvents, SwapHintType.Success),
                 _api.Ui.Badge("作用域 " + (_api.Scopes?.Enabled.Count ?? 0),
                     SwapHintType.Info),
@@ -276,6 +300,8 @@ namespace PCL2Swap.SampleAddon
                     new[] { "能力", "后端 / 前端", "用途" },
                     new IReadOnlyList<string>[]
                     {
+                        new[] { "IAddonConfig", "后端", "schema + 原子迁移" },
+                        new[] { "IAddonServices", "后端", "跨模块服务注册表" },
                         new[] { "IModuleScopes", "后端 / 前端", "用户可编辑功能开关" },
                         new[] { "IAddonMessaging", "后端", "模块间 topic 消息" },
                         new[] { "IAddonFiles", "后端", "模块私有文件存储" },

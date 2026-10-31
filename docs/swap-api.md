@@ -1,4 +1,4 @@
-# PCL2 Swap Addon 指南（API 1.9，v26.3 起）
+# PCL2 Swap Addon 指南（API 1.10，v26.3 起）
 
 > 面向 Addon 作者。平台设计背景见 `docs/swap-api-research.zh.md`。
 > 交付形状（ExLoader 注入 / 磁盘修补）对 Addon **透明**：目标都是同一套 SwapHost 运行时。
@@ -510,6 +510,7 @@ bool ok = api.Pcl.Clipboard.SetText("copied");       // ModBase.ClipboardSet(tex
 | `launch` | `Pcl.Launch.*` |
 | `settings` | `Pcl.Settings.*` |
 | `instance` | `Pcl.Instance.*` |
+| `services` | `api.Services.*` |
 
 声明 `"*"` 表示全部允许。Loader/Animation/Base/Download/Ui/I18n/Data/Log 不门控。
 
@@ -918,5 +919,84 @@ api.Scopes.Changed += (_, __) =>
 
 完整可运行模板见 `examples/demo-addon`；它会按 `demo.core` 启停消息后端，并按 `demo.advanced`
 决定是否构建扩展表格和代码块前端。
+
+## 22. API 1.10（v26.3）：可靠配置与模块服务
+
+`Host.ApiVersion` 现在是 **1.10.0**。这一层补上模块长期运行需要的持久化与互操作能力，
+仍然只增加成员，旧 Addon 继续按原有 API 运行。
+
+### 22.1 `ISwapApi.Config`
+
+`api.Config` 与 `api.Data` 指向同一个模块私有存储，但前者提供 schema、原子保存和事务迁移：
+
+```csharp
+var migrated = api.Config.Migrate(2, tx =>
+{
+    if (tx.Get("theme") == "dark")
+        tx.Set("appearance", "dark");
+    tx.Remove("theme");
+});
+
+api.Config.Set("lastRun", DateTime.UtcNow.ToString("O"));
+api.Config.Save();
+```
+
+旧版扁平 `{"key":"value"}` 文件自动按 schema 1 读取。新文件使用
+`{"_schema":2,"_updatedUtc":"...","_values":{...}}` 信封格式，先写临时文件再用
+`File.Replace` 原子替换，并保留 `config.json.bak`。迁移回调只操作 staging 副本，成功落盘后
+才一次性提交；回调抛错或写入失败时 schema 和旧值保持不变。
+
+```csharp
+api.Config.SchemaVersion; // 当前版本
+api.Config.Keys;          // 排序后的键快照
+api.Config.Changed += (_, __) => RefreshSettingsPage();
+```
+
+线程安全覆盖 `Get/Set/Remove/Save/Migrate`。`Changed` 在内存值或 schema 变化时触发；单纯
+`Save()` 不重复触发。
+
+### 22.2 `ISwapApi.Services`
+
+模块可以把一个 CLR 对象发布为进程内服务，其他已授权模块按类型查询：
+
+```csharp
+public interface IThemeService
+{
+    void Refresh();
+}
+
+using (api.Services.Register(
+           "blockconnect.theme.api", new ThemeService(), "1.0",
+           "Theme refresh capability"))
+{
+    var ok = api.Services.TryGet<IThemeService>("blockconnect.theme.api", out var service);
+    var strict = api.Services.Get("blockconnect.theme.api", typeof(IThemeService));
+}
+```
+
+服务 id 推荐使用反向域名或稳定的命名空间，大小写不敏感且全局唯一；重复 id 会抛
+`InvalidOperationException`。`TryGet` 同时校验运行时契约类型，类型不匹配返回 `false`，
+`Get` 返回包含提供者与实际类型的可读错误。
+
+严格模式使用 `services` 权限；撤销权限会立刻阻断注册、查询和事件订阅。注册 token 释放、
+模块禁用、重载、异常退出清理和卸载都会移除该模块的服务：
+
+```csharp
+api.Services.Changed += (_, args) =>
+    api.Log($"{args.Kind}: {args.Service.ServiceId} from {args.Service.Provider}");
+```
+
+服务对象本身不自动 `Dispose`，所有权仍属于发布模块；平台只撤销注册并切断发现。
+
+### 22.3 前端与目录
+
+模块详情会显示配置 schema、键数量、已发布服务表和每个服务的契约类型、版本与说明。
+`IModuleCatalog.Find()` 同时返回 `ConfigSchemaVersion`、`ConfigKeyCount` 和 `Services`，
+便于管理页和诊断模块不读取私有路径也能展示治理状态。
+
+公共模板已经同时使用这两个后端，并用 `demo.core` 控制服务的注册/撤销。
+
+> 平台只保证 Swap 注册表和配置写入的线程安全，不把同进程 CLR 对象变成安全沙箱。模块仍不能
+> 访问其他模块的私有目录；服务通信应使用明确接口、不可变 DTO 或 JSON 字符串。
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

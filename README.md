@@ -2,9 +2,10 @@
 
 > Restore Plain Craft Launcher's download capability, add reversible English UI, turn silent OTA
 > into explicit recovery-aware behaviour, and expose a governed addon SDK with hooks, diagnostics,
-> module messaging, private files and native WPF pages.
+> atomic config migrations, a cross-module service registry, messaging, private files and native
+> WPF pages.
 
-Current pre-release: **v26.3-Alpha 1** · Addon API: **1.9.0** · Latest stable: **v26.2** ·
+Current pre-release: **v26.3-Alpha 2** · Addon API: **1.10.0** · Latest stable: **v26.2** ·
 Hosts: official PCL **2.99.0.0 / 2.99.0.1**.
 
 > [!IMPORTANT]
@@ -44,7 +45,7 @@ PCL2Swap.Api.dll                    addon-facing SDK
 Expected output:
 
 ```
-PCL2 DLL-Swap loader (v26.3-Alpha 1)
+PCL2 DLL-Swap loader (v26.3-Alpha 2)
   目标    : D:\PCL\Plain Craft Launcher 2.exe
   原版哈希: 6b6e1260cb5a1d6a…
   PageDownloadInstall.LoaderInit -> 恢复 ModDownload.DlClientListLoader

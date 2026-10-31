@@ -66,6 +66,7 @@ namespace PclDlSwap.Payload.Swap
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             public bool ScopeStateLoaded { get; set; }
             internal object ScopeGate { get; } = new object();
+            internal AddonDataStore ConfigStore { get; set; }
 
             /// <summary>
             /// Digest of the signed payload inventory (path + hash of every file). Two packages with
@@ -136,6 +137,9 @@ namespace PclDlSwap.Payload.Swap
                 Shapes = (manifest?.Shapes ?? new List<string>()).ToArray(),
                 HostVersions = (manifest?.HostVersions ?? new List<string>()).ToArray(),
                 Scopes = ScopeSnapshot(record),
+                ConfigSchemaVersion = record.ConfigStore?.SchemaVersion ?? 0,
+                ConfigKeyCount = record.ConfigStore?.Keys.Count ?? 0,
+                Services = AddonServiceRegistry.Snapshot(record.Id),
                 RequestedPermissions = RequestedPermissions(record),
                 GrantedPermissions = EffectiveGrantedPermissions(record),
                 DeniedPermissions = DeniedPermissions(record),
@@ -164,7 +168,7 @@ namespace PclDlSwap.Payload.Swap
         internal static readonly string[] KnownPermissions =
         {
             "hooks", "pages", "files", "clipboard", "network", "logs",
-            "secret", "launch", "settings", "instance", "messaging"
+            "secret", "launch", "settings", "instance", "messaging", "services"
         };
 
         private static bool ForceStrict
@@ -330,6 +334,9 @@ namespace PclDlSwap.Payload.Swap
                 case "events":
                 case "bus":
                 case "messaging": return "messaging";
+                case "service":
+                case "interop":
+                case "services": return "services";
                 case "logs.read":
                 case "logs": return "logs";
                 case "reflect":
@@ -527,6 +534,7 @@ namespace PclDlSwap.Payload.Swap
                     try { record.Instance?.OnDisable(); }
                     catch (Exception ex) { SwapLog.Warn($"Addon {record.Id} OnDisable 抛错：" + ex.Message); }
                     AddonMessageBus.RemoveAll(record.Id);
+                    AddonServiceRegistry.RemoveAll(record.Id);
                     record.Status = "disabled";
                 }
 
@@ -545,6 +553,8 @@ namespace PclDlSwap.Payload.Swap
                 record.Enabled = previous;
                 record.Status = "failed";
                 record.Failure = ex;
+                AddonMessageBus.RemoveAll(record.Id);
+                AddonServiceRegistry.RemoveAll(record.Id);
                 SaveState();
                 SwapLog.Error($"Addon {(enabled ? "启用" : "禁用")}失败：{record.Id}", ex);
                 RaiseChanged();
@@ -610,6 +620,7 @@ namespace PclDlSwap.Payload.Swap
             // Prefix handler does not end up stacked on top of itself.
             ScopedHook.RemoveAll(addonId);
             AddonMessageBus.RemoveAll(addonId);
+            AddonServiceRegistry.RemoveAll(addonId);
             var enabled = SetEnabled(addonId, true);
             return disabled && enabled && Find(addonId)?.Status == "enabled";
         }
@@ -917,6 +928,7 @@ namespace PclDlSwap.Payload.Swap
             // unknown id counts as "enabled", so any handler it left behind would keep firing.
             ScopedHook.RemoveAll(record.Id);
             AddonMessageBus.RemoveAll(record.Id);
+            AddonServiceRegistry.RemoveAll(record.Id);
 
             foreach (var pageId in record.PageIds.ToList())
             {
@@ -1735,11 +1747,15 @@ namespace PclDlSwap.Payload.Swap
             {
                 _inner = inner;
                 _record = record;
-                Data = new AddonDataStore(record.Id);
+                var config = new AddonDataStore(record.Id);
+                record.ConfigStore = config;
+                Data = config;
+                Config = config;
                 Hooks = new ScopedHooks(inner.Hooks, inner as HostApi, record.Id, record);
                 Ui = new ScopedUi(inner.Ui, record);
                 Pcl = new ScopedPclAccess(inner.Pcl, record.Id);
                 Scopes = new ScopesAccess(record);
+                Services = new ServicesAccess(record.Id, record);
                 Files = new AddonFileStore(Path.Combine(SwapPaths.AddonDirectory(record.Id), "files"),
                     record.Id);
                 Messaging = new MessagingAccess(record.Id, record.Id);
@@ -1749,6 +1765,7 @@ namespace PclDlSwap.Payload.Swap
             public IHooks Hooks { get; }
             public IUi Ui { get; }
             public IData Data { get; }
+            public IAddonConfig Config { get; }
             // Reflection stays ungated on purpose: modules run in-process and can always reflect,
             // and ecosystem modules (e.g. PCL2Themes) build on Reflect/Surface without declaring
             // anything. Gating it only broke legitimate modules; permissions constrain side
@@ -1764,6 +1781,7 @@ namespace PclDlSwap.Payload.Swap
             public IModuleScopes Scopes { get; }
             public IAddonFiles Files { get; }
             public IAddonMessaging Messaging { get; }
+            public IAddonServices Services { get; }
 
             // Module lines keep their own file (LSPosed-style per-module log) and are tagged with the
             // module id in the global log, so "which module did this" never needs guessing.

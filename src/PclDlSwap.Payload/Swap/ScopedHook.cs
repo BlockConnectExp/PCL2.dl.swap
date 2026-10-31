@@ -41,7 +41,9 @@ namespace PclDlSwap.Payload.Swap
             public long Skipped;
             public long Errors;
 
-            public bool IsLive => Active && SwapHost.AddonEnabled(AddonId);
+            public bool IsLive => Active &&
+                                  SwapHost.AddonEnabled(AddonId) &&
+                                  SwapHost.AddonPermissionGranted(AddonId, "hooks");
 
             /// <summary>
             /// Marker returned when a module handler threw: a Replace handler that fails must not own
@@ -220,6 +222,20 @@ namespace PclDlSwap.Payload.Swap
                     .Where(registration => string.Equals(registration.AddonId, addonId,
                         StringComparison.OrdinalIgnoreCase))
                     .Sum(registration => registration.Errors));
+
+        internal static bool HasRegistrations(MethodInfo target)
+        {
+            if (target == null) return false;
+            lock (GateLock)
+                return ChainsByTarget.TryGetValue(target, out var chain) &&
+                       chain.Snapshot().Length > 0;
+        }
+
+        internal static bool HasChain(MethodInfo target)
+        {
+            if (target == null) return false;
+            lock (GateLock) return ChainsByTarget.ContainsKey(target);
+        }
 
         /// <summary>Entry point of every generated gate (called with the target's ABI arguments).</summary>
         public static object InvokeChain(int chainId, object self, object[] args)

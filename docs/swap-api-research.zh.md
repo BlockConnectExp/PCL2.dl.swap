@@ -229,8 +229,9 @@ public interface ISwapAddon {
 }
 ```
 - 加载：解包到 `%TEMP%\PCL2Swap\addons\<id>\<version>\` → `Assembly.LoadFrom` → 反射 entry。
-- 隔离：.NET Framework 4.8 无 ALC，同 AppDomain 加载；**权限为声明式**（用于 UI 展示与
-  hook 审计，不作为硬边界）——文档中明确"Addon 与宿主同权限"。
+- 隔离：.NET Framework 4.8 无 ALC，同 AppDomain 加载。**历史草案**曾把权限设为纯声明；
+  Alpha 7 起 gated API 严格门控，Alpha 9 起改为“manifest 请求 + 用户授予”，撤销即时生效。
+  这仍是应用级治理，不是同进程安全沙箱。
 - 失败策略：`OnLoad` 异常 → 标记 failed、禁用该 Addon、不影响宿主与其它 Addon。
 
 ### 4.4 版本与兼容
@@ -303,7 +304,7 @@ shim（已交付）→ `ExLoaderEntry.Activate` → `SwapHost.Start(Injected)` �
 ## 8. 待 Owner 决策
 
 1. **Cancel Button 判据**：`forceWait/isWarn` 组合是否足够？还是维护一张"云公告特征表"？
-2. **Addon 权限模型**：保持"声明式 + 同权限"（简单、实用），还是要做更强隔离？（后者成本高）
+2. ~~Addon 权限模型~~：已由 Alpha 7 strict gate + Alpha 9 用户授权解决；强隔离仍不做。
 3. **API 面规模**：P0 只暴露现有三功能所需（下载/更新/弹窗/页面），还是同时铺开
    `ModProfile/ModLaunch` 等更大面？（"暴露所有可能的 API"的落地粒度）
 4. **Patch 形状接线**：确认按 §6.2 的"静态 bootstrap + 运行时 detour"路线（放弃 profiler）。

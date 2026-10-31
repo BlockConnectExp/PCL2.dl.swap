@@ -6,6 +6,34 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-11:02:05 v26.2-Alpha 9: 模块治理与 API 1.6
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\ModuleCatalog.cs                模块快照与 IModuleCatalog
+.\src\PCL2Swap.Api\HookTarget.cs                   SwapMethodTarget 签名目标
+.\src\PCL2Swap.Api\ISwapApi.cs                     Modules / 签名 hook / 3 个前端契约
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs       用户授权、状态迁移、模块目录、并发快照
+.\src\PclDlSwap.Payload\Swap\HostApi.cs            目录后端、精确重载解析
+.\src\PclDlSwap.Payload\Swap\ScopedHook.cs         活跃 handler 语义与实时 hooks 权限门控
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs 权限授予区与原位计数更新
+.\src\PclDlSwap.Payload\Swap\Views\SwapUi.cs       Badge / Expander / Tabs
+.\src\PclDlSwap.ExLoaderHarness\Program.cs         治理、持久化、签名 hook、前端回归
+.\src\PCL2Swap.SampleAddon\SampleAddon.cs          API 1.6 示例
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|模块目录|`ISwapApi.Modules` 提供线程安全、只读快照：状态、作用域、信任链、请求/授予/拒绝权限、hook 计数与命中；`Changed` 随启停、安装、卸载和授权变化触发|2026.10.31-11:02:05|PCL2.dlswap
+2|用户授权|manifest 权限从“声明即永久授权”升级为“请求 + 用户授予”。旧 state 默认全部请求权限，显式撤销写入 modules.json 并与 enabled 独立；撤销 hooks 立即让已有 handler 直通，恢复后自动重新生效|2026.10.31-11:02:05|PCL2.dlswap
+3|签名钩子|`FindTargets` + `SwapMethodTarget` 支持按类型、参数、返回值和 static 精确选择重载；旧入口保留并警告歧义。`IsHooked` 只在仍有活跃 handler 时返回 true|2026.10.31-11:02:05|PCL2.dlswap
+4|前端|新增 Badge / 懒加载 Expander / Tabs；模块详情的权限区原位更新计数，不再因撤销跳回页顶|2026.10.31-11:02:05|PCL2.dlswap
+5|验证|八套 harness PASS；2.99.0.1 英文真机 `ok=66 fail=0`；权限复选框 `3/3 -> 2/3`、modules.json 同步、详情滚动位置保持|2026.10.31-11:02:05|PCL2.dlswap
+
+---
 ## 2026.10.31-09:30:08 v26.2-Alpha 8: 疑因模块定位与 SDK 1.5
 
 GitCommitHash: (unreleased)

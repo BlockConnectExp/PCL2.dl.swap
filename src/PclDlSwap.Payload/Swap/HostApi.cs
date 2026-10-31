@@ -18,7 +18,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.5.0";
+        public const string ApiVersion = "1.6.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -36,6 +36,7 @@ namespace PclDlSwap.Payload.Swap
             _reflect = new ReflectionImpl(_host);
             _pcl = new PclAccess(_host);
             Recovery = new RecoveryAccessImpl();
+            Modules = new ModuleCatalogImpl();
         }
 
         public IHostInfo Host { get; }
@@ -46,6 +47,7 @@ namespace PclDlSwap.Payload.Swap
         public IPclAccess Pcl => _pcl;
         public II18n I18n => SwapI18n.Current;
         public IRecoveryAccess Recovery { get; }
+        public IModuleCatalog Modules { get; }
 
         public IData Data { get; private set; }
 
@@ -60,6 +62,10 @@ namespace PclDlSwap.Payload.Swap
         internal IDisposable AttachAddonHook(string addonId, string declaringType, string methodName,
             string hookId, HookMode mode, Delegate handler) =>
             _hooks.AttachScoped(addonId, declaringType, methodName, hookId, mode, handler);
+
+        internal IDisposable AttachAddonHook(string addonId, SwapMethodTarget target,
+            string hookId, HookMode mode, Delegate handler) =>
+            _hooks.AttachScoped(addonId, target, hookId, mode, handler);
 
         public void Log(string message) => SwapLog.Info("[addon] " + message);
         public void LogWarning(string message) => SwapLog.Warn("[addon] " + message);
@@ -134,6 +140,28 @@ namespace PclDlSwap.Payload.Swap
             public string Diagnostics() => State?.Diagnostics() ?? string.Empty;
         }
 
+        private sealed class ModuleCatalogImpl : IModuleCatalog
+        {
+            public IReadOnlyList<SwapModuleInfo> Modules =>
+                SwapHost.Addons?.ModuleSnapshot() ?? Array.Empty<SwapModuleInfo>();
+
+            public SwapModuleInfo Find(string id) => SwapHost.Addons?.ModuleSnapshot(id);
+
+            public event EventHandler Changed
+            {
+                add
+                {
+                    var manager = SwapHost.Addons;
+                    if (manager != null) manager.Changed += value;
+                }
+                remove
+                {
+                    var manager = SwapHost.Addons;
+                    if (manager != null) manager.Changed -= value;
+                }
+            }
+        }
+
         private sealed class HookBusImpl : IHooks
         {
             private readonly Assembly _host;
@@ -158,6 +186,23 @@ namespace PclDlSwap.Payload.Swap
                 return new DetourToken(detour);
             }
 
+            public IReadOnlyList<SwapMethodTarget> FindTargets(string declaringType, string methodName) =>
+                ResolveTargets(declaringType, methodName).Select(ToTarget).ToList();
+
+            public IDisposable Attach(SwapMethodTarget target, string hookId, Delegate handler,
+                HookMode mode)
+            {
+                if (handler == null) throw new ArgumentNullException(nameof(handler));
+                var resolved = ResolveTarget(target);
+                if (handler.Target != null)
+                    throw new NotSupportedException("未限定模块的钩子 API 只支持静态 handler；模块作用域 API 支持实例委托。");
+
+                var detour = DetourInstaller.Install(resolved, handler.Method);
+                SwapLog.Info($"[hookbus] {(string.IsNullOrEmpty(hookId) ? resolved.Name : hookId)} -> " +
+                             $"{Describe(resolved)}（{mode}）已安装");
+                return new DetourToken(detour);
+            }
+
             /// <summary>
             /// Module-scoped attach: the addon's own delegate runs behind a generated gate that
             /// follows the module toggle, so a disabled module stops hooking immediately and a
@@ -170,6 +215,15 @@ namespace PclDlSwap.Payload.Swap
                 var target = ResolveTarget(declaringType, methodName);
                 ValidateHandler(target, handler);
                 return ScopedHook.Attach(addonId, hookId, mode, handler, target);
+            }
+
+            internal IDisposable AttachScoped(string addonId, SwapMethodTarget target,
+                string hookId, HookMode mode, Delegate handler)
+            {
+                if (handler == null) throw new ArgumentNullException(nameof(handler));
+                var resolved = ResolveTarget(target);
+                ValidateHandler(resolved, handler);
+                return ScopedHook.Attach(addonId, hookId, mode, handler, resolved);
             }
 
             /// <summary>
@@ -214,22 +268,137 @@ namespace PclDlSwap.Payload.Swap
 
             private MethodInfo ResolveTarget(string declaringType, string methodName)
             {
-                var type = _host?.GetType(declaringType, throwOnError: false);
-                var target = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
-                                              BindingFlags.Static | BindingFlags.Instance)
-                    .FirstOrDefault(m => m.Name == methodName);
+                var matches = ResolveTargets(declaringType, methodName);
+                var target = matches.FirstOrDefault();
                 if (target == null)
                     throw new InvalidOperationException($"宿主方法不存在：{declaringType}.{methodName}");
+                if (matches.Count > 1)
+                    SwapLog.Warn($"[hookbus] {declaringType}.{methodName} 有 {matches.Count} 个重载，" +
+                                 $"旧 API 使用首个：{Describe(target)}；新模块请使用 SwapMethodTarget 精确选择。");
                 return target;
+            }
+
+            private MethodInfo ResolveTarget(SwapMethodTarget target)
+            {
+                if (target == null) throw new ArgumentNullException(nameof(target));
+                var type = _host?.GetType(target.DeclaringType, throwOnError: false);
+                if (type == null)
+                    throw new InvalidOperationException("宿主类型不存在：" + target.DeclaringType);
+                if (string.IsNullOrWhiteSpace(target.MethodName))
+                    throw new ArgumentException("钩子目标缺少 MethodName。", nameof(target));
+
+                var matches = ResolveTargets(target.DeclaringType, target.MethodName)
+                    .Where(method => Matches(method, target))
+                    .ToList();
+                if (matches.Count == 1) return matches[0];
+
+                var available = string.Join(Environment.NewLine,
+                    ResolveTargets(target.DeclaringType, target.MethodName)
+                        .Select(method => "  " + Describe(method)));
+                if (matches.Count == 0)
+                    throw new InvalidOperationException("钩子签名不存在：" + target + Environment.NewLine +
+                                                        "可用重载：" + Environment.NewLine + available);
+                throw new InvalidOperationException("钩子签名仍匹配多个重载：" + target + Environment.NewLine +
+                                                    string.Join(Environment.NewLine,
+                                                        matches.Select(method => "  " + Describe(method))));
+            }
+
+            public bool IsHooked(SwapMethodTarget target)
+            {
+                try
+                {
+                    var resolved = ResolveTarget(target);
+                    return ScopedHook.HasChain(resolved)
+                        ? ScopedHook.HasRegistrations(resolved)
+                        : DetourInstaller.IsHooked(resolved);
+                }
+                catch { return false; }
             }
 
             public bool IsHooked(string declaringType, string methodName)
             {
+                var target = ResolveTargets(declaringType, methodName).FirstOrDefault();
+                return target != null &&
+                       (ScopedHook.HasChain(target)
+                           ? ScopedHook.HasRegistrations(target)
+                           : DetourInstaller.IsHooked(target));
+            }
+
+            private IReadOnlyList<MethodInfo> ResolveTargets(string declaringType, string methodName)
+            {
                 var type = _host?.GetType(declaringType, throwOnError: false);
-                var target = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
-                                              BindingFlags.Static | BindingFlags.Instance)
-                    .FirstOrDefault(m => m.Name == methodName);
-                return target != null && DetourInstaller.IsHooked(target);
+                if (type == null)
+                    throw new InvalidOperationException("宿主类型不存在：" + declaringType);
+                return type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                       BindingFlags.Static | BindingFlags.Instance |
+                                       BindingFlags.FlattenHierarchy)
+                    .Where(method => method.Name == methodName)
+                    .ToList();
+            }
+
+            private static bool Matches(MethodInfo method, SwapMethodTarget target)
+            {
+                if (target.Static.HasValue && method.IsStatic != target.Static.Value) return false;
+                if (!string.IsNullOrWhiteSpace(target.ReturnType) &&
+                    !TypeNameMatches(method.ReturnType, target.ReturnType)) return false;
+                if (target.ParameterTypes == null) return true;
+
+                var actual = method.GetParameters();
+                if (actual.Length != target.ParameterTypes.Count) return false;
+                for (var index = 0; index < actual.Length; index++)
+                    if (!TypeNameMatches(actual[index].ParameterType, target.ParameterTypes[index]))
+                        return false;
+                return true;
+            }
+
+            private static bool TypeNameMatches(Type actual, string expected)
+            {
+                if (actual == null || string.IsNullOrWhiteSpace(expected)) return false;
+                var wanted = NormalizeTypeToken(expected);
+                return string.Equals(NormalizeTypeToken(actual.FullName ?? actual.Name), wanted,
+                           StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(NormalizeTypeToken(actual.Name), wanted,
+                           StringComparison.OrdinalIgnoreCase);
+            }
+
+            private static string NormalizeTypeToken(string value)
+            {
+                var text = (value ?? string.Empty).Trim().Replace("+", ".").Replace(" ", string.Empty);
+                switch (text.ToLowerInvariant())
+                {
+                    case "string": return "System.String";
+                    case "int": return "System.Int32";
+                    case "long": return "System.Int64";
+                    case "short": return "System.Int16";
+                    case "bool": return "System.Boolean";
+                    case "double": return "System.Double";
+                    case "float": return "System.Single";
+                    case "object": return "System.Object";
+                    case "byte": return "System.Byte";
+                    case "char": return "System.Char";
+                    case "void": return "System.Void";
+                    default: return text;
+                }
+            }
+
+            private static SwapMethodTarget ToTarget(MethodInfo method) => new SwapMethodTarget
+            {
+                DeclaringType = method.DeclaringType?.FullName,
+                MethodName = method.Name,
+                ParameterTypes = method.GetParameters()
+                    .Select(parameter => parameter.ParameterType.FullName ?? parameter.ParameterType.Name)
+                    .ToList(),
+                ReturnType = method.ReturnType.FullName ?? method.ReturnType.Name,
+                Static = method.IsStatic
+            };
+
+            private static string Describe(MethodInfo method)
+            {
+                var parameters = string.Join(", ", method.GetParameters()
+                    .Select(parameter => (parameter.ParameterType.FullName ?? parameter.ParameterType.Name)));
+                return (method.DeclaringType?.FullName ?? "?") + "." + method.Name +
+                       "(" + parameters + ") : " + (method.ReturnType.FullName ?? method.ReturnType.Name) +
+                       (method.IsStatic ? " [static]" : " [instance]");
             }
 
             // Raised by the host pipelines that already see every dialog / update / download.
@@ -371,6 +540,18 @@ namespace PclDlSwap.Payload.Swap
             public System.Windows.FrameworkElement Banner(string title, string text,
                 SwapHintType type = SwapHintType.Warning) =>
                 Views.SwapUi.Banner(title, text, type);
+
+            public System.Windows.FrameworkElement Badge(string text,
+                SwapHintType type = SwapHintType.Info) => Views.SwapUi.Badge(text, type);
+
+            public System.Windows.FrameworkElement Expander(string title, bool initiallyExpanded,
+                Func<System.Windows.FrameworkElement> contentFactory) =>
+                Views.SwapUi.Expander(title, initiallyExpanded, contentFactory);
+
+            public System.Windows.FrameworkElement Tabs(
+                System.Collections.Generic.IReadOnlyList<string> titles, int selectedIndex,
+                Func<int, System.Windows.FrameworkElement> contentFactory) =>
+                Views.SwapUi.Tabs(titles, selectedIndex, contentFactory);
         }
 
         private sealed class ReflectionImpl : IReflection

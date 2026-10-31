@@ -88,6 +88,9 @@ namespace PCL2Swap.Api
     public interface IHooks
     {
         IDisposable Attach(string declaringType, string methodName, string hookId, Delegate handler, HookMode mode);
+        IReadOnlyList<SwapMethodTarget> FindTargets(string declaringType, string methodName);
+        IDisposable Attach(SwapMethodTarget target, string hookId, Delegate handler, HookMode mode);
+        bool IsHooked(SwapMethodTarget target);
         bool IsHooked(string declaringType, string methodName);
         event EventHandler<DownloadEventArgs> DownloadCompleted;
         event EventHandler<DialogEventArgs> DialogOpening;
@@ -190,6 +193,17 @@ namespace PCL2Swap.Api
         /// message instead of nesting another card inside the page.
         /// </summary>
         FrameworkElement Banner(string title, string text, SwapHintType type = SwapHintType.Warning);
+
+        /// <summary>A compact semantic status pill for headers and summaries.</summary>
+        FrameworkElement Badge(string text, SwapHintType type = SwapHintType.Info);
+
+        /// <summary>A native disclosure section whose content is constructed on demand.</summary>
+        FrameworkElement Expander(string title, bool initiallyExpanded,
+            Func<FrameworkElement> contentFactory);
+
+        /// <summary>A compact tabbed surface; contentFactory is called once per tab.</summary>
+        FrameworkElement Tabs(IReadOnlyList<string> titles, int selectedIndex,
+            Func<int, FrameworkElement> contentFactory);
     }
 
     /// <summary>Per-addon persisted key/value store.</summary>
@@ -224,6 +238,8 @@ namespace PCL2Swap.Api
         II18n I18n { get; }
         /// <summary>Read-only startup recovery state and diagnostics (API 1.5).</summary>
         IRecoveryAccess Recovery { get; }
+        /// <summary>Read-only inventory of installed modules and their governance state (API 1.6).</summary>
+        IModuleCatalog Modules { get; }
         void Log(string message);
         void LogWarning(string message);
         void LogError(string message, Exception exception = null);

@@ -140,6 +140,10 @@ namespace PclDlSwap.Payload.Swap
         /// </summary>
         public static bool AddonEnabled(string addonId) => Addons?.IsEnabled(addonId) ?? true;
 
+        /// <summary>Live permission gate used by hook and backend calls on worker threads.</summary>
+        public static bool AddonPermissionGranted(string addonId, string permission) =>
+            Addons?.HasPermission(addonId, permission) ?? true;
+
         // ---- host event bus -------------------------------------------------------------------
         // The platform's own pipelines call these; addons subscribe through IHooks. The bus is a
         // host facility, so it keeps publishing even while a module is switched off.

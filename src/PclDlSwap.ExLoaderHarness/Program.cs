@@ -858,9 +858,13 @@ namespace PclDlSwap.ExLoaderHarness
             var modulesJson = File.Exists(PCL2Swap.Api.SwapPaths.ModulesFile)
                 ? File.ReadAllText(PCL2Swap.Api.SwapPaths.ModulesFile)
                 : string.Empty;
+            var demoStateMatch = System.Text.RegularExpressions.Regex.Match(
+                modulesJson, "\"demo\\.sample\"\\s*:\\s*\\{(?<body>[^}]*)\\}");
             Expect("modules.json records the disabled suspect",
-                modulesJson.IndexOf("\"demo.sample\":{\"enabled\":false}",
-                    StringComparison.OrdinalIgnoreCase) >= 0);
+                demoStateMatch.Success &&
+                System.Text.RegularExpressions.Regex.IsMatch(
+                    demoStateMatch.Groups["body"].Value,
+                    "\"enabled\"\\s*:\\s*false"));
 
             var next = begin?.Invoke(null, new object[]
             {
@@ -901,7 +905,8 @@ namespace PclDlSwap.ExLoaderHarness
             hostType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static)
                 .Invoke(null, new object[] { PCL2Swap.Api.SwapShape.Injected, typeof(PCL.ModMain).Assembly });
 
-            var api = hostType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+            var api = hostType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static)
+                ?.GetValue(null) as PCL2Swap.Api.ISwapApi;
             var pcl = api?.GetType().GetProperty("Pcl")?.GetValue(api);
             Expect("typed PCL access exposed on ISwapApi", pcl != null);
 
@@ -937,8 +942,8 @@ namespace PclDlSwap.ExLoaderHarness
             var hostInfo = api?.GetType().GetProperty("Host")?.GetValue(api);
             var pclVersion = Convert.ToString(hostInfo?.GetType().GetProperty("PclVersion")?.GetValue(hostInfo));
             Expect("Host.PclVersion reports the bound PCL build", !string.IsNullOrEmpty(pclVersion));
-            Expect("Host.ApiVersion reports the additive 1.5 contract",
-                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.5.0");
+            Expect("Host.ApiVersion reports the additive 1.6 contract",
+                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.6.0");
 
             var recovery = api?.GetType().GetProperty("Recovery")?.GetValue(api);
             var recoveryDiagnostics = Convert.ToString(recovery?.GetType().GetMethod("Diagnostics")
@@ -952,6 +957,12 @@ namespace PclDlSwap.ExLoaderHarness
                 recoveryDiagnostics.Contains("suspect module:") &&
                 recoveryDiagnostics.Contains("suspect phase:") &&
                 recoveryDiagnostics.Contains("safe mode reason code:"));
+
+            var moduleCatalog = api?.Modules;
+            Expect("Module catalog exposes installed built-ins",
+                moduleCatalog != null &&
+                moduleCatalog.Modules.Count >= 3 &&
+                moduleCatalog.Find("swap.cancel-button") != null);
 
             var secret = pcl?.GetType().GetProperty("Secret")?.GetValue(pcl);
             Expect("Secret family exposed", secret != null);
@@ -1454,6 +1465,8 @@ namespace PclDlSwap.ExLoaderHarness
                 var start = hostType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static);
                 start.Invoke(null, new object[] { PCL2Swap.Api.SwapShape.Injected, typeof(PCL.ModMain).Assembly });
 
+                var api = hostType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static)
+                    ?.GetValue(null) as PCL2Swap.Api.ISwapApi;
                 var manager = hostType.GetProperty("Addons", BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null);
                 var records = (manager?.GetType().GetProperty("Records")?.GetValue(manager) as System.Collections.IEnumerable)
                     ?.Cast<object>().ToList() ?? new List<object>();
@@ -1485,12 +1498,19 @@ namespace PclDlSwap.ExLoaderHarness
 
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
-                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.5.0");
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.6.0");
 
                 // ---- module state: persisted, and it gates the built-in features ----
                 var isEnabled = manager?.GetType().GetMethod("IsEnabled");
                 var setEnabled = manager?.GetType().GetMethod("SetEnabled");
                 Expect("module state exposes IsEnabled/SetEnabled", isEnabled != null && setEnabled != null);
+                var catalogEvents = 0;
+                EventHandler catalogHandler = (sender, args) => catalogEvents++;
+                var catalog = api?.Modules;
+                if (catalog != null) catalog.Changed += catalogHandler;
+                Expect("module catalog exposes built-ins and the package",
+                    catalog != null && catalog.Modules.Count == 4 &&
+                    catalog.Find("test.sample") != null);
 
                 var modulesFile = PCL2Swap.Api.SwapPaths.ModulesFile;
                 Expect("OTA Protector starts enabled",
@@ -1508,11 +1528,12 @@ namespace PclDlSwap.ExLoaderHarness
                     new object[] { "swap.ota-protector", true }));
                 Expect("re-enabling restores the gate", reEnabled &&
                     Convert.ToBoolean(isEnabled?.Invoke(manager, new object[] { "swap.ota-protector" })));
+                Expect("module catalog raises Changed for governance edits",
+                    catalogEvents >= 2);
                 Expect("addon store lives under the durable root",
                     Directory.Exists(Path.Combine(dataRoot, "addons")));
 
                 // ---- event bus: the sample addon subscribed through IHooks and must receive ----
-                var api = hostType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
                 var hooks = api?.GetType().GetProperty("Hooks")?.GetValue(api);
                 var raiseDialog = hooks?.GetType().GetMethod("RaiseDialogOpening",
                     BindingFlags.NonPublic | BindingFlags.Instance);
@@ -1540,8 +1561,11 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("sample addon saw the dialog title", StaticString("LastDialogTitle") == "事件测试");
 
                 // ---- module-scoped hooks: the gate follows the module toggle ----
-                var attachScoped = api?.GetType().GetMethod("AttachAddonHook",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
+                var attachScoped = api?.GetType().GetMethods(
+                        BindingFlags.NonPublic | BindingFlags.Instance)
+                    .FirstOrDefault(method => method.Name == "AttachAddonHook" &&
+                                              method.GetParameters().Length == 6 &&
+                                              method.GetParameters()[1].ParameterType == typeof(string));
                 Expect("host exposes the scoped attach", attachScoped != null);
 
                 var token = attachScoped?.Invoke(api, new object[]
@@ -1610,6 +1634,55 @@ namespace PclDlSwap.ExLoaderHarness
                     instanceHandler.Calls == 1 && echoed == "inst:abc");
                 echoToken?.Dispose();
                 Expect("disposed echo hook restores the host body", PCL.HookTarget.Echo("abc") == "harness:abc");
+
+                // ---- signature-aware hooks: select one overload without guessing ----
+                var createScopedApi = manager?.GetType().GetMethod("CreateScopedApi",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                var scopedApi = createScopedApi?.Invoke(manager, new[] { sample }) as PCL2Swap.Api.ISwapApi;
+                var overloads = scopedApi?.Hooks.FindTargets("PCL.HookTarget", "Overloaded");
+                Expect("signature discovery sees both overloads",
+                    overloads != null && overloads.Count == 2);
+                var stringOverload = overloads?.FirstOrDefault(target =>
+                    target.ParameterTypes.Count == 1 &&
+                    target.ParameterTypes[0] == typeof(string).FullName);
+                Expect("signature discovery exposes full parameter types", stringOverload != null);
+
+                var stringHookHits = 0;
+                var signatureToken = stringOverload == null
+                    ? null
+                    : scopedApi.Hooks.Attach(stringOverload, "sample.signature",
+                        (Action<string>)(_ => stringHookHits++), PCL2Swap.Api.HookMode.Prefix);
+                var intCallsBefore = PCL.HookTarget.OverloadedIntCalls;
+                PCL.HookTarget.Overloaded("signature");
+                PCL.HookTarget.Overloaded(4);
+                Expect("signature hook only runs for the selected overload",
+                    stringHookHits == 1 && PCL.HookTarget.OverloadedIntCalls == intCallsBefore + 1);
+                Expect("signature target reports its installed state",
+                    scopedApi?.Hooks.IsHooked(stringOverload) == true);
+                signatureToken?.Dispose();
+                Expect("disposing a signature hook clears its installed state",
+                    scopedApi?.Hooks.IsHooked(stringOverload) == false);
+
+                try
+                {
+                    scopedApi?.Hooks.Attach(new PCL2Swap.Api.SwapMethodTarget
+                    {
+                        DeclaringType = "PCL.HookTarget",
+                        MethodName = "Overloaded",
+                        ParameterTypes = new List<string> { "System.Guid" }
+                    }, "sample.signature.missing", (Action<Guid>)(_ => { }),
+                        PCL2Swap.Api.HookMode.Prefix);
+                    Expect("unknown signature is rejected", false);
+                }
+                catch (Exception ex)
+                    when (ex is InvalidOperationException ||
+                          ex.InnerException is InvalidOperationException)
+                {
+                    var inner = ex as InvalidOperationException ?? ex.InnerException;
+                    Expect("unknown signature is rejected with the available overloads",
+                        inner.Message.Contains("钩子签名不存在") &&
+                        inner.Message.Contains("Overloaded"));
+                }
 
                 // A handler whose shape cannot be called with the target's ABI must fail at attach
                 // time (field lesson: the mismatch only surfaced later, as a bare
@@ -1686,8 +1759,25 @@ namespace PclDlSwap.ExLoaderHarness
                         {
                             "harness state", "semantic banner", PCL2Swap.Api.SwapHintType.Warning
                         }) as System.Windows.FrameworkElement;
+                        var badge = ui?.GetType().GetMethod("Badge")?.Invoke(ui, new object[]
+                        {
+                            "READY", PCL2Swap.Api.SwapHintType.Success
+                        }) as System.Windows.FrameworkElement;
+                        var expander = ui?.GetType().GetMethod("Expander")?.Invoke(ui, new object[]
+                        {
+                            "advanced", true,
+                            (Func<System.Windows.FrameworkElement>)(() =>
+                                new System.Windows.Controls.TextBlock { Text = "content" })
+                        }) as System.Windows.FrameworkElement;
+                        var tabs = ui?.GetType().GetMethod("Tabs")?.Invoke(ui, new object[]
+                        {
+                            new[] { "one", "two" }, 1,
+                            (Func<int, System.Windows.FrameworkElement>)(index =>
+                                new System.Windows.Controls.TextBlock { Text = "tab:" + index })
+                        }) as System.Windows.FrameworkElement;
                         uiBuildOk = card != null && uiButton != null && infoRow != null &&
-                                    checkBox != null && combo != null && banner != null;
+                                    checkBox != null && combo != null && banner != null &&
+                                    badge != null && expander != null && tabs != null;
                     }
                     catch (Exception ex)
                     {
@@ -1744,7 +1834,7 @@ namespace PclDlSwap.ExLoaderHarness
                     "{\"schema\":1,\"id\":\"test.installed\",\"name\":\"Installed Sample\"," +
                     "\"version\":\"2.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
                     "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"author\":\"harness\"," +
-                    "\"description\":\"installed by the manager test\",\"permissions\":[\"host.read\"]}",
+                    "\"description\":\"installed by the manager test\",\"permissions\":[\"settings\",\"hooks\"]}",
                     null);
 
                 // ---- install preview: inspect without touching the store, then describe it ----
@@ -1771,7 +1861,8 @@ namespace PclDlSwap.ExLoaderHarness
                     previewText.Contains("test.installed") && previewText.Contains("API") &&
                     previewText.Contains("SHA-256"));
                 Expect("the install preview repeats the declared permissions",
-                    previewText.Contains("权限声明") && previewText.Contains("host.read"));
+                    previewText.Contains("权限声明") && previewText.Contains("settings") &&
+                    previewText.Contains("hooks"));
 
                 // ---- trust chain: signature + payload hashes + version-level warnings -------------
                 object TrustOfReview(object review) =>
@@ -1866,6 +1957,116 @@ namespace PclDlSwap.ExLoaderHarness
                     File.Exists(Path.Combine(addonRoot, "test.installed-2.0.0.swapaddon")));
                 Expect("install keeps the user's original package untouched", File.Exists(external));
                 Expect("installed module shows up in the list", RecordIds().Contains("test.installed"));
+
+                // ---- user governance: requested permissions can be revoked and restored ----
+                var installedInfo = catalog?.Find("test.installed");
+                Expect("a new module starts with all requested permissions granted",
+                    installedInfo != null &&
+                    installedInfo.RequestedPermissions.Contains("settings") &&
+                    installedInfo.RequestedPermissions.Contains("hooks") &&
+                    installedInfo.GrantedPermissions.Contains("settings") &&
+                    installedInfo.GrantedPermissions.Contains("hooks") &&
+                    installedInfo.DeniedPermissions.Count == 0);
+                var governedScopedApi = createScopedApi?.Invoke(manager,
+                    new[] { installed }) as PCL2Swap.Api.ISwapApi;
+                var governedHookHits = 0;
+                var governedHook = governedScopedApi?.Hooks.Attach(
+                    new PCL2Swap.Api.SwapMethodTarget
+                    {
+                        DeclaringType = "PCL.HookTarget",
+                        MethodName = "Ping",
+                        ParameterTypes = new List<string> { "System.Int32" }
+                    }, "governed.permission-hook",
+                    (Func<int, int>)(value =>
+                    {
+                        governedHookHits++;
+                        return value + 1000;
+                    }), PCL2Swap.Api.HookMode.Replace);
+                Expect("a granted hook permission runs the installed handler",
+                    governedHookHits == 0 && PCL.HookTarget.Ping(2) == 1002);
+                var governanceEventsBefore = catalogEvents;
+                var setPermission = manager?.GetType().GetMethod("SetPermission");
+                var revoked = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "settings", false }) ?? false);
+                var revokedInfo = catalog?.Find("test.installed");
+                Expect("revoking a requested permission updates the catalog",
+                    revoked && revokedInfo != null &&
+                    !revokedInfo.GrantedPermissions.Contains("settings") &&
+                    revokedInfo.DeniedPermissions.Contains("settings") &&
+                    catalogEvents == governanceEventsBefore + 1);
+                try
+                {
+                    var deniedSettings = governedScopedApi?.Pcl.Settings;
+                    Expect("a revoked permission is enforced at the scoped API boundary", false);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    Expect("a revoked permission is enforced at the scoped API boundary",
+                        ex.Message.Contains("未获得权限"));
+                }
+                var hooksRevoked = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "hooks", false }) ?? false);
+                var hooksBeforeRevocation = governedHookHits;
+                var ungatedHookResult = PCL.HookTarget.Ping(2);
+                Expect("revoking hook permission immediately disables installed handlers",
+                    hooksRevoked && governedHookHits == hooksBeforeRevocation &&
+                    ungatedHookResult == 4);
+                var governedModules = File.ReadAllText(modulesFile);
+                Expect("permission grants persist independently of the enabled flag",
+                    governedModules.Contains("\"test.installed\"") &&
+                    governedModules.Contains("\"permissions\":[]"));
+                var managerType = manager?.GetType();
+                var managerCtor = managerType?.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(ctor => ctor.GetParameters().Length == 1);
+                var reloadedManager = managerCtor?.Invoke(new object[] { api });
+                managerType?.GetMethod("RegisterBuiltIns")?.Invoke(reloadedManager, null);
+                managerType?.GetMethod("LoadFromDisk")?.Invoke(reloadedManager, null);
+                managerType?.GetMethod("ApplySavedState",
+                        BindingFlags.NonPublic | BindingFlags.Instance)
+                    ?.Invoke(reloadedManager, null);
+                var reloadedInstalled = (reloadedManager == null ? null :
+                        managerType.GetMethod("ModuleSnapshot",
+                                BindingFlags.NonPublic | BindingFlags.Instance,
+                                null, Type.EmptyTypes, null)
+                            ?.Invoke(reloadedManager, null)
+                        as IEnumerable<PCL2Swap.Api.SwapModuleInfo>)
+                    ?.FirstOrDefault(module => module.Id == "test.installed");
+                Expect("permission revocation survives module-state reload",
+                    reloadedInstalled != null &&
+                    reloadedInstalled.DeniedPermissions.Contains("settings") &&
+                    reloadedInstalled.DeniedPermissions.Contains("hooks"));
+                var regranted = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "settings", true }) ?? false);
+                var hooksRegranted = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "hooks", true }) ?? false);
+                Expect("a revoked permission can be granted again",
+                    regranted && hooksRegranted && catalog?.Find("test.installed")
+                        ?.GrantedPermissions.Contains("settings") == true &&
+                    catalog?.Find("test.installed")?.GrantedPermissions.Contains("hooks") == true);
+                Expect("regranting immediately restores scoped access",
+                    governedScopedApi?.Pcl.Settings != null);
+                Expect("regranting hook permission immediately restores installed handlers",
+                    PCL.HookTarget.Ping(2) == 1002);
+                governedHook?.Dispose();
+
+                var permissionUpdatePath = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapPermissionUpdate-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                PackSignedAddon(permissionUpdatePath,
+                    "{\"schema\":1,\"id\":\"test.permission-update\",\"name\":\"Permission Update\"," +
+                    "\"version\":\"1.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
+                    "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"permissions\":[\"settings\"]}",
+                    trustedKey);
+                var permissionFirst = install?.Invoke(manager,
+                    new object[] { permissionUpdatePath, true });
+                setPermission?.Invoke(manager,
+                    new object[] { "test.permission-update", "settings", false });
+                var permissionUpdated = install?.Invoke(manager,
+                    new object[] { permissionUpdatePath, true });
+                Expect("hot module update preserves user permission revocations",
+                    permissionFirst != null && permissionUpdated != null &&
+                    catalog?.Find("test.permission-update")
+                        ?.DeniedPermissions.Contains("settings") == true);
+                uninstall?.Invoke(manager, new object[] { "test.permission-update" });
 
                 // Version-level warnings only make sense once the same id is installed.
                 var downgradeOut = Path.Combine(Path.GetTempPath(),
@@ -2293,6 +2494,22 @@ namespace PclDlSwap.ExLoaderHarness
                     {
                         "state", "semantic banner", PCL2Swap.Api.SwapHintType.Success
                     });
+                    var badge = swapUi.GetMethod("Badge", flags)?.Invoke(null, new object[]
+                    {
+                        "READY", PCL2Swap.Api.SwapHintType.Success
+                    });
+                    var expander = swapUi.GetMethod("Expander", flags)?.Invoke(null, new object[]
+                    {
+                        "advanced", true,
+                        (Func<System.Windows.FrameworkElement>)(() =>
+                            new System.Windows.Controls.TextBlock { Text = "content" })
+                    });
+                    var tabs = swapUi.GetMethod("Tabs", flags)?.Invoke(null, new object[]
+                    {
+                        new[] { "one", "two" }, 1,
+                        (Func<int, System.Windows.FrameworkElement>)(index =>
+                            new System.Windows.Controls.TextBlock { Text = "tab:" + index })
+                    });
 
                     var i18nType = payload.GetType("PclDlSwap.Payload.Swap.SwapI18n",
                         throwOnError: true);
@@ -2332,10 +2549,13 @@ namespace PclDlSwap.ExLoaderHarness
                     frontendDetail = "radio=" + (radio != null) + ", number=" + (number != null) +
                                      ", password=" + (password != null) + ", multiline=" + (multiline != null) +
                                      ", progress=" + (progressElement != null) + ", banner=" + (banner != null) +
+                                     ", badge=" + (badge != null) + ", expander=" + (expander != null) +
+                                     ", tabs=" + (tabs != null) +
                                      ", translated=" + translated +
                                      "; " + frontendDetail;
                     frontendOk = radio != null && number != null && password != null &&
-                                 multiline != null && progressElement != null && banner != null && translated;
+                                 multiline != null && progressElement != null && banner != null &&
+                                 badge != null && expander != null && tabs != null && translated;
                 }
                 catch (Exception ex)
                 {
@@ -2348,7 +2568,7 @@ namespace PclDlSwap.ExLoaderHarness
                 }
             }));
             frontendDone.Wait(TimeSpan.FromSeconds(10));
-            Console.WriteLine("[uitest] API 1.5 frontends=" + (frontendOk ? "PASS" : "FAIL"));
+            Console.WriteLine("[uitest] API 1.6 frontends=" + (frontendOk ? "PASS" : "FAIL"));
             if (!frontendOk)
             {
                 Console.WriteLine("[uitest] frontend detail: " + frontendDetail);
@@ -2961,6 +3181,25 @@ namespace PCL
             builder.Append("harness:");
             builder.Append(text);
             return builder.ToString();
+        }
+
+        public static int OverloadedStringCalls;
+        public static int OverloadedIntCalls;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Overloaded(string value)
+        {
+            var pad = "harness.overloaded.string." + (value ?? string.Empty);
+            OverloadedStringCalls += pad.Length > 0 ? 1 : 0;
+            return (value ?? string.Empty).Length;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static int Overloaded(int value)
+        {
+            var pad = "harness.overloaded.int." + value;
+            OverloadedIntCalls += pad.Length > 0 ? 1 : 0;
+            return value * 3;
         }
     }
 

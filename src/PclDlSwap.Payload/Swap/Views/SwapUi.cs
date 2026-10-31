@@ -733,6 +733,84 @@ namespace PclDlSwap.Payload.Swap.Views
             return root;
         }
 
+        /// <summary>Compact semantic pill for module state and section summaries.</summary>
+        internal static FrameworkElement Badge(string text, SwapHintType type = SwapHintType.Info)
+        {
+            var border = new Border
+            {
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(8, 2, 8, 3),
+                Margin = new Thickness(0, 0, 7, 0),
+                Child = Text(text, 10.5, false, false, FontWeights.SemiBold)
+            };
+            SetBadgeState(border, type);
+            return border;
+        }
+
+        internal static void SetBadgeState(FrameworkElement badge, SwapHintType type)
+        {
+            if (!(badge is Border border)) return;
+            var color = BannerColor(type);
+            border.Background = new SolidColorBrush(Color.FromArgb(24, color.R, color.G, color.B));
+            border.BorderBrush = new SolidColorBrush(Color.FromArgb(96, color.R, color.G, color.B));
+        }
+
+        /// <summary>Native disclosure row for advanced module information.</summary>
+        internal static FrameworkElement Expander(string title, bool initiallyExpanded,
+            Func<FrameworkElement> contentFactory)
+        {
+            var contentHost = new ContentControl();
+            var loaded = false;
+            Action load = () =>
+            {
+                if (loaded) return;
+                loaded = true;
+                try { contentHost.Content = contentFactory?.Invoke() ?? Note("(empty)", true); }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("SwapUi：Expander 内容构建失败：" + ex.Message);
+                    contentHost.Content = Note("(content failed)", true);
+                }
+            };
+            var expander = new Expander
+            {
+                Header = Text(title, 12.5, false, true, FontWeights.SemiBold),
+                IsExpanded = initiallyExpanded,
+                Margin = new Thickness(0, 0, 0, 10),
+                Content = contentHost
+            };
+            expander.Expanded += (sender, args) => load();
+            if (initiallyExpanded) load();
+            return expander;
+        }
+
+        /// <summary>Compact tab surface using the host's native WPF theme.</summary>
+        internal static FrameworkElement Tabs(IReadOnlyList<string> titles, int selectedIndex,
+            Func<int, FrameworkElement> contentFactory)
+        {
+            var tabs = new TabControl { MinHeight = 150, Margin = new Thickness(0, 0, 0, 10) };
+            if (titles == null || titles.Count == 0)
+                return Note("(no tabs)", true);
+
+            for (var index = 0; index < titles.Count; index++)
+            {
+                FrameworkElement content = null;
+                try { content = contentFactory?.Invoke(index); }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn($"SwapUi：Tab {index} 内容构建失败：" + ex.Message);
+                }
+                tabs.Items.Add(new TabItem
+                {
+                    Header = titles[index] ?? string.Empty,
+                    Content = content ?? Note("(empty)", true)
+                });
+            }
+            tabs.SelectedIndex = Math.Max(0, Math.Min(titles.Count - 1, selectedIndex));
+            return tabs;
+        }
+
         private static Color BannerColor(SwapHintType type)
         {
             switch (type)

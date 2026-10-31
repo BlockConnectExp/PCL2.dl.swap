@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -53,6 +54,14 @@ namespace PclDlSwap.Payload.Swap
             public string TrustKind { get; set; }
 
             /// <summary>
+            /// User-granted subset of manifest permissions. PermissionStateLoaded=false means a
+            /// legacy state file had no permission list, so all requested entries remain granted.
+            /// </summary>
+            public HashSet<string> GrantedPermissions { get; } =
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            public bool PermissionStateLoaded { get; set; }
+
+            /// <summary>
             /// Digest of the signed payload inventory (path + hash of every file). Two packages with
             /// the same id and version but different payloads are distinguishable even though the zip
             /// container itself may be re-timestamped.
@@ -62,16 +71,61 @@ namespace PclDlSwap.Payload.Swap
 
         private readonly ISwapApi _api;
         private readonly List<AddonRecord> _records = new List<AddonRecord>();
+        private readonly object _recordsGate = new object();
         private readonly Dictionary<string, bool> _savedState =
             new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, HashSet<string>> _savedPermissions =
+            new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _savedPermissionState =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool _stateLoaded;
         private StartupRecovery _recovery;
 
         public AddonManager(ISwapApi api) => _api = api ?? throw new ArgumentNullException(nameof(api));
 
-        public IReadOnlyList<AddonRecord> Records => _records;
+        public IReadOnlyList<AddonRecord> Records => SnapshotRecords();
         internal StartupRecovery Recovery => _recovery;
         internal bool SafeMode => _recovery?.SafeMode == true;
+        internal event EventHandler Changed;
+
+        internal IReadOnlyList<SwapModuleInfo> ModuleSnapshot() =>
+            SnapshotRecords().Select(ToModuleInfo).ToList();
+
+        internal SwapModuleInfo ModuleSnapshot(string addonId)
+        {
+            var record = Find(addonId);
+            return record == null ? null : ToModuleInfo(record);
+        }
+
+        private SwapModuleInfo ToModuleInfo(AddonRecord record)
+        {
+            var manifest = record.Manifest;
+            return new SwapModuleInfo
+            {
+                Id = record.Id,
+                Name = record.Name,
+                Version = record.Version,
+                Description = record.Description,
+                Author = manifest?.Author,
+                ApiVersion = manifest?.ApiVersion,
+                BuiltIn = record.BuiltIn,
+                Enabled = record.Enabled,
+                Status = record.Status,
+                Directory = record.Directory,
+                LogPath = ModuleLog.PathFor(record.Id),
+                ConfigPath = GetModuleConfigPath(record.Id),
+                TrustKind = record.TrustKind,
+                Signature = record.Signature,
+                Shapes = (manifest?.Shapes ?? new List<string>()).ToArray(),
+                HostVersions = (manifest?.HostVersions ?? new List<string>()).ToArray(),
+                RequestedPermissions = RequestedPermissions(record),
+                GrantedPermissions = EffectiveGrantedPermissions(record),
+                DeniedPermissions = DeniedPermissions(record),
+                HookCount = ScopedHook.CountFor(record.Id),
+                HookHits = ScopedHook.HitsFor(record.Id),
+                HookErrors = ScopedHook.ErrorsFor(record.Id)
+            };
+        }
 
         internal void ConfigureRecovery(StartupRecovery recovery)
         {
@@ -126,11 +180,104 @@ namespace PclDlSwap.Payload.Swap
             if (record == null) return true;
             if (!IsStrict(record)) return true;
             if (string.IsNullOrWhiteSpace(permission)) return true;
-            var wanted = NormalizePermission(permission);
-            return record.Manifest?.Permissions != null &&
-                   record.Manifest.Permissions.Any(entry =>
-                       NormalizePermission(entry) == wanted || NormalizePermission(entry) == "*");
+            return IsPermissionGranted(record, permission);
         }
+
+        internal IReadOnlyList<string> RequestedPermissions(AddonRecord record) =>
+            NormalizePermissions(record?.Manifest?.Permissions);
+
+        internal IReadOnlyList<string> EffectiveGrantedPermissions(AddonRecord record)
+        {
+            var requested = RequestedPermissions(record);
+            if (!record.PermissionStateLoaded)
+                return requested;
+            return record.GrantedPermissions
+                .Select(NormalizePermission)
+                .Where(permission => permission.Length > 0 &&
+                                     (requested.Contains("*") || requested.Contains(permission)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(permission => permission, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        internal IReadOnlyList<string> DeniedPermissions(AddonRecord record)
+        {
+            var requested = RequestedPermissions(record);
+            var granted = EffectiveGrantedPermissions(record);
+            var denied = requested
+                .Where(permission => permission != "*" &&
+                                     !granted.Contains(permission, StringComparer.OrdinalIgnoreCase) &&
+                                     !granted.Contains("*", StringComparer.OrdinalIgnoreCase))
+                .ToList();
+            if (requested.Contains("*", StringComparer.OrdinalIgnoreCase) &&
+                !granted.Contains("*", StringComparer.OrdinalIgnoreCase))
+                denied.Insert(0, "*");
+            return denied;
+        }
+
+        internal bool IsPermissionGranted(AddonRecord record, string permission)
+        {
+            if (record == null || string.IsNullOrWhiteSpace(permission)) return true;
+            var wanted = NormalizePermission(permission);
+            var requested = RequestedPermissions(record);
+            if (!requested.Contains(wanted, StringComparer.OrdinalIgnoreCase) &&
+                !requested.Contains("*", StringComparer.OrdinalIgnoreCase))
+                return false;
+            var granted = EffectiveGrantedPermissions(record);
+            return granted.Contains(wanted, StringComparer.OrdinalIgnoreCase) ||
+                   granted.Contains("*", StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Grants or revokes one manifest-requested permission. A legacy module is materialised to
+        /// "all requested granted" before the first edit, so upgrades do not silently narrow access.
+        /// </summary>
+        public bool SetPermission(string addonId, string permission, bool granted)
+        {
+            var record = Find(addonId);
+            var wanted = NormalizePermission(permission);
+            if (record == null || wanted.Length == 0) return false;
+
+            var requested = RequestedPermissions(record);
+            if (!requested.Contains(wanted, StringComparer.OrdinalIgnoreCase) &&
+                !requested.Contains("*", StringComparer.OrdinalIgnoreCase))
+            {
+                SwapLog.Warn($"[permissions] {addonId} 未请求权限 {wanted}，拒绝修改授权。");
+                return false;
+            }
+
+            MaterializePermissionState(record);
+            if (granted) record.GrantedPermissions.Add(wanted);
+            else record.GrantedPermissions.Remove(WantedPermission(record, wanted));
+            SaveState();
+            RaiseChanged();
+            SwapLog.Info($"[permissions] {addonId} · {wanted} = {(granted ? "granted" : "denied")}");
+            return true;
+        }
+
+        private void MaterializePermissionState(AddonRecord record)
+        {
+            if (record.PermissionStateLoaded) return;
+            record.GrantedPermissions.Clear();
+            foreach (var requested in RequestedPermissions(record))
+                record.GrantedPermissions.Add(requested);
+            record.PermissionStateLoaded = true;
+        }
+
+        private static string WantedPermission(AddonRecord record, string normalized)
+        {
+            var match = record.GrantedPermissions.FirstOrDefault(entry =>
+                NormalizePermission(entry) == normalized);
+            return match ?? normalized;
+        }
+
+        private static IReadOnlyList<string> NormalizePermissions(IEnumerable<string> permissions) =>
+            (permissions ?? Enumerable.Empty<string>())
+                .Select(NormalizePermission)
+                .Where(permission => permission.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(permission => permission, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
         /// <summary>
         /// Permission aliases: early third-party modules used namespaced spellings
@@ -192,10 +339,11 @@ namespace PclDlSwap.Payload.Swap
             if (HasPermission(record, permission)) return;
 
             ModuleLog.Write(addonId, "warn",
-                $"权限被拒绝：{permission}（manifest.permissions = {string.Join(",", record?.Manifest?.Permissions ?? new List<string>())}）");
+                $"权限被拒绝：{permission}（requested = {string.Join(",", RequestedPermissions(record))}，" +
+                $"granted = {string.Join(",", EffectiveGrantedPermissions(record))}）");
             throw new UnauthorizedAccessException(
-                $"模块 {addonId} 未声明权限 \"{permission}\"。严格模式由 manifest.permissions 非空启用；" +
-                "声明需要的权限（或 \"*\"）后重新打包安装。");
+                $"模块 {addonId} 未获得权限 \"{permission}\"。严格模式由 manifest.permissions 非空启用；" +
+                "请在 Swap Addon 的模块详情中授予该权限。");
         }
 
         /// <summary>Builds a scoped API for tests and for the permission self-check.</summary>
@@ -212,11 +360,18 @@ namespace PclDlSwap.Payload.Swap
             return record == null || (record.Enabled && !SafeMode);
         }
 
-        public AddonRecord Find(string addonId) =>
-            string.IsNullOrEmpty(addonId)
-                ? null
-                : _records.FirstOrDefault(record =>
+        public AddonRecord Find(string addonId)
+        {
+            if (string.IsNullOrEmpty(addonId)) return null;
+            lock (_recordsGate)
+                return _records.FirstOrDefault(record =>
                     string.Equals(record.Id, addonId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private List<AddonRecord> SnapshotRecords()
+        {
+            lock (_recordsGate) return _records.ToList();
+        }
 
         /// <summary>Flips an addon on or off and persists the choice; drives the built-in features.</summary>
         public bool SetEnabled(string addonId, bool enabled)
@@ -261,6 +416,7 @@ namespace PclDlSwap.Payload.Swap
                         : "（钩子类拦截立即停用；已完成的页面/侧栏修复要重启 PCL 才会完全回退）")
                     : string.Empty;
                 SwapLog.Info($"Addon 已{(enabled ? "启用" : "禁用")}：{record.Id}" + note);
+                RaiseChanged();
                 return true;
             }
             catch (Exception ex)
@@ -270,6 +426,7 @@ namespace PclDlSwap.Payload.Swap
                 record.Failure = ex;
                 SaveState();
                 SwapLog.Error($"Addon {(enabled ? "启用" : "禁用")}失败：{record.Id}", ex);
+                RaiseChanged();
                 return false;
             }
         }
@@ -361,6 +518,9 @@ namespace PclDlSwap.Payload.Swap
                                                         : "（" + trust.Problems[0] + "）"));
 
             var existing = Find(manifest.Id);
+            var inheritedPermissions = existing?.PermissionStateLoaded == true
+                ? new HashSet<string>(existing.GrantedPermissions, StringComparer.OrdinalIgnoreCase)
+                : null;
             string staging = null;
             if (existing != null)
             {
@@ -380,6 +540,12 @@ namespace PclDlSwap.Payload.Swap
             try
             {
                 record = Unpack(storeCopy, manifest);
+                if (inheritedPermissions != null)
+                {
+                    record.PermissionStateLoaded = true;
+                    foreach (var permission in inheritedPermissions)
+                        record.GrantedPermissions.Add(permission);
+                }
             }
             catch
             {
@@ -410,7 +576,7 @@ namespace PclDlSwap.Payload.Swap
             record.Signature = trust.Summary;
             record.TrustKind = trust.Kind.ToString();
             record.PayloadDigest = PayloadDigestOf(manifest);
-            _records.Add(record);
+            lock (_recordsGate) _records.Add(record);
 
             // Compatibility precheck: a package that does not fit *this* host still installs (the user
             // may be preparing for another PCL build), but the mismatch is stated up front instead of
@@ -427,6 +593,7 @@ namespace PclDlSwap.Payload.Swap
                 record.Enabled = false;
                 record.Status = "disabled";
                 SaveState();
+                RaiseChanged();
             }
             return record;
         }
@@ -577,8 +744,11 @@ namespace PclDlSwap.Payload.Swap
 
             Retire(record, removeArchive: true, keepSavedState: false);
             _savedState.Remove(record.Id);
+            _savedPermissions.Remove(record.Id);
+            _savedPermissionState.Remove(record.Id);
             SaveState();
             SwapLog.Info($"Addon 已卸载：{record.Id}（{record.Name} {record.Version}）");
+            RaiseChanged();
             return true;
         }
 
@@ -606,7 +776,7 @@ namespace PclDlSwap.Payload.Swap
             if (!keepSavedState) _savedState.Remove(record.Id);
             if (!record.BuiltIn) DeleteOrQueue(record, removeArchive, removeModuleData: !keepSavedState);
 
-            _records.Remove(record);
+            lock (_recordsGate) _records.Remove(record);
         }
 
         /// <summary>
@@ -753,6 +923,7 @@ namespace PclDlSwap.Payload.Swap
                 record.Status = "skipped-safe-mode";
                 record.Failure = null;
                 SwapLog.Warn($"Addon 已跳过（安全模式）：{record.Id}");
+                RaiseChanged();
                 return;
             }
             if (!IsInScope(record, out var scopeStatus, out var scopeReason))
@@ -760,6 +931,7 @@ namespace PclDlSwap.Payload.Swap
                 record.Status = scopeStatus;
                 record.Failure = null;
                 SwapLog.Info($"Addon 跳过（作用域不适用）：{record.Id} —— {scopeReason}");
+                RaiseChanged();
                 return;
             }
 
@@ -785,6 +957,7 @@ namespace PclDlSwap.Payload.Swap
                 record.Status = "enabled";
                 record.Failure = null;
                 SwapLog.Info($"Addon 已启用：{record.Id}（{record.Name} {record.Version}）");
+                RaiseChanged();
             }
             catch (Exception ex)
             {
@@ -792,6 +965,7 @@ namespace PclDlSwap.Payload.Swap
                 record.Enabled = false;
                 record.Failure = ex;
                 SwapLog.Error($"Addon 启用失败：{record.Id}", ex);
+                RaiseChanged();
             }
         }
 
@@ -1012,7 +1186,19 @@ namespace PclDlSwap.Payload.Swap
                 {
                     if (pair.Value is Dictionary<string, object> entry &&
                         entry.TryGetValue("enabled", out var enabled))
+                    {
                         _savedState[pair.Key] = Convert.ToBoolean(enabled);
+                        object rawPermissions;
+                        if (entry.TryGetValue("permissions", out rawPermissions) ||
+                            entry.TryGetValue("grantedPermissions", out rawPermissions))
+                        {
+                            _savedPermissions[pair.Key] = new HashSet<string>(
+                                ReadPermissionList(rawPermissions).Select(NormalizePermission)
+                                    .Where(permission => permission.Length > 0),
+                                StringComparer.OrdinalIgnoreCase);
+                            _savedPermissionState.Add(pair.Key);
+                        }
+                    }
                     else
                         _savedState[pair.Key] = Convert.ToBoolean(pair.Value);
                 }
@@ -1029,10 +1215,17 @@ namespace PclDlSwap.Payload.Swap
             try
             {
                 var map = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                foreach (var record in _records)
+                foreach (var record in SnapshotRecords())
                 {
                     if (string.IsNullOrEmpty(record.Id)) continue;
-                    map[record.Id] = new Dictionary<string, object> { { "enabled", record.Enabled } };
+                    var entry = new Dictionary<string, object> { { "enabled", record.Enabled } };
+                    if ((record.Manifest?.Permissions?.Count ?? 0) > 0 || record.PermissionStateLoaded)
+                    {
+                        entry["permissions"] = EffectiveGrantedPermissions(record)
+                            .OrderBy(permission => permission, StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                    }
+                    map[record.Id] = entry;
                 }
 
                 Directory.CreateDirectory(SwapPaths.DataRoot);
@@ -1048,10 +1241,43 @@ namespace PclDlSwap.Payload.Swap
         private void ApplySavedState()
         {
             LoadState();
-            foreach (var record in _records)
+            foreach (var record in SnapshotRecords())
             {
                 if (record.Id != null && _savedState.TryGetValue(record.Id, out var enabled))
                     record.Enabled = enabled;
+                if (record.Id != null && _savedPermissionState.Contains(record.Id))
+                {
+                    record.GrantedPermissions.Clear();
+                    if (_savedPermissions.TryGetValue(record.Id, out var permissions))
+                        foreach (var permission in permissions)
+                            record.GrantedPermissions.Add(permission);
+                    record.PermissionStateLoaded = true;
+                }
+            }
+        }
+
+        private static IEnumerable<string> ReadPermissionList(object raw)
+        {
+            if (raw == null || raw is string) yield break;
+            if (!(raw is IEnumerable values)) yield break;
+            foreach (var value in values)
+            {
+                var text = Convert.ToString(value);
+                if (!string.IsNullOrWhiteSpace(text)) yield return text;
+            }
+        }
+
+        private void RaiseChanged()
+        {
+            var handlers = Changed;
+            if (handlers == null) return;
+            foreach (EventHandler handler in handlers.GetInvocationList())
+            {
+                try { handler(this, EventArgs.Empty); }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("[module-catalog] Changed subscriber failed: " + ex.Message);
+                }
             }
         }
 
@@ -1069,7 +1295,7 @@ namespace PclDlSwap.Payload.Swap
 
         private void AddBuiltIn(ISwapAddon instance, string id, string name, string version, string description)
         {
-            _records.Add(new AddonRecord
+            var record = new AddonRecord
             {
                 Id = id,
                 Name = name,
@@ -1079,7 +1305,8 @@ namespace PclDlSwap.Payload.Swap
                 Instance = instance,
                 Manifest = new AddonManifest { Id = id, Name = name, Version = version, ApiVersion = ">=1.0 <2.0" },
                 Status = "registered"
-            });
+            };
+            lock (_recordsGate) _records.Add(record);
         }
 
         // ------------------------------------------------------------------ disk addons
@@ -1126,7 +1353,7 @@ namespace PclDlSwap.Payload.Swap
                     SwapLog.Error($"模块包校验未通过，已禁止加载：{record.Id} —— {trust.Summary}");
                 }
 
-                _records.Add(record);
+                lock (_recordsGate) _records.Add(record);
             }
             catch (Exception ex)
             {
@@ -1135,7 +1362,7 @@ namespace PclDlSwap.Payload.Swap
                     record.Status = "failed";
                     record.Enabled = false;
                     record.Failure = ex;
-                    _records.Add(record);
+                    lock (_recordsGate) _records.Add(record);
                 }
                 SwapLog.Error("Addon 加载失败：" + archive, ex);
             }
@@ -1260,7 +1487,7 @@ namespace PclDlSwap.Payload.Swap
         public void EnableAll()
         {
             ApplySavedState();
-            foreach (var record in _records.ToList())
+            foreach (var record in SnapshotRecords())
             {
                 if (SafeMode)
                 {
@@ -1277,6 +1504,7 @@ namespace PclDlSwap.Payload.Swap
                 }
                 EnableRecord(record);
             }
+            RaiseChanged();
         }
 
         private static ISwapAddon CreateInstance(AddonRecord record)
@@ -1331,6 +1559,7 @@ namespace PclDlSwap.Payload.Swap
             public IPclAccess Pcl { get; }
             public II18n I18n => _inner.I18n;
             public IRecoveryAccess Recovery => _inner.Recovery;
+            public IModuleCatalog Modules => _inner.Modules;
 
             // Module lines keep their own file (LSPosed-style per-module log) and are tagged with the
             // module id in the global log, so "which module did this" never needs guessing.
@@ -1488,6 +1717,17 @@ namespace PclDlSwap.Payload.Swap
 
             public FrameworkElement Banner(string title, string text,
                 SwapHintType type = SwapHintType.Warning) => _inner.Banner(title, text, type);
+
+            public FrameworkElement Badge(string text, SwapHintType type = SwapHintType.Info) =>
+                _inner.Badge(text, type);
+
+            public FrameworkElement Expander(string title, bool initiallyExpanded,
+                Func<FrameworkElement> contentFactory) =>
+                _inner.Expander(title, initiallyExpanded, contentFactory);
+
+            public FrameworkElement Tabs(IReadOnlyList<string> titles, int selectedIndex,
+                Func<int, FrameworkElement> contentFactory) =>
+                _inner.Tabs(titles, selectedIndex, contentFactory);
         }
 
         /// <summary>
@@ -1548,6 +1788,32 @@ namespace PclDlSwap.Payload.Swap
                     throw;
                 }
             }
+
+            public IReadOnlyList<SwapMethodTarget> FindTargets(string declaringType,
+                string methodName) => _inner.FindTargets(declaringType, methodName);
+
+            public IDisposable Attach(SwapMethodTarget target, string hookId, Delegate handler,
+                HookMode mode)
+            {
+                SwapHost.Addons?.RequirePermission(_record, "hooks");
+                try
+                {
+                    var token = _host == null
+                        ? _inner.Attach(target, hookId, handler, mode)
+                        : _host.AttachAddonHook(_addonId, target, hookId, mode, handler);
+                    ModuleLog.Write(_addonId, "info",
+                        $"挂钩 {target}（{mode}，hookId {hookId}）");
+                    return token;
+                }
+                catch (Exception ex)
+                {
+                    ModuleLog.Write(_addonId, "error",
+                        $"挂钩失败 {target}（{mode}）：{ex.Message}", ex);
+                    throw;
+                }
+            }
+
+            public bool IsHooked(SwapMethodTarget target) => _inner.IsHooked(target);
 
             public bool IsHooked(string declaringType, string methodName) =>
                 _inner.IsHooked(declaringType, methodName);

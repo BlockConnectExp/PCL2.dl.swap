@@ -215,6 +215,17 @@ namespace PCL2Swap.SampleAddon
                 _api.LogWarning("创建 API 1.3 后端演示失败：" + ex.Message);
             }
 
+            page.Children.Add(_api.Ui.Card("API 1.6 模块治理",
+                _api.Ui.Buttons(
+                    _api.Ui.Badge("模块目录 " + (_api.Modules?.Modules.Count ?? 0), SwapHintType.Info),
+                    _api.Ui.Badge("签名钩子", SwapHintType.Success)),
+                _api.Ui.Tabs(new[] { "概览", "说明" }, 0, index =>
+                    _api.Ui.Text(index == 0
+                        ? "模块目录、权限授予和签名目标选择均由宿主统一提供。"
+                        : "旧 API 保持兼容；新模块可精确选择重载，并按用户授权运行。", 12.5, true)),
+                _api.Ui.Expander("高级信息", false, () =>
+                    _api.Ui.Note("这个区域由 IUi.Expander 构建，内容在展开前不会干扰主页面。"))));
+
             // Live view: the page is built once and cached, so a timer keeps the counters honest
             // while the user is looking at it.
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };

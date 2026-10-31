@@ -407,6 +407,54 @@ namespace PclDlSwap.Payload.Swap.Views
                     : string.Join(separator, manifest.Permissions) + i18n.T("（严格门控）", " (strictly gated)")));
             }
 
+            var requestedPermissions = addons.RequestedPermissions(record);
+            if (requestedPermissions.Count > 0)
+            {
+                var grantedCount = addons.EffectiveGrantedPermissions(record).Count;
+                content.Add(SwapUi.Expander(
+                    i18n.T("权限授予", "Permission grants"), true,
+                    () =>
+                    {
+                        var panel = new StackPanel { Margin = new Thickness(0, 8, 0, 4) };
+                        var badges = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+                        var countBadge = SwapUi.Badge(
+                            i18n.T($"已授予 {grantedCount}/{requestedPermissions.Count}",
+                                $"{grantedCount}/{requestedPermissions.Count} granted"),
+                            grantedCount >= requestedPermissions.Count
+                                ? SwapHintType.Success
+                                : grantedCount == 0 ? SwapHintType.Error : SwapHintType.Warning);
+                        badges.Children.Add(countBadge);
+                        var countText = (countBadge as Border)?.Child as TextBlock;
+                        badges.Children.Add(SwapUi.Badge(i18n.T("严格门控", "Strictly gated"),
+                            SwapHintType.Info));
+                        panel.Children.Add(badges);
+                        panel.Children.Add(SwapUi.Note(i18n.T(
+                            "撤销会立即生效；模块已安装的钩子会按新授权开关放行或直通原方法。",
+                            "Revocation applies immediately; installed hooks either run or pass through according to the new grant.")));
+                        foreach (var permission in requestedPermissions)
+                        {
+                            var current = permission;
+                            panel.Children.Add(SwapUi.CheckBox(
+                                PermissionLabel(current, i18n),
+                                addons.IsPermissionGranted(record, current),
+                                value =>
+                                {
+                                    addons.SetPermission(record.Id, current, value);
+                                    var currentCount = addons.EffectiveGrantedPermissions(record).Count;
+                                    if (countText != null)
+                                        countText.Text = i18n.T(
+                                            $"已授予 {currentCount}/{requestedPermissions.Count}",
+                                            $"{currentCount}/{requestedPermissions.Count} granted");
+                                    SwapUi.SetBadgeState(countBadge,
+                                        currentCount >= requestedPermissions.Count
+                                            ? SwapHintType.Success
+                                            : currentCount == 0 ? SwapHintType.Error : SwapHintType.Warning);
+                                }));
+                        }
+                        return panel;
+                    }));
+            }
+
             var chains = ScopedHook.Snapshot()
                 .Where(line => line.IndexOf(record.Id, StringComparison.OrdinalIgnoreCase) >= 0)
                 .ToList();
@@ -449,7 +497,9 @@ namespace PclDlSwap.Payload.Swap.Views
             if (!record.BuiltIn)
                 actions.Add(ActionButton(i18n.T("卸载", "Uninstall"),
                     () => UninstallModule(api, addons, record), "Red"));
-            content.Add(SwapUi.Buttons(actions.ToArray()));
+            var actionWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var action in actions) actionWrap.Children.Add(action);
+            content.Add(actionWrap);
 
             return SwapUi.Card(i18n.T("模块详情：", "Module details: ") + (record.Name ?? record.Id),
                 content.ToArray());
@@ -697,6 +747,25 @@ namespace PclDlSwap.Payload.Swap.Views
                 case "safe-mode-cleared": return i18n.T("安全模式已清除", "Safe mode cleared");
                 case "": return i18n.T("（无）", "(none)");
                 default: return phase;
+            }
+        }
+
+        private static string PermissionLabel(string permission, SwapI18n i18n)
+        {
+            switch ((permission ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "hooks": return i18n.T("挂钩宿主方法", "Hook host methods");
+                case "pages": return i18n.T("注册界面页面", "Register UI pages");
+                case "files": return i18n.T("打开文件和文件夹", "Open files and folders");
+                case "clipboard": return i18n.T("读写剪贴板", "Read/write clipboard");
+                case "network": return i18n.T("使用 PCL 网络栈", "Use the PCL network stack");
+                case "logs": return i18n.T("读取宿主日志", "Read host logs");
+                case "secret": return i18n.T("访问更新与密钥能力", "Access update and secret capabilities");
+                case "launch": return i18n.T("启动游戏和账户资料", "Launch games and account profiles");
+                case "settings": return i18n.T("读写 PCL 设置", "Read/write PCL settings");
+                case "instance": return i18n.T("访问游戏实例", "Access game instances");
+                case "*": return i18n.T("全部权限", "All permissions");
+                default: return permission ?? "(unknown)";
             }
         }
 

@@ -35,11 +35,13 @@ cd examples\demo-addon
 | 设置页槽位 | `api.Ui.RegisterSettingsPage("settings", …)` |
 | 更多页槽位 | `api.Ui.RegisterMorePage("more", …)` |
 | 原生卡片/行 | `api.Ui.Card` / `InfoRow` |
-| 控件 | `api.Ui.Slider` / `TextInput` / `Link` / `Separator` / `Button(s)` / `Note` |
+| 控件 | `api.Ui.Slider` / `TextInput` / `Link` / `Badge` / `Expander` / `Tabs` / `Button(s)` / `Note` |
 | 双语 | `api.I18n.T("中文", "English")` |
 | 持久化 | `api.Data.Get/Set/Save` |
 | 后端 | `api.Pcl.Clipboard.SetText` / `api.Pcl.Shell.OpenFolder` |
-| 权限 | manifest `permissions: ["pages","files","clipboard"]`（严格模式） |
+| 权限 | manifest 请求 `["pages","files","clipboard"]`，用户可在模块详情逐项授予/撤销 |
+| 模块目录 | `api.Modules.Modules` / `Find` / `Changed` |
+| 签名钩子 | `api.Hooks.FindTargets` + `SwapMethodTarget` 精确选择重载 |
 
 ## 4 安装与验证
 

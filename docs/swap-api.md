@@ -63,7 +63,8 @@ my-addon.swapaddon
   比较式（`">=2.99.0"`、`"<3.0"`、`"=2.99.0.1"`）；留空表示任意宿主（Alpha 9 之前的行为）。
   不在作用域内的模块**不会启动**，状态显示「作用域不适用 / 宿主版本不适用」，不会被标记为失败；
   安装时平台会先把不匹配写进日志提醒（仍然允许安装 —— 你可能是在为另一个 PCL 版本做准备）。
-- `permissions` 目前是**声明式**（用于展示与审计），运行时不做硬隔离：Addon 与宿主同权限。
+- `permissions` 是**请求清单**：非空时启用严格门控，用户可在模块详情里逐项授予/撤销。新模块
+  默认获得其请求的全部权限，旧 `modules.json` 没有权限字段时也按此兼容；显式撤销立即生效。
 - `files` 是**负载清单**（每个文件的 SHA-256），由打包器自动写入；`signature.json` 的 RSA-SHA256
   签名覆盖 `manifest.json` 的原始字节，因此签名同时覆盖清单与全部负载哈希。
 
@@ -396,8 +397,9 @@ handler 可以是实例委托（不再要求静态方法）；参数形状与宿
 
 manifest 的 `shapes` / `permissions` 现在会被真正解析（Alpha 6 之前数组被 `Convert.ToString`
 吞掉，永远是空），模块行会显示 `作者 · API 版本范围 · 形状 · 权限声明`（最多列三个权限名）。
-`permissions` 目前是**声明与展示**：模块与宿主同进程，`Reflect`/`Surface` 本来就是逃生口，
-平台不假装能沙箱化同进程代码 —— 声明用于让用户看清模块想要什么。
+`permissions` 现在同时承担“请求”和“用户授权”两层语义：模块与宿主仍同进程，`Reflect` /
+`Surface` 本来就是逃生口，平台不假装能沙箱化同进程代码；但 hooks/pages/files/clipboard/
+network/logs/secret/launch/settings/instance 这些有副作用的入口会按用户授予状态实时门控。
 
 真机 e2e 也能不开对话框地驱动这两条路径（`docs/local-e2e.zh.md`）：
 
@@ -492,12 +494,14 @@ bool ok = api.Pcl.Clipboard.SetText("copied");       // ModBase.ClipboardSet(tex
   `UnauthorizedAccessException`，并写入该模块日志；
 - **未声明/空 → 兼容模式**：保持旧行为（全部允许）；
 - `<数据根>\security.json` 写 `{"forceStrict":true}` 可强制全部模块严格。
+- 新安装模块默认获得全部请求权限；模块详情中的复选框可逐项撤销或恢复；
+- 撤销 `hooks` 会立即让已有 handler 变为直通原方法，恢复后无需重挂即可重新生效；
+- 授权状态写入 `modules.json` 的 `permissions` 数组，与 `enabled` 独立保存。
 
 | 权限名 | 门控点 |
 |---|---|
 | `hooks` | `IHooks.Attach` |
 | `pages` | `Ui.RegisterSettingsPage` / `RegisterMorePage` |
-| `reflection` | `Reflect` / `Surface` |
 | `files` | `Pcl.Shell.OpenFolder/OpenFile` |
 | `clipboard` | `Pcl.Clipboard.GetText/SetText` |
 | `network` | `Pcl.Net.*` |
@@ -529,6 +533,7 @@ settings/instance）。
 ```
 
 该模块若调用 `api.Pcl.Clipboard.GetText()` 将被拒绝；在模块管理页会显示「严格」标记。
+模块详情中的权限授予区会显示请求/授予/拒绝状态；撤销会立即影响 gated API 与已安装 hook。
 
 ## 15. API 1.3（v26.2-Alpha 6 起）：更多后端与前端
 
@@ -652,5 +657,59 @@ page.Children.Add(api.Ui.Banner(
 Alpha 8 把 Addon 管理页与恢复页中带运行时变量的句子改为在构建时显式选择中英文，不再依赖
 宿主视觉树翻译轮询。覆盖安装/更新/卸载确认、严格权限、作用域、模块状态、详情、日志、疑因
 模块和恢复动作。PCL 宿主自身的翻译仍由 `HostTranslator` 与 `I18n.Extra.cs` 继续渐进扩展。
+
+## 18. API 1.6（v26.2-Alpha 9 起）：模块目录、用户授权与签名钩子
+
+`Host.ApiVersion` 现在是 **1.6.0**。新增成员只增不改，API 1.0-1.5 addon 继续可用。
+
+### 18.1 `ISwapApi.Modules`（只读模块目录）
+
+```csharp
+foreach (var module in api.Modules.Modules)
+{
+    api.Log($"{module.Id} {module.Status} hooks={module.HookCount}");
+    foreach (var denied in module.DeniedPermissions)
+        api.LogWarning($"{module.Id} denied {denied}");
+}
+
+SwapModuleInfo demo = api.Modules.Find("demo.sample");
+api.Modules.Changed += (_, __) => RefreshDashboard();
+```
+
+快照包含模块身份、启停状态、作用域、信任链、请求/授予/拒绝权限和 hook 计数/命中/错误。
+目录始终只读；授权修改仍由内置模块详情页执行。
+
+### 18.2 签名钩子
+
+旧 `Attach(declaringType, methodName, …)` 保留。遇到重载会记录警告并继续使用首个匹配；新代码
+应先发现目标，再按完整签名精确挂载：
+
+```csharp
+var targets = api.Hooks.FindTargets("PCL.ModNet", "NetDownloadByClient");
+var target = targets.Single(t => t.ParameterTypes.Count == 7);
+
+using (api.Hooks.Attach(target, "demo.download", handler, HookMode.Prefix))
+{
+    // handler 必须是该目标 ABI 对应的 Delegate。
+}
+```
+
+`SwapMethodTarget` 的 `ParameterTypes` 接受全名、短名或 C# 别名（`string` / `int` 等），并可
+限定 `ReturnType` / `Static`。无匹配或多匹配会抛带全部候选的异常。`IsHooked(target)` 表示该
+目标当前仍有活跃 handler；空 gate 不算已挂钩。
+
+### 18.3 新前端控件
+
+```csharp
+page.Children.Add(api.Ui.Badge("READY", SwapHintType.Success));
+page.Children.Add(api.Ui.Expander("Advanced", false, () =>
+    api.Ui.Note("Lazily constructed content.")));
+page.Children.Add(api.Ui.Tabs(
+    new[] { "Overview", "Details" }, 0,
+    index => api.Ui.Text(index == 0 ? "Overview" : "Details")));
+```
+
+`Expander` 内容按需构建；`Tabs` 使用原生 WPF `TabControl`；模块详情页现在直接展示可编辑的
+权限授予区，撤销不会跳回页面顶部。
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

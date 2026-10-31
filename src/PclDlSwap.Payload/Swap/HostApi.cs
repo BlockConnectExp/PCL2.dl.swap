@@ -18,7 +18,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.8.0";
+        public const string ApiVersion = "1.9.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -38,6 +38,7 @@ namespace PclDlSwap.Payload.Swap
             Recovery = new RecoveryAccessImpl();
             Modules = new ModuleCatalogImpl();
             Diagnostics = new DiagnosticsAccessImpl();
+            Scopes = new HostScopesAccess();
             Files = new AddonFileStore(Path.Combine(SwapPaths.DataRoot, "files", "host"));
             Messaging = new MessagingAccess("host");
         }
@@ -52,6 +53,7 @@ namespace PclDlSwap.Payload.Swap
         public IRecoveryAccess Recovery { get; }
         public IModuleCatalog Modules { get; }
         public IDiagnosticsAccess Diagnostics { get; }
+        public IModuleScopes Scopes { get; }
         public IAddonFiles Files { get; }
         public IAddonMessaging Messaging { get; }
 
@@ -66,12 +68,12 @@ namespace PclDlSwap.Payload.Swap
 
         /// <summary>Scoped attach used by <c>ScopedApi</c>: the hook belongs to one addon.</summary>
         internal IDisposable AttachAddonHook(string addonId, string declaringType, string methodName,
-            string hookId, HookMode mode, Delegate handler) =>
-            _hooks.AttachScoped(addonId, declaringType, methodName, hookId, mode, handler);
+            string hookId, string scopeId, HookMode mode, Delegate handler) =>
+            _hooks.AttachScoped(addonId, declaringType, methodName, hookId, scopeId, mode, handler);
 
         internal IDisposable AttachAddonHook(string addonId, SwapMethodTarget target,
-            string hookId, HookMode mode, Delegate handler) =>
-            _hooks.AttachScoped(addonId, target, hookId, mode, handler);
+            string hookId, string scopeId, HookMode mode, Delegate handler) =>
+            _hooks.AttachScoped(addonId, target, hookId, scopeId, mode, handler);
 
         public void Log(string message) => SwapLog.Info("[addon] " + message);
         public void LogWarning(string message) => SwapLog.Warn("[addon] " + message);
@@ -182,6 +184,18 @@ namespace PclDlSwap.Payload.Swap
             }
         }
 
+        private sealed class HostScopesAccess : IModuleScopes
+        {
+            public IReadOnlyList<SwapScopeInfo> Scopes => Array.Empty<SwapScopeInfo>();
+            public IReadOnlyList<string> Enabled => Array.Empty<string>();
+            public bool IsEnabled(string scopeId) => false;
+            public event EventHandler Changed
+            {
+                add { }
+                remove { }
+            }
+        }
+
         private sealed class HookBusImpl : IHooks
         {
             private readonly Assembly _host;
@@ -223,27 +237,35 @@ namespace PclDlSwap.Payload.Swap
                 return new DetourToken(detour);
             }
 
+            public IDisposable Attach(SwapMethodTarget target, string hookId, string scopeId,
+                Delegate handler, HookMode mode) =>
+                Attach(target, hookId, handler, mode);
+
+            public IDisposable Attach(string declaringType, string methodName, string hookId,
+                string scopeId, Delegate handler, HookMode mode) =>
+                Attach(declaringType, methodName, hookId, handler, mode);
+
             /// <summary>
             /// Module-scoped attach: the addon's own delegate runs behind a generated gate that
             /// follows the module toggle, so a disabled module stops hooking immediately and a
             /// disposed token forwards to the original from then on.
             /// </summary>
             internal IDisposable AttachScoped(string addonId, string declaringType, string methodName,
-                string hookId, HookMode mode, Delegate handler)
+                string hookId, string scopeId, HookMode mode, Delegate handler)
             {
                 if (handler == null) throw new ArgumentNullException(nameof(handler));
                 var target = ResolveTarget(declaringType, methodName);
                 ValidateHandler(target, handler);
-                return ScopedHook.Attach(addonId, hookId, mode, handler, target);
+                return ScopedHook.Attach(addonId, hookId, scopeId, mode, handler, target);
             }
 
             internal IDisposable AttachScoped(string addonId, SwapMethodTarget target,
-                string hookId, HookMode mode, Delegate handler)
+                string hookId, string scopeId, HookMode mode, Delegate handler)
             {
                 if (handler == null) throw new ArgumentNullException(nameof(handler));
                 var resolved = ResolveTarget(target);
                 ValidateHandler(resolved, handler);
-                return ScopedHook.Attach(addonId, hookId, mode, handler, resolved);
+                return ScopedHook.Attach(addonId, hookId, scopeId, mode, handler, resolved);
             }
 
             /// <summary>

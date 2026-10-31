@@ -17,6 +17,7 @@ src/PclDlSwap.Profiler/*.obj
 logs/
 config/swap.config.json
 test/
+.devlogs/
 
 # reverse-engineering working material (kept in the research workspace, not shipped)
 samples/

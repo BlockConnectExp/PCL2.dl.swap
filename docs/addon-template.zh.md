@@ -1,7 +1,8 @@
 # Addon 模板 / Demo Addon
 
 > Summary: the smallest complete, buildable PCL2 Swap addon. Copy `examples/demo-addon`, rename
-> the id, and you have a module with two page slots, widgets, persisted data and strict permissions.
+> the id, and you have a module with two page slots, widgets, persisted data, strict permissions,
+> bilingual feature scopes and a live scope-event consumer.
 
 ---
 
@@ -46,6 +47,8 @@ cd examples\demo-addon
 | 模块消息 | `api.Messaging.Subscribe/Publish`（`messaging` 权限） |
 | 私有文件 | `api.Files.Read/Write/List/Delete`（`files` 权限，路径限制在模块根目录） |
 | 数据前端 | `api.Ui.Table` / `EmptyState` / `CodeBlock` / `Scroll` |
+| 功能作用域 | `api.Scopes.Scopes/Enabled/IsEnabled/Changed`；manifest `scopes[]` 支持 `nameEn` / `descriptionEn` |
+| 作用域 Hook | `api.Hooks.Attach(target, hookId, scopeId, handler, mode)`，关闭 scope 即直通原方法 |
 
 ## 4 安装与验证
 
@@ -58,7 +61,9 @@ $env:PCL2SWAP_SELFTEST = '1'
 ```
 
 预期：设置侧栏出现「示例设置 / Demo Settings」，更多侧栏出现「示例页面 / Demo Page」；
-重启后 Launch count 递增（Data 持久化）。
+模块详情出现 `demo.core` / `demo.advanced` 两个功能作用域；关闭 `demo.advanced` 后高级前端
+不再构建，关闭 `demo.core` 后消息订阅停止且页面进入说明状态。重启后 Launch count 与 scope
+选择均保持不变。
 
 ## 5 已验证的生命周期（v26.2）
 

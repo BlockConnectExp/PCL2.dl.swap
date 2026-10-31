@@ -40,6 +40,49 @@ namespace PclDlSwap.Payload.Swap
                 manifest.HostVersions.AddRange(ToStrings(GetRaw(map, "hostVersion")));
             manifest.Permissions.AddRange(ToStrings(GetRaw(map, "permissions")));
 
+            // scopes: ["download"] or
+            // scopes: [{ "id":"download", "name":"下载恢复", "nameEn":"Download restore",
+            //           "description":"…", "descriptionEn":"…", "defaultEnabled":true }]
+            var rawScopes = GetRaw(map, "scopes");
+            if (rawScopes is IEnumerable scopeList && !(rawScopes is string))
+            {
+                var seenScopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var item in scopeList)
+                {
+                    AddonScopeDefinition scope = null;
+                    if (item is Dictionary<string, object> entry)
+                    {
+                        var scopeId = Get(entry, "id");
+                        if (string.IsNullOrWhiteSpace(scopeId)) continue;
+                        scope = new AddonScopeDefinition
+                        {
+                            Id = scopeId.Trim(),
+                            Name = Get(entry, "name"),
+                            NameEnglish = Get(entry, "nameEn"),
+                            Description = Get(entry, "description"),
+                            DescriptionEnglish = Get(entry, "descriptionEn"),
+                            DefaultEnabled = ToBool(Get(entry, "defaultEnabled"), true)
+                        };
+                    }
+                    else
+                    {
+                        var scopeId = Convert.ToString(item);
+                        if (string.IsNullOrWhiteSpace(scopeId)) continue;
+                        scope = new AddonScopeDefinition
+                        {
+                            Id = scopeId.Trim(),
+                            Name = scopeId.Trim(),
+                            DefaultEnabled = true
+                        };
+                    }
+
+                    if (!IsValidScopeId(scope.Id) || !seenScopes.Add(scope.Id)) continue;
+                    if (string.IsNullOrWhiteSpace(scope.Name)) scope.Name = scope.Id;
+                    if (string.IsNullOrWhiteSpace(scope.NameEnglish)) scope.NameEnglish = scope.Name;
+                    manifest.Scopes.Add(scope);
+                }
+            }
+
             // files: [{ "path": "Addon.dll", "sha256": "…" }] - the payload integrity list.
             if (GetRaw(map, "files") is IEnumerable fileList)
             {
@@ -85,6 +128,15 @@ namespace PclDlSwap.Payload.Swap
                 }
             }
             return list;
+        }
+
+        private static bool IsValidScopeId(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id) || id.Length > 96) return false;
+            foreach (var ch in id)
+                if (!(char.IsLetterOrDigit(ch) || ch == '.' || ch == '_' || ch == '-' ))
+                    return false;
+            return true;
         }
     }
 }

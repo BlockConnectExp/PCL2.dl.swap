@@ -1,4 +1,4 @@
-# PCL2 Swap Addon 指南（API 1.8，v26.2 起）
+# PCL2 Swap Addon 指南（API 1.9，v26.3 起）
 
 > 面向 Addon 作者。平台设计背景见 `docs/swap-api-research.zh.md`。
 > 交付形状（ExLoader 注入 / 磁盘修补）对 Addon **透明**：目标都是同一套 SwapHost 运行时。
@@ -837,5 +837,86 @@ page.Children.Add(api.Ui.Scroll(new StackPanel { /* long page content */ }));
 `Table` 使用只读 `DataGrid`，列宽按权重分配；`EmptyState` 是居中零内容状态；`CodeBlock` 使用
 等宽字体和只读滚动区域；`Scroll` 用 PCL 的 `MyScrollViewer` 承载长页面，缺失时退回标准 WPF。
 四者与现有 Card/Text/Note 组合使用，不嵌套 Card。
+
+## 21. API 1.9（v26.3）：可编辑功能作用域
+
+`Host.ApiVersion` 现在是 **1.9.0**。这一层把 PCL2 Swap 的 “LSPosed scope” 从包级兼容范围
+扩展为模块内部、用户可即时切换的功能开关；API 1.0-1.8 保持源码兼容。
+
+### 21.1 Manifest
+
+```json
+{
+  "id": "demo.sample",
+  "scopes": [
+    {
+      "id": "demo.core",
+      "name": "基础功能",
+      "nameEn": "Core features",
+      "description": "页面主体与模块消息",
+      "descriptionEn": "Page body and module messaging",
+      "defaultEnabled": true
+    },
+    {
+      "id": "demo.advanced",
+      "name": "高级工具",
+      "nameEn": "Advanced tools",
+      "description": "可选的数据与诊断前端",
+      "descriptionEn": "Optional data and diagnostic front ends",
+      "defaultEnabled": false
+    }
+  ]
+}
+```
+
+`id` 限定为字母、数字、点、下划线和连字符，最长 96 字符；重复 id（忽略大小写）会被忽略。
+旧版字符串数组 `["demo.core"]` 仍受支持，等价于名称和 id 相同、默认开启。
+
+`PclAddonPack` 可以重复传入 `--scope`：
+
+```powershell
+--scope "demo.core;基础功能;页面主体;true;Core features;Page body"
+```
+
+字段顺序为 `id;Name;Description;defaultEnabled;NameEn;DescriptionEn`。Windows PowerShell 5.1
+读取无 BOM UTF-8 脚本时可能损坏中文，脚本中建议使用 ASCII，或改用 PowerShell 7 / UTF-8 BOM。
+
+### 21.2 后端与 Hook 门控
+
+```csharp
+foreach (var scope in api.Scopes.Scopes)
+    api.Log($"{scope.Id}: {scope.Enabled}");
+
+if (api.Scopes.IsEnabled("demo.advanced"))
+    RegisterAdvancedPage();
+
+using (api.Hooks.Attach(
+           "PCL.ModBase", "ToUnixTimestampUtc",
+           "demo.hook", "demo.core",
+           (Action<DateTime>)(_ => Observe()), HookMode.Prefix))
+{
+}
+```
+
+带 `scopeId` 的 `Hooks.Attach` 会在每次调用时读取实时状态。关闭 scope 后，注册仍在，但 handler
+立即被跳过，调用直通原方法；重新开启后无需重新挂载即可恢复。未声明的 scope 在挂载时会抛出
+`ArgumentException`，避免拼写错误悄悄变成永久直通。未传 `scopeId` 的旧重载保持原有行为。
+
+用户选择写入 `modules.json` 的 `scopes` 数组。模块热更新按 id 继承用户选择；模块禁用、重载和
+安全模式继续优先于 scope 门控。
+
+### 21.3 前端与英文
+
+`Swap Addon → 模块详情 → 功能作用域` 提供逐项复选框和实时启用计数。英文界面优先使用
+`nameEn` / `descriptionEn`，缺失时回退到中文名称。`api.Scopes.Changed` 在用户修改任一 scope 后
+触发；订阅者异常由宿主隔离。
+
+```csharp
+api.Scopes.Changed += (_, __) =>
+    api.Ui.Hint(api.I18n.T("作用域已更新。", "Scopes updated."));
+```
+
+完整可运行模板见 `examples/demo-addon`；它会按 `demo.core` 启停消息后端，并按 `demo.advanced`
+决定是否构建扩展表格和代码块前端。
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

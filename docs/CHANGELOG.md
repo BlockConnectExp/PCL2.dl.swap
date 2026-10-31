@@ -6,6 +6,39 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-15:55:00 v26.3-Alpha 1: 功能作用域与 API 1.9
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\Scopes.cs                       IModuleScopes 只读作用域契约
+.\src\PCL2Swap.Api\AddonManifest.cs                双语 scope 定义
+.\src\PCL2Swap.Api\ModuleCatalog.cs                模块快照中的 scope 状态
+.\src\PCL2Swap.Api\ISwapApi.cs                     Scopes 与带 scopeId 的 Hook 重载
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs       scope 持久化、热更新继承、事件隔离、线程安全门控
+.\src\PclDlSwap.Payload\Swap\ScopedHook.cs         关闭 scope 时 handler 直通
+.\src\PclDlSwap.Payload\Swap\AddonManifestReader.cs scope JSON 解析
+.\src\PclDlSwap.Payload\Swap\HostApi.cs            API 1.9 / HostScopesAccess
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs           真机 IModuleScopes 探针
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs 英文/中文 scope 编辑区
+.\src\PclDlSwap.Payload\Swap\SwapHost.cs           scope 活跃门控
+.\src\PclDlSwap.ExLoaderHarness\Program.cs         scope 默认值/直通/持久化/热更新/事件隔离回归
+.\src\PCL2Swap.SampleAddon\SampleAddon.cs          API 1.9 示例
+.\examples\demo-addon\DemoAddon.cs                 公共 scope 模板与 scope 事件消费者
+.\tools\PclAddonPack\Program.cs                    --scope 六字段打包
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|API 1.9 后端|`IModuleScopes` 暴露 `Scopes/Enabled/IsEnabled/Changed`；scope 选择写入 modules.json，重载和热更新保留用户选择，事件只投递所属模块|2026.10.31-15:55:00|PCL2.dlswap
+2|scope Hook|`IHooks.Attach` 新增 scopeId 重载；关闭 scope 时已有注册即时直通原方法，重新开启后无需重挂；未声明 scope 拒绝挂载|2026.10.31-15:55:00|PCL2.dlswap
+3|英文前端|manifest 支持 `nameEn/descriptionEn`；模块详情的 scope 名称、说明、计数和提示均随语言切换，缺失英文回退中文|2026.10.31-15:55:00|PCL2.dlswap
+4|模板与打包|`PclAddonPack --scope` 支持 `id;Name;Description;defaultEnabled;NameEn;DescriptionEn`；公共 Demo 使用 core/advanced 两个真实 scope|2026.10.31-15:55:00|PCL2.dlswap
+5|验证|完整构建与偏移校验 PASS；八套 harness PASS；PCL 2.99.0.0/2.99.0.1 真机注入、Demo 热装与自检 `ok=74 fail=0`；英文 UI `1/2 -> 2/2`、modules.json 与模块事件同步|2026.10.31-15:55:00|PCL2.dlswap
+
+---
 ## 2026.10.31-11:57:40 v26.2: 英文支持与 API 1.8 正式版
 
 GitCommitHash: f9e6d62

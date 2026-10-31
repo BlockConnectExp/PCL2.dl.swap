@@ -71,6 +71,9 @@ namespace PclDlSwap.Payload.Swap
             Probe("Host.ApiVersion", () => api.Host.ApiVersion);
             Probe("Host.PclVersion", () => api.Host.PclVersion);
             Probe("模块作用域判定", () => RunScopeProbe(api));
+            Probe("IModuleScopes", () => api.Scopes != null
+                ? "ready (" + api.Scopes.Scopes.Count + " host scopes)"
+                : throw new InvalidOperationException("api.Scopes is null"));
             Probe("Host.Shape", () => api.Host.Shape);
             Probe("Host.ProcessId", () => api.Host.ProcessId);
             Probe("Host.AddonDirectory", () => api.Host.AddonDirectory);
@@ -457,7 +460,7 @@ namespace PclDlSwap.Payload.Swap
             };
 
             using (host.AttachAddonHook("test.sample", "PCL.ModBase", "ToUnixTimestampUtc",
-                       "selftest.scoped", HookMode.Replace, handler))
+                       "selftest.scoped", null, HookMode.Replace, handler))
             {
                 var enabled = Convert.ToInt64(method.Invoke(null, new object[] { DateTime.UtcNow }));
                 SwapHost.Addons.SetEnabled("test.sample", false);

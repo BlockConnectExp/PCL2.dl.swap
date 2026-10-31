@@ -144,6 +144,10 @@ namespace PclDlSwap.Payload.Swap
         public static bool AddonPermissionGranted(string addonId, string permission) =>
             Addons?.HasPermission(addonId, permission) ?? true;
 
+        /// <summary>Live feature-scope gate used by scoped hooks and addon code.</summary>
+        public static bool AddonScopeEnabled(string addonId, string scopeId) =>
+            string.IsNullOrWhiteSpace(scopeId) || (Addons?.IsScopeEnabled(addonId, scopeId) ?? false);
+
         // ---- host event bus -------------------------------------------------------------------
         // The platform's own pipelines call these; addons subscribe through IHooks. The bus is a
         // host facility, so it keeps publishing even while a module is switched off.

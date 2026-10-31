@@ -30,6 +30,7 @@ namespace PCL2Swap.SampleAddon
         public static string LastDialogTitle;
         public static string LastHookTarget;
         public static string LastHostPath;
+        public static string LastEnabledScopes;
 
         private ISwapApi _api;
         private IDisposable _hook;
@@ -48,6 +49,7 @@ namespace PCL2Swap.SampleAddon
             _api?.Data?.Set("loaded", "1");
             _api?.Data?.Save();
             LastHostPath = _api?.Pcl?.Environment?.HostPath;
+            LastEnabledScopes = string.Join(",", _api?.Scopes?.Enabled ?? new string[0]);
             try
             {
                 _api?.Files?.WriteText("sample/hello.txt",
@@ -132,7 +134,7 @@ namespace PCL2Swap.SampleAddon
                 try
                 {
                     _hook = hooks.Attach(candidate.Item1, candidate.Item2, "sample.demo.prefix",
-                        candidate.Item3, HookMode.Prefix);
+                        "sample.hooks", candidate.Item3, HookMode.Prefix);
                     LastHookTarget = candidate.Item1 + "." + candidate.Item2;
                     _api.Log($"示例模块已在 {LastHookTarget} 上挂 Prefix 钩子（只观察，不改变宿主行为）。");
                     return;
@@ -199,6 +201,17 @@ namespace PCL2Swap.SampleAddon
                 _api.Ui.Note("持久化数据、Reflect 直达宿主方法，以及下面这个原生外观按钮。"),
                 _api.Ui.Buttons(_api.Ui.Button("调用宿主方法并刷新", CallHostAndRefresh))));
 
+            page.Children.Add(_api.Ui.Card("功能作用域",
+                _api.Ui.Buttons(
+                    _api.Ui.Badge("已启用 " + (_api.Scopes?.Enabled.Count ?? 0),
+                        SwapHintType.Info),
+                    _api.Ui.Badge("sample.hooks",
+                        _api.Scopes?.IsEnabled("sample.hooks") == true
+                            ? SwapHintType.Success
+                            : SwapHintType.Warning)),
+                _api.Ui.Note("用户可在 Swap Addon → 详情 → 功能作用域中即时启停；" +
+                             "绑定到 sample.hooks 的 hook 会随开关直接放行或恢复。")));
+
             page.Children.Add(_api.Ui.Card("模块设置（自动持久化）",
                 _api.Ui.CheckBox("记录 Prefix 钩子命中", _countHook, value =>
                 {
@@ -255,12 +268,15 @@ namespace PCL2Swap.SampleAddon
                 _api.Ui.Expander("高级信息", false, () =>
                     _api.Ui.Note("这个区域由 IUi.Expander 构建；诊断时间线来自有界结构化日志。"))));
 
-            page.Children.Add(_api.Ui.Card("API 1.8 模块协作",
+            page.Children.Add(_api.Ui.Card("API 1.9 模块协作与作用域",
                 _api.Ui.Badge("消息 " + MessageEvents, SwapHintType.Success),
+                _api.Ui.Badge("作用域 " + (_api.Scopes?.Enabled.Count ?? 0),
+                    SwapHintType.Info),
                 _api.Ui.Table(
                     new[] { "能力", "后端 / 前端", "用途" },
                     new IReadOnlyList<string>[]
                     {
+                        new[] { "IModuleScopes", "后端 / 前端", "用户可编辑功能开关" },
                         new[] { "IAddonMessaging", "后端", "模块间 topic 消息" },
                         new[] { "IAddonFiles", "后端", "模块私有文件存储" },
                         new[] { "IUi.Table", "前端", "只读清单与对比" },

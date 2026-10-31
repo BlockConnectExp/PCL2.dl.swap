@@ -4,7 +4,8 @@
 > into explicit recovery-aware behaviour, and expose a governed addon SDK with hooks, diagnostics,
 > module messaging, private files and native WPF pages.
 
-Current release: **v26.2** · Addon API: **1.8.0** · Hosts: official PCL **2.99.0.0 / 2.99.0.1**.
+Current pre-release: **v26.3-Alpha 1** · Addon API: **1.9.0** · Latest stable: **v26.2** ·
+Hosts: official PCL **2.99.0.0 / 2.99.0.1**.
 
 > [!IMPORTANT]
 > The generated `PclDlSwap.Patched.exe` is a patched **copy**; the official executable is never
@@ -43,7 +44,7 @@ PCL2Swap.Api.dll                    addon-facing SDK
 Expected output:
 
 ```
-PCL2 DLL-Swap loader (v26.1-Alpha 1)
+PCL2 DLL-Swap loader (v26.3-Alpha 1)
   目标    : D:\PCL\Plain Craft Launcher 2.exe
   原版哈希: 6b6e1260cb5a1d6a…
   PageDownloadInstall.LoaderInit -> 恢复 ModDownload.DlClientListLoader

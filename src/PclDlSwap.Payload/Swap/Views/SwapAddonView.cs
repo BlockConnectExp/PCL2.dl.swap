@@ -421,10 +421,65 @@ namespace PclDlSwap.Payload.Swap.Views
                 content.Add(SwapUi.InfoRow(i18n.T("宿主版本", "Host versions"), manifest.HostVersions.Count == 0
                     ? i18n.T("（未声明 —— 任意版本）", "(not declared - any version)")
                     : string.Join(separator, manifest.HostVersions)));
+                content.Add(SwapUi.InfoRow(i18n.T("功能作用域", "Feature scopes"),
+                    manifest.Scopes.Count == 0
+                        ? i18n.T("（未声明）", "(not declared)")
+                        : manifest.Scopes.Count + i18n.T(" 项，可在下方启停", " declared; edit below")));
                 content.Add(SwapUi.InfoRow(i18n.T("权限声明", "Permissions"), manifest.Permissions.Count == 0
                     ? i18n.T("（未声明 —— 兼容模式，全部访问）",
                         "(not declared - compatibility mode, all access)")
                     : string.Join(separator, manifest.Permissions) + i18n.T("（严格门控）", " (strictly gated)")));
+            }
+
+            var scopeList = addons.ScopeSnapshot(record);
+            if (scopeList.Count > 0)
+            {
+                var enabledScopeCount = scopeList.Count(scope => scope.Enabled);
+                content.Add(SwapUi.Expander(
+                    i18n.T("功能作用域", "Feature scopes"), true,
+                    () =>
+                    {
+                        var panel = new StackPanel { Margin = new Thickness(0, 8, 0, 4) };
+                        var badges = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+                        var countBadge = SwapUi.Badge(
+                            i18n.T($"{enabledScopeCount}/{scopeList.Count} 已启用",
+                                $"{enabledScopeCount}/{scopeList.Count} enabled"),
+                            enabledScopeCount == 0 ? SwapHintType.Warning : SwapHintType.Success);
+                        badges.Children.Add(countBadge);
+                        var countText = (countBadge as Border)?.Child as TextBlock;
+                        panel.Children.Add(badges);
+                        panel.Children.Add(SwapUi.Note(i18n.T(
+                            "这些是模块声明的功能作用域。关闭某项会立即让绑定到它的 hook 直通原方法；模块仍保持启用。",
+                            "These are feature scopes declared by the module. Disabling one immediately makes its bound hooks pass through while the module remains enabled.")));
+
+                        foreach (var scope in scopeList)
+                        {
+                            var currentScope = scope;
+                            var scopeName = i18n.IsEnglish
+                                ? FirstNonEmpty(currentScope.NameEnglish, currentScope.Name, currentScope.Id)
+                                : FirstNonEmpty(currentScope.Name, currentScope.Id);
+                            var scopeDescription = i18n.IsEnglish
+                                ? FirstNonEmpty(currentScope.DescriptionEnglish, currentScope.Description)
+                                : currentScope.Description;
+                            panel.Children.Add(SwapUi.CheckBox(
+                                scopeName + "  [" + currentScope.Id + "]",
+                                currentScope.Enabled,
+                                value =>
+                                {
+                                    addons.SetScopeEnabled(record.Id, currentScope.Id, value);
+                                    var currentCount = addons.ScopeSnapshot(record).Count(item => item.Enabled);
+                                    if (countText != null)
+                                        countText.Text = i18n.T(
+                                            $"{currentCount}/{scopeList.Count} 已启用",
+                                            $"{currentCount}/{scopeList.Count} enabled");
+                                    SwapUi.SetBadgeState(countBadge,
+                                        currentCount == 0 ? SwapHintType.Warning : SwapHintType.Success);
+                                }));
+                            if (!string.IsNullOrWhiteSpace(scopeDescription))
+                                panel.Children.Add(SwapUi.Note(scopeDescription));
+                        }
+                        return panel;
+                    }));
             }
 
             var requestedPermissions = addons.RequestedPermissions(record);
@@ -706,6 +761,9 @@ namespace PclDlSwap.Payload.Swap.Views
         }
 
         /// <summary>Manifest scope line: author, API range, shapes and permission count.</summary>
+        private static string FirstNonEmpty(params string[] values) =>
+            values?.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
         private static string ScopeText(AddonManager.AddonRecord record)
         {
             var manifest = record.Manifest;
@@ -721,6 +779,22 @@ namespace PclDlSwap.Payload.Swap.Views
                 parts.Add(i18n.T("形状 ", "shapes ") + string.Join("/", manifest.Shapes));
             if (manifest.HostVersions != null && manifest.HostVersions.Count > 0)
                 parts.Add(i18n.T("宿主 ", "host ") + string.Join(separator, manifest.HostVersions));
+            if (manifest.Scopes != null && manifest.Scopes.Count > 0)
+            {
+                var scopes = SwapHost.Addons?.ScopeSnapshot(record) ?? manifest.Scopes
+                    .Select(scope => new PCL2Swap.Api.SwapScopeInfo
+                    {
+                        Id = scope.Id,
+                        Name = scope.Name,
+                        NameEnglish = scope.NameEnglish,
+                        Description = scope.Description,
+                        DescriptionEnglish = scope.DescriptionEnglish,
+                        DefaultEnabled = scope.DefaultEnabled,
+                        Enabled = scope.DefaultEnabled
+                    }).ToList();
+                parts.Add(i18n.T("功能 ", "features ") +
+                          scopes.Count(scope => scope.Enabled) + "/" + scopes.Count);
+            }
             if (manifest.Permissions != null && manifest.Permissions.Count > 0)
             {
                 var shown = manifest.Permissions.Take(3).ToList();

@@ -10,12 +10,12 @@
       dist\PCL2.dl.swap-Injector-<ver>.zip            the release asset
 
     Usage:
-      .\scripts\build-injector.ps1 -ToolVersion "v26.1-Alpha3"
+      .\scripts\build-injector.ps1 -ToolVersion "v26.3-Alpha1"
 #>
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [string]$ToolVersion = 'v26.1-Alpha3',
+    [string]$ToolVersion = 'v26.3-Alpha1',
     [string]$DistDir = 'dist'
 )
 

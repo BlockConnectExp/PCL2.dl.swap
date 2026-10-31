@@ -955,8 +955,8 @@ namespace PclDlSwap.ExLoaderHarness
             var hostInfo = api?.GetType().GetProperty("Host")?.GetValue(api);
             var pclVersion = Convert.ToString(hostInfo?.GetType().GetProperty("PclVersion")?.GetValue(hostInfo));
             Expect("Host.PclVersion reports the bound PCL build", !string.IsNullOrEmpty(pclVersion));
-            Expect("Host.ApiVersion reports the additive 1.8 contract",
-                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.8.0");
+            Expect("Host.ApiVersion reports the additive 1.9 contract",
+                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.9.0");
 
             var recovery = api?.GetType().GetProperty("Recovery")?.GetValue(api);
             var recoveryDiagnostics = Convert.ToString(recovery?.GetType().GetMethod("Diagnostics")
@@ -1508,7 +1508,15 @@ namespace PclDlSwap.ExLoaderHarness
                         writer.Write("{\"schema\":1,\"id\":\"test.sample\",\"name\":\"Sample Addon\"," +
                                      "\"version\":\"1.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
                                      "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\"," +
-                                     "\"description\":\"harness sample\"}");
+                                     "\"description\":\"harness sample\"," +
+                                     "\"scopes\":[" +
+                                     "{\"id\":\"sample.hooks\",\"name\":\"演示钩子\",\"nameEn\":\"Demo hook\"," +
+                                     "\"description\":\"由示例钩子使用\",\"descriptionEn\":\"Used by the demo hook\"," +
+                                     "\"defaultEnabled\":true}," +
+                                     "{\"id\":\"sample.optional\",\"name\":\"可选功能\",\"nameEn\":\"Optional feature\"," +
+                                     "\"description\":\"默认关闭的可选功能\",\"descriptionEn\":\"Optional feature disabled by default\"," +
+                                     "\"defaultEnabled\":false}" +
+                                     "]}");
                     }
                     var dllEntry = zip.CreateEntry("PCL2Swap.SampleAddon.dll");
                     using (var target = dllEntry.Open())
@@ -1554,7 +1562,9 @@ namespace PclDlSwap.ExLoaderHarness
 
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
-                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.8.0");
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.9.0");
+                Expect("sample addon sees only the default-enabled feature scope",
+                    StaticString("LastEnabledScopes") == "sample.hooks");
 
                 // ---- module state: persisted, and it gates the built-in features ----
                 var isEnabled = manager?.GetType().GetMethod("IsEnabled");
@@ -1616,17 +1626,40 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("sample addon received UpdateRequested", StaticInt("UpdateEvents") == 1);
                 Expect("sample addon saw the dialog title", StaticString("LastDialogTitle") == "事件测试");
 
-                // ---- module-scoped hooks: the gate follows the module toggle ----
+                // ---- feature scopes: defaults, persistence, catalog events and live hook gating ----
+                var createScopedApi = manager?.GetType().GetMethod("CreateScopedApi",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                var scopedApi = createScopedApi?.Invoke(manager, new[] { sample }) as PCL2Swap.Api.ISwapApi;
+                Expect("scoped API exposes IModuleScopes", scopedApi?.Scopes != null);
+                Expect("scope catalog localizes names and descriptions",
+                    scopedApi?.Scopes.Scopes.Count == 2 &&
+                    scopedApi.Scopes.Scopes[0].Name == "演示钩子" &&
+                    scopedApi.Scopes.Scopes[0].NameEnglish == "Demo hook" &&
+                    scopedApi.Scopes.Scopes[0].DescriptionEnglish == "Used by the demo hook");
+                Expect("scope defaults are applied before the user changes anything",
+                    scopedApi?.Scopes.IsEnabled("sample.hooks") == true &&
+                    scopedApi.Scopes.IsEnabled("sample.optional") == false &&
+                    scopedApi.Scopes.Enabled.SequenceEqual(new[] { "sample.hooks" }));
+
+                var scopeEvents = 0;
+                EventHandler scopeHandler = (sender, args) => scopeEvents++;
+                if (scopedApi != null) scopedApi.Scopes.Changed += scopeHandler;
+                var setScope = manager?.GetType().GetMethod("SetScopeEnabled");
+                Expect("module manager exposes SetScopeEnabled", setScope != null);
+                var catalogEventsBeforeScope = catalogEvents;
+
+                // ---- module-scoped hooks: the gate follows both the scope and module toggles ----
                 var attachScoped = api?.GetType().GetMethods(
                         BindingFlags.NonPublic | BindingFlags.Instance)
                     .FirstOrDefault(method => method.Name == "AttachAddonHook" &&
-                                              method.GetParameters().Length == 6 &&
+                                              method.GetParameters().Length == 7 &&
                                               method.GetParameters()[1].ParameterType == typeof(string));
                 Expect("host exposes the scoped attach", attachScoped != null);
 
                 var token = attachScoped?.Invoke(api, new object[]
                 {
                     "test.sample", "PCL.HookTarget", "Ping", "sample.ping",
+                    "sample.hooks",
                     PCL2Swap.Api.HookMode.Replace,
                     (Func<int, int>)HookHandlers.Sample
                 }) as IDisposable;
@@ -1637,26 +1670,75 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("enabled module's handler runs",
                     HookHandlers.SampleCalls == handlerBefore + 1 && hooked == 105);
 
+                var scopeDisabled = Convert.ToBoolean(setScope?.Invoke(manager,
+                    new object[] { "test.sample", "sample.hooks", false }) ?? false);
+                var scopeForwarded = PCL.HookTarget.Ping(5);
+                var modulesAfterScopeChange = File.Exists(modulesFile) ? File.ReadAllText(modulesFile) : string.Empty;
+                Expect("disabling a feature scope immediately forwards its hook",
+                    scopeDisabled && HookHandlers.SampleCalls == handlerBefore + 1 && scopeForwarded == 10);
+                Expect("feature-scope edits persist and notify both change surfaces",
+                    modulesAfterScopeChange.Contains("\"scopes\":[]") &&
+                    scopeEvents == 1 && catalogEvents == catalogEventsBeforeScope + 1);
+                Expect("scope API reports the live disabled state",
+                    scopedApi?.Scopes.IsEnabled("sample.hooks") == false &&
+                    !scopedApi.Scopes.Enabled.Contains("sample.hooks"));
+
+                var scopeReenabled = Convert.ToBoolean(setScope?.Invoke(manager,
+                    new object[] { "test.sample", "sample.hooks", true }) ?? false);
+                var scopeAgain = PCL.HookTarget.Ping(5);
+                Expect("re-enabling a feature scope restores its hook without reattaching",
+                    scopeReenabled && HookHandlers.SampleCalls == handlerBefore + 2 && scopeAgain == 105 &&
+                    scopeEvents == 2 && catalogEvents == catalogEventsBeforeScope + 2);
+
                 setEnabled?.Invoke(manager, new object[] { "test.sample", false });
                 var forwarded = PCL.HookTarget.Ping(5);
                 Expect("disabled module forwards to the original",
-                    HookHandlers.SampleCalls == handlerBefore + 1 && forwarded == 10);
+                    HookHandlers.SampleCalls == handlerBefore + 2 && forwarded == 10);
 
                 setEnabled?.Invoke(manager, new object[] { "test.sample", true });
                 var again = PCL.HookTarget.Ping(5);
                 Expect("re-enabled module hooks again",
-                    HookHandlers.SampleCalls == handlerBefore + 2 && again == 105);
+                    HookHandlers.SampleCalls == handlerBefore + 3 && again == 105);
 
                 token?.Dispose();
                 var afterDispose = PCL.HookTarget.Ping(5);
                 Expect("disposed token forwards to the original",
-                    HookHandlers.SampleCalls == handlerBefore + 2 && afterDispose == 10);
+                    HookHandlers.SampleCalls == handlerBefore + 3 && afterDispose == 10);
+                if (scopedApi != null) scopedApi.Scopes.Changed -= scopeHandler;
+                Expect("unknown scope edits are rejected",
+                    Convert.ToBoolean(setScope?.Invoke(manager,
+                        new object[] { "test.sample", "sample.missing", true }) ?? true) == false);
+                var publicScopeHits = 0;
+                var publicScopeHook = scopedApi?.Hooks.Attach(
+                    "PCL.HookTarget", "Ping", "sample.public-scope", "sample.hooks",
+                    (Action<int>)(_ => publicScopeHits++), PCL2Swap.Api.HookMode.Prefix);
+                PCL.HookTarget.Ping(1);
+                setScope?.Invoke(manager, new object[] { "test.sample", "sample.hooks", false });
+                PCL.HookTarget.Ping(1);
+                setScope?.Invoke(manager, new object[] { "test.sample", "sample.hooks", true });
+                PCL.HookTarget.Ping(1);
+                Expect("the public scoped-attach overload follows the same live scope gate",
+                    publicScopeHook != null && publicScopeHits == 2);
+                publicScopeHook?.Dispose();
+                try
+                {
+                    scopedApi?.Hooks.Attach(
+                        "PCL.HookTarget", "Ping", "sample.unknown-scope", "sample.missing",
+                        (Action<int>)(_ => { }), PCL2Swap.Api.HookMode.Prefix);
+                    Expect("attaching to an undeclared feature scope is rejected", false);
+                }
+                catch (ArgumentException ex)
+                {
+                    Expect("attaching to an undeclared feature scope is rejected",
+                        ex.Message.Contains("未声明") && ex.Message.Contains("sample.missing"));
+                }
 
                 // ---- hook modes: prefix observes before, postfix after, both keep the host result ----
                 PCL.HookTarget.Order.Clear();
                 var prefixToken = attachScoped?.Invoke(api, new object[]
                 {
                     "test.sample", "PCL.HookTarget", "Ping", "sample.prefix",
+                    null,
                     PCL2Swap.Api.HookMode.Prefix, (Action<int>)HookHandlers.Before
                 }) as IDisposable;
                 Expect("prefix hook installed", prefixToken != null);
@@ -1668,6 +1750,7 @@ namespace PclDlSwap.ExLoaderHarness
                 var postfixToken = attachScoped?.Invoke(api, new object[]
                 {
                     "test.sample", "PCL.HookTarget", "Ping", "sample.postfix",
+                    null,
                     PCL2Swap.Api.HookMode.Postfix, (Action<int>)HookHandlers.After
                 }) as IDisposable;
                 Expect("postfix hook installed", postfixToken != null);
@@ -1682,6 +1765,7 @@ namespace PclDlSwap.ExLoaderHarness
                 var echoToken = attachScoped?.Invoke(api, new object[]
                 {
                     "test.sample", "PCL.HookTarget", "Echo", "sample.echo",
+                    null,
                     PCL2Swap.Api.HookMode.Replace, (Func<string, string>)instanceHandler.Echo
                 }) as IDisposable;
                 Expect("instance delegate attaches", echoToken != null);
@@ -1692,9 +1776,6 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("disposed echo hook restores the host body", PCL.HookTarget.Echo("abc") == "harness:abc");
 
                 // ---- signature-aware hooks: select one overload without guessing ----
-                var createScopedApi = manager?.GetType().GetMethod("CreateScopedApi",
-                    BindingFlags.NonPublic | BindingFlags.Instance);
-                var scopedApi = createScopedApi?.Invoke(manager, new[] { sample }) as PCL2Swap.Api.ISwapApi;
                 scopedApi?.Files.WriteText("nested/probe.txt", "scoped-file-probe", false);
                 Expect("scoped IAddonFiles stays below the module root",
                     scopedApi?.Files.ReadText("nested/probe.txt") == "scoped-file-probe" &&
@@ -1793,6 +1874,7 @@ namespace PclDlSwap.ExLoaderHarness
                     attachScoped?.Invoke(api, new object[]
                     {
                         "test.sample", "PCL.HookTarget", "Ping", "sample.bad",
+                        null,
                         PCL2Swap.Api.HookMode.Replace, (Action)(() => { })
                     });
                     Expect("mismatched handler shape is rejected", false);
@@ -1809,6 +1891,7 @@ namespace PclDlSwap.ExLoaderHarness
                 var boomToken = attachScoped?.Invoke(api, new object[]
                 {
                     "test.sample", "PCL.HookTarget", "Ping", "sample.boom",
+                    null,
                     PCL2Swap.Api.HookMode.Replace, (Func<int, int>)(value =>
                     {
                         boomHits++;
@@ -1973,7 +2056,12 @@ namespace PclDlSwap.ExLoaderHarness
                     "\"version\":\"2.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
                     "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"author\":\"harness\"," +
                     "\"description\":\"installed by the manager test\"," +
-                    "\"permissions\":[\"settings\",\"hooks\",\"files\",\"messaging\"]}",
+                    "\"permissions\":[\"settings\",\"hooks\",\"files\",\"messaging\"]," +
+                    "\"scopes\":[" +
+                    "{\"id\":\"installed.core\",\"name\":\"核心\",\"nameEn\":\"Core\"," +
+                    "\"description\":\"核心功能\",\"descriptionEn\":\"Core features\",\"defaultEnabled\":true}," +
+                    "{\"id\":\"installed.optional\",\"name\":\"可选\",\"nameEn\":\"Optional\"," +
+                    "\"description\":\"可选功能\",\"descriptionEn\":\"Optional features\",\"defaultEnabled\":false}]}",
                     null);
 
                 // ---- install preview: inspect without touching the store, then describe it ----
@@ -2003,6 +2091,10 @@ namespace PclDlSwap.ExLoaderHarness
                     previewText.Contains("权限声明") && previewText.Contains("settings") &&
                     previewText.Contains("hooks") && previewText.Contains("files") &&
                     previewText.Contains("messaging"));
+                Expect("the install preview shows feature scopes and their defaults",
+                    previewText.Contains("功能作用域") && previewText.Contains("installed.core") &&
+                    previewText.Contains("installed.optional") && previewText.Contains("默认开") &&
+                    previewText.Contains("默认关"));
 
                 // ---- trust chain: signature + payload hashes + version-level warnings -------------
                 object TrustOfReview(object review) =>
@@ -2111,6 +2203,12 @@ namespace PclDlSwap.ExLoaderHarness
                     installedInfo.GrantedPermissions.Contains("files") &&
                     installedInfo.GrantedPermissions.Contains("messaging") &&
                     installedInfo.DeniedPermissions.Count == 0);
+                Expect("installed module exposes localized scope metadata and defaults",
+                    installedInfo?.Scopes.Count == 2 &&
+                    installedInfo.Scopes[0].NameEnglish == "Core" &&
+                    installedInfo.Scopes[0].DescriptionEnglish == "Core features" &&
+                    installedInfo.Scopes[0].Enabled &&
+                    !installedInfo.Scopes[1].Enabled);
                 var governedScopedApi = createScopedApi?.Invoke(manager,
                     new[] { installed }) as PCL2Swap.Api.ISwapApi;
                 var governedHookHits = 0;
@@ -2128,6 +2226,23 @@ namespace PclDlSwap.ExLoaderHarness
                     }), PCL2Swap.Api.HookMode.Replace);
                 Expect("a granted hook permission runs the installed handler",
                     governedHookHits == 0 && PCL.HookTarget.Ping(2) == 1002);
+                var installedScopeEvents = 0;
+                EventHandler installedScopeHandler = (sender, args) => installedScopeEvents++;
+                if (governedScopedApi != null) governedScopedApi.Scopes.Changed += installedScopeHandler;
+                var sampleCrossScopeEvents = 0;
+                EventHandler sampleCrossScopeHandler = (sender, args) => sampleCrossScopeEvents++;
+                if (scopedApi != null) scopedApi.Scopes.Changed += sampleCrossScopeHandler;
+                var installedScopeChanged = Convert.ToBoolean(setScope?.Invoke(manager,
+                    new object[] { "test.installed", "installed.optional", true }) ?? false);
+                Expect("installed module scopes are user-editable and raise a scoped event",
+                    installedScopeChanged && installedScopeEvents == 1 &&
+                    governedScopedApi?.Scopes.IsEnabled("installed.optional") == true);
+                setScope?.Invoke(manager, new object[] { "test.installed", "installed.core", false });
+                setScope?.Invoke(manager, new object[] { "test.installed", "installed.core", true });
+                Expect("scope events are isolated to the module that changed",
+                    installedScopeEvents == 3 && sampleCrossScopeEvents == 0);
+                if (governedScopedApi != null) governedScopedApi.Scopes.Changed -= installedScopeHandler;
+                if (scopedApi != null) scopedApi.Scopes.Changed -= sampleCrossScopeHandler;
                 var governanceEventsBefore = catalogEvents;
                 var setPermission = manager?.GetType().GetMethod("SetPermission");
                 var revoked = Convert.ToBoolean(setPermission?.Invoke(manager,
@@ -2193,6 +2308,10 @@ namespace PclDlSwap.ExLoaderHarness
                     reloadedInstalled != null &&
                     reloadedInstalled.DeniedPermissions.Contains("settings") &&
                     reloadedInstalled.DeniedPermissions.Contains("hooks"));
+                Expect("feature-scope selection survives module-state reload",
+                    reloadedInstalled != null &&
+                    reloadedInstalled.Scopes.First(scope => scope.Id == "installed.core").Enabled &&
+                    reloadedInstalled.Scopes.First(scope => scope.Id == "installed.optional").Enabled);
                 var regranted = Convert.ToBoolean(setPermission?.Invoke(manager,
                     new object[] { "test.installed", "settings", true }) ?? false);
                 var hooksRegranted = Convert.ToBoolean(setPermission?.Invoke(manager,
@@ -2225,6 +2344,25 @@ namespace PclDlSwap.ExLoaderHarness
                     catalog?.Find("test.permission-update")
                         ?.DeniedPermissions.Contains("settings") == true);
                 uninstall?.Invoke(manager, new object[] { "test.permission-update" });
+
+                var scopeUpdatePath = Path.Combine(Path.GetTempPath(),
+                    "PCL2SwapScopeUpdate-" + Guid.NewGuid().ToString("N") + ".swapaddon");
+                PackSignedAddon(scopeUpdatePath,
+                    "{\"schema\":1,\"id\":\"test.scope-update\",\"name\":\"Scope Update\"," +
+                    "\"version\":\"1.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
+                    "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"scopes\":[" +
+                    "{\"id\":\"scope-update.core\",\"name\":\"核心\",\"nameEn\":\"Core\",\"defaultEnabled\":true}," +
+                    "{\"id\":\"scope-update.optional\",\"name\":\"可选\",\"nameEn\":\"Optional\",\"defaultEnabled\":false}]}",
+                    trustedKey);
+                var scopeFirst = install?.Invoke(manager, new object[] { scopeUpdatePath, true });
+                setScope?.Invoke(manager,
+                    new object[] { "test.scope-update", "scope-update.optional", true });
+                var scopeUpdated = install?.Invoke(manager, new object[] { scopeUpdatePath, true });
+                Expect("hot module update preserves user feature-scope choices",
+                    scopeFirst != null && scopeUpdated != null &&
+                    catalog?.Find("test.scope-update")
+                        ?.Scopes.First(scope => scope.Id == "scope-update.optional").Enabled == true);
+                uninstall?.Invoke(manager, new object[] { "test.scope-update" });
 
                 // Version-level warnings only make sense once the same id is installed.
                 var downgradeOut = Path.Combine(Path.GetTempPath(),
@@ -2344,6 +2482,7 @@ namespace PclDlSwap.ExLoaderHarness
                 attachScoped?.Invoke(api, new object[]
                 {
                     "test.installed", "PCL.HookTarget", "Ping", "detail.ping",
+                    "installed.core",
                     PCL2Swap.Api.HookMode.Replace, (Func<int, int>)(value => value * 3)
                 });
                 var hooksBeforeReload = Convert.ToInt32(countFor?.Invoke(null, new object[] { "test.installed" }) ?? -1);
@@ -2778,7 +2917,7 @@ namespace PclDlSwap.ExLoaderHarness
                 }
             }));
             frontendDone.Wait(TimeSpan.FromSeconds(10));
-            Console.WriteLine("[uitest] API 1.8 frontends=" + (frontendOk ? "PASS" : "FAIL"));
+            Console.WriteLine("[uitest] API 1.9 frontends=" + (frontendOk ? "PASS" : "FAIL"));
             if (!frontendOk)
             {
                 Console.WriteLine("[uitest] frontend detail: " + frontendDetail);

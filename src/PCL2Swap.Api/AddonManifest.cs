@@ -16,6 +16,23 @@ namespace PCL2Swap.Api
     }
 
     /// <summary>
+    /// One user-selectable feature scope declared by a module. Scopes are independent switches:
+    /// the module can omit hooks, tools or pages that the user does not need.
+    /// </summary>
+    public sealed class AddonScopeDefinition
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string NameEnglish { get; set; }
+        public string Description { get; set; }
+        public string DescriptionEnglish { get; set; }
+        public bool DefaultEnabled { get; set; } = true;
+
+        public override string ToString() =>
+            string.IsNullOrEmpty(Name) ? (Id ?? "(unnamed)") : Name + " (" + Id + ")";
+    }
+
+    /// <summary>
     /// Addon package manifest (manifest.json inside a .swapaddon archive). The host parses it into
     /// this model; see docs/swap-api-research.zh.md section 4 for the schema draft.
     /// </summary>
@@ -37,6 +54,13 @@ namespace PCL2Swap.Api
         /// An empty list means "any build" (the Alpha 9 behaviour).
         /// </summary>
         public List<string> HostVersions { get; set; } = new List<string>();
+
+        /// <summary>
+        /// Optional feature scopes shown as user-controlled switches in the module detail page.
+        /// A string list entry is shorthand for <c>{ id, name=id, defaultEnabled=true }</c>.
+        /// </summary>
+        public List<AddonScopeDefinition> Scopes { get; set; } =
+            new List<AddonScopeDefinition>();
 
         public List<string> Permissions { get; set; } = new List<string>();
         public bool DefaultEnabled { get; set; }

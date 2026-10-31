@@ -90,6 +90,14 @@ namespace PCL2Swap.Api
         IDisposable Attach(string declaringType, string methodName, string hookId, Delegate handler, HookMode mode);
         IReadOnlyList<SwapMethodTarget> FindTargets(string declaringType, string methodName);
         IDisposable Attach(SwapMethodTarget target, string hookId, Delegate handler, HookMode mode);
+
+        /// <summary>Attach a signature target gated by a user-selectable module scope.</summary>
+        IDisposable Attach(SwapMethodTarget target, string hookId, string scopeId,
+            Delegate handler, HookMode mode);
+
+        /// <summary>Attach a method-name target gated by a user-selectable module scope.</summary>
+        IDisposable Attach(string declaringType, string methodName, string hookId, string scopeId,
+            Delegate handler, HookMode mode);
         bool IsHooked(SwapMethodTarget target);
         bool IsHooked(string declaringType, string methodName);
         event EventHandler<DownloadEventArgs> DownloadCompleted;
@@ -263,6 +271,8 @@ namespace PCL2Swap.Api
         IModuleCatalog Modules { get; }
         /// <summary>Bounded runtime diagnostic timeline and export surface (API 1.7).</summary>
         IDiagnosticsAccess Diagnostics { get; }
+        /// <summary>Read-only state of the user-selected feature scopes (API 1.9).</summary>
+        IModuleScopes Scopes { get; }
         /// <summary>Sandboxed per-module file storage (API 1.8).</summary>
         IAddonFiles Files { get; }
         /// <summary>In-process module message bus (API 1.8).</summary>

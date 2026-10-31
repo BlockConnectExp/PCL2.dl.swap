@@ -14,7 +14,7 @@ namespace PclDlSwap.PclAddonPack
     ///   PclAddonPack --project &lt;dir&gt; --id &lt;id&gt; --name &lt;name&gt; --version &lt;ver&gt;
     ///                --entry &lt;type&gt; [--api "&gt;=1.0 &lt;2.0"] [--description "..."]
     ///                [--shapes "injected,patched"] [--host-versions "&gt;=2.99.0"]
-    ///                [--permissions "host.hooks.attach"]
+    ///                [--permissions "host.hooks.attach"] [--scope "id;Name;Description;true;NameEn;DescriptionEn"]
     ///                [--assets &lt;dir&gt;] [--out &lt;file&gt;]
     /// The entry type is validated with dnlib (no addon code is executed here), so a typo in
     /// --entry fails at packaging time instead of inside the launcher.
@@ -31,6 +31,7 @@ namespace PclDlSwap.PclAddonPack
             string api = ">=1.0 <2.0", description = null, assets = null, output = null;
             string shapes = null, hostVersions = null, permissions = null;
             string signKey = null, genKey = null;
+            var scopeSpecs = new List<string>();
 
             for (var i = 0; i < args.Length; i++)
             {
@@ -46,6 +47,7 @@ namespace PclDlSwap.PclAddonPack
                     case "--shapes": shapes = args[++i]; break;
                     case "--host-versions": hostVersions = args[++i]; break;
                     case "--permissions": permissions = args[++i]; break;
+                    case "--scope": scopeSpecs.Add(args[++i]); break;
                     case "--sign": signKey = args[++i]; break;
                     case "--gen-key": genKey = args[++i]; break;
                     case "--assets": assets = args[++i]; break;
@@ -84,6 +86,7 @@ namespace PclDlSwap.PclAddonPack
                     "                  [--api \">=1.0 <2.0\"] [--description \"...\"]\n" +
                     "                  [--shapes \"injected,patched\"] [--host-versions \">=2.99.0\"]\n" +
                     "                  [--permissions \"host.hooks.attach,host.settings.write\"]\n" +
+                    "                  [--scope \"id;Name;Description;true;NameEn;DescriptionEn\"]   （可重复）\n" +
                     "                  [--assets <dir>] [--out <file>] [--sign <private-key.xml>]\n" +
                     "       PclAddonPack --gen-key <private-key.xml>   （生成签名密钥对）");
                 return 2;
@@ -141,6 +144,7 @@ namespace PclDlSwap.PclAddonPack
             AddList(fields, "shapes", shapes);
             AddList(fields, "hostVersions", hostVersions);
             AddList(fields, "permissions", permissions);
+            AddScopes(fields, scopeSpecs);
 
             // files: [{ path, sha256 }] - the integrity list; signing covers the manifest bytes, so
             // the payload hashes are covered too.
@@ -283,6 +287,40 @@ namespace PclDlSwap.PclAddonPack
                 .Where(item => item.Length > 0)
                 .Select(Quote);
             fields.Add("  \"" + key + "\": [" + string.Join(", ", items) + "]");
+        }
+
+        /// <summary>
+        /// Adds rich feature-scope objects. Spec format:
+        /// id;Name;Description;defaultEnabled;NameEnglish;DescriptionEnglish.
+        /// Only the id is required; empty optional fields are omitted.
+        /// </summary>
+        private static void AddScopes(List<string> fields, IReadOnlyList<string> specs)
+        {
+            if (specs == null || specs.Count == 0) return;
+            var lines = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var raw in specs)
+            {
+                var parts = (raw ?? string.Empty).Split(new[] { ';' }, 6);
+                var id = parts.Length > 0 ? parts[0].Trim() : string.Empty;
+                if (id.Length == 0 || !seen.Add(id)) continue;
+                var name = parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]) ? parts[1].Trim() : id;
+                var description = parts.Length > 2 ? parts[2].Trim() : string.Empty;
+                var enabled = parts.Length <= 3 || !bool.TryParse(parts[3], out var parsed) || parsed;
+                var nameEnglish = parts.Length > 4 ? parts[4].Trim() : string.Empty;
+                var descriptionEnglish = parts.Length > 5 ? parts[5].Trim() : string.Empty;
+                var line = "    {\"id\": " + Quote(id) + ", \"name\": " + Quote(name);
+                if (nameEnglish.Length > 0)
+                    line += ", \"nameEn\": " + Quote(nameEnglish);
+                line += ", \"description\": " + Quote(description);
+                if (descriptionEnglish.Length > 0)
+                    line += ", \"descriptionEn\": " + Quote(descriptionEnglish);
+                line += ", \"defaultEnabled\": " + (enabled ? "true" : "false") + "}";
+                lines.Add(line);
+            }
+            if (lines.Count == 0) return;
+            fields.Add("  \"scopes\": [" + Environment.NewLine +
+                       string.Join("," + Environment.NewLine, lines) + Environment.NewLine + "  ]");
         }
     }
 }

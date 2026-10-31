@@ -3,6 +3,18 @@ using System.Collections.Generic;
 
 namespace PCL2Swap.Api
 {
+    /// <summary>One declared feature scope and its current user-selected state.</summary>
+    public sealed class SwapScopeInfo
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string NameEnglish { get; set; }
+        public string Description { get; set; }
+        public string DescriptionEnglish { get; set; }
+        public bool DefaultEnabled { get; set; }
+        public bool Enabled { get; set; }
+    }
+
     /// <summary>Read-only snapshot of one installed module for dashboards and diagnostics.</summary>
     public sealed class SwapModuleInfo
     {
@@ -22,6 +34,7 @@ namespace PCL2Swap.Api
         public string Signature { get; set; }
         public IReadOnlyList<string> Shapes { get; set; }
         public IReadOnlyList<string> HostVersions { get; set; }
+        public IReadOnlyList<SwapScopeInfo> Scopes { get; set; }
         public IReadOnlyList<string> RequestedPermissions { get; set; }
         public IReadOnlyList<string> GrantedPermissions { get; set; }
         public IReadOnlyList<string> DeniedPermissions { get; set; }

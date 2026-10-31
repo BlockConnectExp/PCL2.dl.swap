@@ -61,6 +61,12 @@ namespace PclDlSwap.Payload.Swap
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             public bool PermissionStateLoaded { get; set; }
 
+            /// <summary>User-enabled subset of manifest feature scopes.</summary>
+            public HashSet<string> EnabledScopes { get; } =
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            public bool ScopeStateLoaded { get; set; }
+            internal object ScopeGate { get; } = new object();
+
             /// <summary>
             /// Digest of the signed payload inventory (path + hash of every file). Two packages with
             /// the same id and version but different payloads are distinguishable even though the zip
@@ -78,6 +84,10 @@ namespace PclDlSwap.Payload.Swap
             new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _savedPermissionState =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, HashSet<string>> _savedScopes =
+            new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _savedScopeState =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool _stateLoaded;
         private StartupRecovery _recovery;
 
@@ -87,6 +97,13 @@ namespace PclDlSwap.Payload.Swap
         internal StartupRecovery Recovery => _recovery;
         internal bool SafeMode => _recovery?.SafeMode == true;
         internal event EventHandler Changed;
+        internal sealed class ScopeChangedEventArgs : EventArgs
+        {
+            public string AddonId { get; set; }
+            public string ScopeId { get; set; }
+        }
+
+        internal event EventHandler<ScopeChangedEventArgs> ScopeChanged;
 
         internal IReadOnlyList<SwapModuleInfo> ModuleSnapshot() =>
             SnapshotRecords().Select(ToModuleInfo).ToList();
@@ -118,6 +135,7 @@ namespace PclDlSwap.Payload.Swap
                 Signature = record.Signature,
                 Shapes = (manifest?.Shapes ?? new List<string>()).ToArray(),
                 HostVersions = (manifest?.HostVersions ?? new List<string>()).ToArray(),
+                Scopes = ScopeSnapshot(record),
                 RequestedPermissions = RequestedPermissions(record),
                 GrantedPermissions = EffectiveGrantedPermissions(record),
                 DeniedPermissions = DeniedPermissions(record),
@@ -349,6 +367,105 @@ namespace PclDlSwap.Payload.Swap
                 "请在 Swap Addon 的模块详情中授予该权限。");
         }
 
+        // ---------------------------------------------------------------- feature scopes (API 1.9)
+
+        internal IReadOnlyList<AddonScopeDefinition> DeclaredScopes(AddonRecord record) =>
+            record?.Manifest?.Scopes ?? new List<AddonScopeDefinition>();
+
+        internal IReadOnlyList<string> EffectiveEnabledScopes(AddonRecord record)
+        {
+            var declared = DeclaredScopes(record);
+            if (record == null) return Array.Empty<string>();
+            lock (record.ScopeGate)
+                return declared.Where(scope =>
+                        record.ScopeStateLoaded
+                            ? record.EnabledScopes.Contains(scope.Id)
+                            : scope.DefaultEnabled)
+                .Select(scope => scope.Id)
+                .ToList();
+        }
+
+        internal IReadOnlyList<SwapScopeInfo> ScopeSnapshot(AddonRecord record) =>
+            DeclaredScopes(record).Select(scope => new SwapScopeInfo
+            {
+                Id = scope.Id,
+                Name = string.IsNullOrEmpty(scope.Name) ? scope.Id : scope.Name,
+                NameEnglish = string.IsNullOrEmpty(scope.NameEnglish) ? scope.Name : scope.NameEnglish,
+                Description = scope.Description,
+                DescriptionEnglish = string.IsNullOrEmpty(scope.DescriptionEnglish)
+                    ? scope.Description
+                    : scope.DescriptionEnglish,
+                DefaultEnabled = scope.DefaultEnabled,
+                Enabled = IsScopeEnabled(record, scope.Id)
+            }).ToList();
+
+        internal bool IsScopeEnabled(AddonRecord record, string scopeId)
+        {
+            if (record == null) return true;
+            if (string.IsNullOrWhiteSpace(scopeId)) return true;
+            var scope = DeclaredScopes(record).FirstOrDefault(item =>
+                string.Equals(item.Id, scopeId.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (scope == null) return false;
+            lock (record.ScopeGate)
+                return record.ScopeStateLoaded
+                    ? record.EnabledScopes.Contains(scope.Id)
+                    : scope.DefaultEnabled;
+        }
+
+        internal bool IsScopeEnabled(string addonId, string scopeId) =>
+            IsScopeEnabled(Find(addonId), scopeId);
+
+        internal void RequireDeclaredScope(AddonRecord record, string scopeId)
+        {
+            if (string.IsNullOrWhiteSpace(scopeId)) return;
+            if (DeclaredScopes(record).Any(scope =>
+                    string.Equals(scope.Id, scopeId.Trim(), StringComparison.OrdinalIgnoreCase)))
+                return;
+            throw new ArgumentException(
+                $"模块 {record?.Id ?? "(unknown)"} 未声明 feature scope \"{scopeId}\"。");
+        }
+
+        private void MaterializeScopeState(AddonRecord record)
+        {
+            lock (record.ScopeGate)
+            {
+                if (record.ScopeStateLoaded) return;
+                record.EnabledScopes.Clear();
+                foreach (var scope in DeclaredScopes(record).Where(scope => scope.DefaultEnabled))
+                    record.EnabledScopes.Add(scope.Id);
+                record.ScopeStateLoaded = true;
+            }
+        }
+
+        /// <summary>Updates one user-selectable manifest scope and persists the choice.</summary>
+        public bool SetScopeEnabled(string addonId, string scopeId, bool enabled)
+        {
+            var record = Find(addonId);
+            if (record == null) return false;
+            var normalizedScopeId = (scopeId ?? string.Empty).Trim();
+            var scope = DeclaredScopes(record).FirstOrDefault(item =>
+                string.Equals(item.Id, normalizedScopeId, StringComparison.OrdinalIgnoreCase));
+            if (scope == null)
+            {
+                SwapLog.Warn($"[scopes] {addonId} 未声明 scope {scopeId}");
+                return false;
+            }
+
+            MaterializeScopeState(record);
+            lock (record.ScopeGate)
+            {
+                if (enabled) record.EnabledScopes.Add(scope.Id);
+                else record.EnabledScopes.Remove(scope.Id);
+            }
+            SaveState();
+            RaiseScopeChanged(addonId, scope.Id);
+            RaiseChanged();
+            ModuleLog.Write(addonId, "info",
+                $"feature scope {scope.Id} = {(enabled ? "enabled" : "disabled")}");
+            SwapLog.Info($"[scopes] {addonId} · {scope.Id} = {(enabled ? "enabled" : "disabled")}");
+            return true;
+        }
+
         /// <summary>Builds a scoped API for tests and for the permission self-check.</summary>
         internal ISwapApi CreateScopedApi(AddonRecord record) => new ScopedApi(_api, record);
 
@@ -526,6 +643,9 @@ namespace PclDlSwap.Payload.Swap
             var inheritedPermissions = existing?.PermissionStateLoaded == true
                 ? new HashSet<string>(existing.GrantedPermissions, StringComparer.OrdinalIgnoreCase)
                 : null;
+            var inheritedScopes = existing?.ScopeStateLoaded == true
+                ? new HashSet<string>(existing.EnabledScopes, StringComparer.OrdinalIgnoreCase)
+                : null;
             string staging = null;
             if (existing != null)
             {
@@ -550,6 +670,15 @@ namespace PclDlSwap.Payload.Swap
                     record.PermissionStateLoaded = true;
                     foreach (var permission in inheritedPermissions)
                         record.GrantedPermissions.Add(permission);
+                }
+                if (inheritedScopes != null)
+                {
+                    lock (record.ScopeGate)
+                    {
+                        record.ScopeStateLoaded = true;
+                        foreach (var scopeId in inheritedScopes)
+                            record.EnabledScopes.Add(scopeId);
+                    }
                 }
             }
             catch
@@ -667,6 +796,25 @@ namespace PclDlSwap.Payload.Swap
             if (manifest.HostVersions != null && manifest.HostVersions.Count > 0)
                 text.AppendLine("  " + i18n.T("宿主版本：", "Host versions: ") +
                                 string.Join(separator, manifest.HostVersions));
+            if (manifest.Scopes != null && manifest.Scopes.Count > 0)
+            {
+                var scopeNames = manifest.Scopes.Take(5).Select(scope =>
+                {
+                    var name = i18n.IsEnglish
+                        ? (string.IsNullOrWhiteSpace(scope.NameEnglish) ? scope.Name : scope.NameEnglish)
+                        : scope.Name;
+                    if (string.IsNullOrWhiteSpace(name)) name = scope.Id;
+                    return name + " [" + scope.Id + "] " +
+                           (scope.DefaultEnabled
+                               ? i18n.T("默认开", "default on")
+                               : i18n.T("默认关", "default off"));
+                });
+                var scopeText = string.Join(separator, scopeNames);
+                if (manifest.Scopes.Count > 5)
+                    scopeText += i18n.T(" 等 " + manifest.Scopes.Count + " 项",
+                        " and " + manifest.Scopes.Count + " total");
+                text.AppendLine("  " + i18n.T("功能作用域：", "Feature scopes: ") + scopeText);
+            }
             text.AppendLine("  " + i18n.T("权限声明：", "Permissions: ") +
                             (manifest.Permissions == null || manifest.Permissions.Count == 0
                                 ? i18n.T("（未声明 —— 按兼容模式获得全部访问）",
@@ -1206,6 +1354,14 @@ namespace PclDlSwap.Payload.Swap
                                 StringComparer.OrdinalIgnoreCase);
                             _savedPermissionState.Add(pair.Key);
                         }
+                        if (entry.TryGetValue("scopes", out var rawScopes) ||
+                            entry.TryGetValue("enabledScopes", out rawScopes))
+                        {
+                            _savedScopes[pair.Key] = new HashSet<string>(
+                                ReadPermissionList(rawScopes),
+                                StringComparer.OrdinalIgnoreCase);
+                            _savedScopeState.Add(pair.Key);
+                        }
                     }
                     else
                         _savedState[pair.Key] = Convert.ToBoolean(pair.Value);
@@ -1231,6 +1387,12 @@ namespace PclDlSwap.Payload.Swap
                     {
                         entry["permissions"] = EffectiveGrantedPermissions(record)
                             .OrderBy(permission => permission, StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                    }
+                    if ((record.Manifest?.Scopes?.Count ?? 0) > 0 || record.ScopeStateLoaded)
+                    {
+                        entry["scopes"] = EffectiveEnabledScopes(record)
+                            .OrderBy(scope => scope, StringComparer.OrdinalIgnoreCase)
                             .ToList();
                     }
                     map[record.Id] = entry;
@@ -1261,6 +1423,17 @@ namespace PclDlSwap.Payload.Swap
                             record.GrantedPermissions.Add(permission);
                     record.PermissionStateLoaded = true;
                 }
+                if (record.Id != null && _savedScopeState.Contains(record.Id))
+                {
+                    lock (record.ScopeGate)
+                    {
+                        record.EnabledScopes.Clear();
+                        if (_savedScopes.TryGetValue(record.Id, out var scopes))
+                            foreach (var scope in scopes)
+                                record.EnabledScopes.Add(scope);
+                        record.ScopeStateLoaded = true;
+                    }
+                }
             }
         }
 
@@ -1285,6 +1458,21 @@ namespace PclDlSwap.Payload.Swap
                 catch (Exception ex)
                 {
                     SwapLog.Warn("[module-catalog] Changed subscriber failed: " + ex.Message);
+                }
+            }
+        }
+
+        private void RaiseScopeChanged(string addonId, string scopeId)
+        {
+            var handlers = ScopeChanged;
+            if (handlers == null) return;
+            var args = new ScopeChangedEventArgs { AddonId = addonId, ScopeId = scopeId };
+            foreach (EventHandler<ScopeChangedEventArgs> handler in handlers.GetInvocationList())
+            {
+                try { handler(this, args); }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("[scopes] Changed subscriber failed: " + ex.Message);
                 }
             }
         }
@@ -1551,6 +1739,7 @@ namespace PclDlSwap.Payload.Swap
                 Hooks = new ScopedHooks(inner.Hooks, inner as HostApi, record.Id, record);
                 Ui = new ScopedUi(inner.Ui, record);
                 Pcl = new ScopedPclAccess(inner.Pcl, record.Id);
+                Scopes = new ScopesAccess(record);
                 Files = new AddonFileStore(Path.Combine(SwapPaths.AddonDirectory(record.Id), "files"),
                     record.Id);
                 Messaging = new MessagingAccess(record.Id, record.Id);
@@ -1572,6 +1761,7 @@ namespace PclDlSwap.Payload.Swap
             public IRecoveryAccess Recovery => _inner.Recovery;
             public IModuleCatalog Modules => _inner.Modules;
             public IDiagnosticsAccess Diagnostics => _inner.Diagnostics;
+            public IModuleScopes Scopes { get; }
             public IAddonFiles Files { get; }
             public IAddonMessaging Messaging { get; }
 
@@ -1593,6 +1783,69 @@ namespace PclDlSwap.Payload.Swap
             {
                 ModuleLog.Write(_record.Id, "error", message, exception);
                 _inner.LogError("[" + _record.Id + "] " + message, exception);
+            }
+        }
+
+        private sealed class ScopesAccess : IModuleScopes
+        {
+            private readonly AddonRecord _record;
+            private readonly object _eventGate = new object();
+            private EventHandler _changed;
+
+            public ScopesAccess(AddonRecord record) => _record = record;
+
+            public IReadOnlyList<SwapScopeInfo> Scopes =>
+                SwapHost.Addons?.ScopeSnapshot(_record) ?? Array.Empty<SwapScopeInfo>();
+
+            public IReadOnlyList<string> Enabled =>
+                SwapHost.Addons?.EffectiveEnabledScopes(_record) ?? Array.Empty<string>();
+
+            public bool IsEnabled(string scopeId) =>
+                SwapHost.Addons?.IsScopeEnabled(_record, scopeId) ?? false;
+
+            public event EventHandler Changed
+            {
+                add
+                {
+                    if (value == null) return;
+                    lock (_eventGate)
+                    {
+                        if (_changed == null)
+                        {
+                            var manager = SwapHost.Addons;
+                            if (manager != null) manager.ScopeChanged += OnManagerScopeChanged;
+                        }
+                        _changed += value;
+                    }
+                }
+                remove
+                {
+                    if (value == null) return;
+                    lock (_eventGate)
+                    {
+                        _changed -= value;
+                        if (_changed != null) return;
+                        var manager = SwapHost.Addons;
+                        if (manager != null) manager.ScopeChanged -= OnManagerScopeChanged;
+                    }
+                }
+            }
+
+            private void OnManagerScopeChanged(object sender, ScopeChangedEventArgs args)
+            {
+                if (!string.Equals(args?.AddonId, _record?.Id, StringComparison.OrdinalIgnoreCase))
+                    return;
+                EventHandler handlers;
+                lock (_eventGate) handlers = _changed;
+                if (handlers == null) return;
+                foreach (EventHandler handler in handlers.GetInvocationList())
+                {
+                    try { handler(this, EventArgs.Empty); }
+                    catch (Exception ex)
+                    {
+                        SwapLog.Warn($"[scopes] {_record?.Id} Changed subscriber failed: {ex.Message}");
+                    }
+                }
             }
         }
 
@@ -1798,16 +2051,22 @@ namespace PclDlSwap.Payload.Swap
             }
 
             public IDisposable Attach(string declaringType, string methodName, string hookId,
-                Delegate handler, HookMode mode)
+                Delegate handler, HookMode mode) =>
+                Attach(declaringType, methodName, hookId, null, handler, mode);
+
+            public IDisposable Attach(string declaringType, string methodName, string hookId,
+                string scopeId, Delegate handler, HookMode mode)
             {
                 SwapHost.Addons?.RequirePermission(_record, "hooks");
+                SwapHost.Addons?.RequireDeclaredScope(_record, scopeId);
                 try
                 {
                     var token = _host == null
                         ? _inner.Attach(declaringType, methodName, hookId, handler, mode)
-                        : _host.AttachAddonHook(_addonId, declaringType, methodName, hookId, mode, handler);
+                        : _host.AttachAddonHook(_addonId, declaringType, methodName, hookId,
+                            scopeId, mode, handler);
                     ModuleLog.Write(_addonId, "info",
-                        $"挂钩 {declaringType}.{methodName}（{mode}，hookId {hookId}）");
+                        $"挂钩 {declaringType}.{methodName}（{mode}，hookId {hookId}，scope {scopeId ?? "*"}）");
                     return token;
                 }
                 catch (Exception ex)
@@ -1822,16 +2081,20 @@ namespace PclDlSwap.Payload.Swap
                 string methodName) => _inner.FindTargets(declaringType, methodName);
 
             public IDisposable Attach(SwapMethodTarget target, string hookId, Delegate handler,
-                HookMode mode)
+                HookMode mode) => Attach(target, hookId, null, handler, mode);
+
+            public IDisposable Attach(SwapMethodTarget target, string hookId, string scopeId,
+                Delegate handler, HookMode mode)
             {
                 SwapHost.Addons?.RequirePermission(_record, "hooks");
+                SwapHost.Addons?.RequireDeclaredScope(_record, scopeId);
                 try
                 {
                     var token = _host == null
                         ? _inner.Attach(target, hookId, handler, mode)
-                        : _host.AttachAddonHook(_addonId, target, hookId, mode, handler);
+                        : _host.AttachAddonHook(_addonId, target, hookId, scopeId, mode, handler);
                     ModuleLog.Write(_addonId, "info",
-                        $"挂钩 {target}（{mode}，hookId {hookId}）");
+                        $"挂钩 {target}（{mode}，hookId {hookId}，scope {scopeId ?? "*"}）");
                     return token;
                 }
                 catch (Exception ex)

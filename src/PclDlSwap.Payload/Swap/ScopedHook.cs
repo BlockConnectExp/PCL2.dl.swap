@@ -34,6 +34,7 @@ namespace PclDlSwap.Payload.Swap
             public int Id;
             public string AddonId;
             public string HookId;
+            public string ScopeId;
             public HookMode Mode;
             public Delegate Handler;
             public volatile bool Active = true;
@@ -43,7 +44,8 @@ namespace PclDlSwap.Payload.Swap
 
             public bool IsLive => Active &&
                                   SwapHost.AddonEnabled(AddonId) &&
-                                  SwapHost.AddonPermissionGranted(AddonId, "hooks");
+                                  SwapHost.AddonPermissionGranted(AddonId, "hooks") &&
+                                  SwapHost.AddonScopeEnabled(AddonId, ScopeId);
 
             /// <summary>
             /// Marker returned when a module handler threw: a Replace handler that fails must not own
@@ -108,8 +110,8 @@ namespace PclDlSwap.Payload.Swap
         /// Attaches one module handler to a host method, creating the chain (and the single gate
         /// detour) on first use.
         /// </summary>
-        internal static IDisposable Attach(string addonId, string hookId, HookMode mode,
-            Delegate handler, MethodInfo target)
+        internal static IDisposable Attach(string addonId, string hookId, string scopeId,
+            HookMode mode, Delegate handler, MethodInfo target)
         {
             Chain chain;
             Registration registration;
@@ -133,6 +135,7 @@ namespace PclDlSwap.Payload.Swap
                     Id = Interlocked.Increment(ref _nextRegistrationId),
                     AddonId = addonId,
                     HookId = hookId,
+                    ScopeId = scopeId,
                     Mode = mode,
                     Handler = handler
                 };
@@ -148,7 +151,8 @@ namespace PclDlSwap.Payload.Swap
 
             SwapLog.Info($"[hookbus] {(installedNow ? "新建钩子链并装载" : "加入既有钩子链")}：" +
                          $"{target.DeclaringType?.Name}.{target.Name} ← {addonId} · {mode} · " +
-                         $"{(string.IsNullOrEmpty(hookId) ? "(unnamed)" : hookId)}" +
+                         $"{(string.IsNullOrEmpty(hookId) ? "(unnamed)" : hookId)} · " +
+                         $"scope {(string.IsNullOrEmpty(scopeId) ? "*" : scopeId)}" +
                          $"（当前{(SwapHost.AddonEnabled(addonId) ? "启用" : "禁用")}）");
             return new ScopedToken(chain, registration);
         }
@@ -195,7 +199,8 @@ namespace PclDlSwap.Payload.Swap
             ChainsById.Values
                 .SelectMany(chain => chain.Snapshot().Select(registration =>
                     $"{chain.Target.DeclaringType?.Name}.{chain.Target.Name} · {registration.AddonId} · " +
-                    $"{registration.Mode}：命中 {registration.Calls} 次，跳过 {registration.Skipped} 次"))
+                    $"{registration.ScopeId ?? "*"} · {registration.Mode}：命中 {registration.Calls} 次，" +
+                    $"跳过 {registration.Skipped} 次"))
                 .ToList();
 
         /// <summary>How many hooks one module currently has on the chains (for the module list).</summary>

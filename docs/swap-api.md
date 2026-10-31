@@ -613,4 +613,44 @@ string recovery = api.Host.RecoveryDirectory;
 
 完整的恢复流程和环境变量见 `docs/recovery.zh.md`。
 
+## 17. API 1.5（v26.2-Alpha 8 起）：恢复后端与 Banner 前端
+
+`Host.ApiVersion` 现在是 **1.5.0**。新增成员都是只增不改，API 1.0-1.4 addon 保持源码兼容。
+
+### 17.1 `ISwapApi.Recovery`（只读后端）
+
+```csharp
+bool safe = api.Recovery.SafeMode;
+string reasonCode = api.Recovery.SafeModeReasonCode; // unstable-start / previous-safe-mode / forced-env
+string phase = api.Recovery.LifecyclePhase;       // create / onLoad / onEnable / stable...
+string started = api.Recovery.LastStartedModule;
+string completed = api.Recovery.LastCompletedModule;
+string suspect = api.Recovery.SuspectModule;
+string suspectPhase = api.Recovery.SuspectPhase;   // create / onLoad / onEnable
+string journal = api.Recovery.JournalPath;
+string diagnostics = api.Recovery.Diagnostics();
+```
+
+`SuspectModule` 是下一次未稳定启动根据“最后开始生命周期的模块”得出的定位线索，不是平台
+自动定罪。为安全起见，该接口只读；清除安全模式和禁用疑因模块只能由内置恢复 UI 执行，避免
+普通 Addon 意外解除宿主保护。
+
+### 17.2 `IUi.Banner`（语义状态横幅）
+
+```csharp
+page.Children.Add(api.Ui.Banner(
+    "网络不可用",
+    "请求会在连接恢复后重试。",
+    SwapHintType.Warning));
+```
+
+`Banner` 用一个左侧语义色轨和一段正文表达页面级状态，不嵌套 Card。类型支持
+`Info` / `Success` / `Warning` / `Error`；标题和正文由调用方自行国际化。
+
+### 17.3 Swap 管理页英文补全
+
+Alpha 8 把 Addon 管理页与恢复页中带运行时变量的句子改为在构建时显式选择中英文，不再依赖
+宿主视觉树翻译轮询。覆盖安装/更新/卸载确认、严格权限、作用域、模块状态、详情、日志、疑因
+模块和恢复动作。PCL 宿主自身的翻译仍由 `HostTranslator` 与 `I18n.Extra.cs` 继续渐进扩展。
+
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

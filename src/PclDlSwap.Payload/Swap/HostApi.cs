@@ -18,7 +18,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.4.0";
+        public const string ApiVersion = "1.5.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -35,6 +35,7 @@ namespace PclDlSwap.Payload.Swap
             _ui = new UiImpl();
             _reflect = new ReflectionImpl(_host);
             _pcl = new PclAccess(_host);
+            Recovery = new RecoveryAccessImpl();
         }
 
         public IHostInfo Host { get; }
@@ -44,6 +45,7 @@ namespace PclDlSwap.Payload.Swap
         public ISwapSurface Surface => _surface;
         public IPclAccess Pcl => _pcl;
         public II18n I18n => SwapI18n.Current;
+        public IRecoveryAccess Recovery { get; }
 
         public IData Data { get; private set; }
 
@@ -111,6 +113,25 @@ namespace PclDlSwap.Payload.Swap
             public string SafeModeReason => SwapHost.Recovery?.SafeModeReason ?? string.Empty;
             public string RecoveryDirectory => SwapPaths.RecoveryDirectory;
             public object PclAssembly { get; }
+        }
+
+        private sealed class RecoveryAccessImpl : IRecoveryAccess
+        {
+            private static StartupRecovery State => SwapHost.Recovery;
+
+            public bool SafeMode => State?.SafeMode == true;
+            public bool SafeModeExitPending => State?.SafeModeExitPending == true;
+            public string SafeModeReason => State?.SafeModeReason ?? string.Empty;
+            public string SafeModeReasonCode => State?.SafeModeReasonCode ?? string.Empty;
+            public string JournalPath => State?.JournalPath ?? string.Empty;
+            public int UncleanStarts => State?.UncleanStarts ?? 0;
+            public int SafeModeUncleanStarts => State?.SafeModeUncleanStarts ?? 0;
+            public string LifecyclePhase => State?.LifecyclePhase ?? string.Empty;
+            public string LastStartedModule => State?.LastStartedModule ?? string.Empty;
+            public string LastCompletedModule => State?.LastCompletedModule ?? string.Empty;
+            public string SuspectModule => State?.SuspectModule ?? string.Empty;
+            public string SuspectPhase => State?.SuspectPhase ?? string.Empty;
+            public string Diagnostics() => State?.Diagnostics() ?? string.Empty;
         }
 
         private sealed class HookBusImpl : IHooks
@@ -346,6 +367,10 @@ namespace PclDlSwap.Payload.Swap
 
             public IProgressView Progress(string label, double initial = 0,
                 bool indeterminate = false) => Views.SwapUi.Progress(label, initial, indeterminate);
+
+            public System.Windows.FrameworkElement Banner(string title, string text,
+                SwapHintType type = SwapHintType.Warning) =>
+                Views.SwapUi.Banner(title, text, type);
         }
 
         private sealed class ReflectionImpl : IReflection

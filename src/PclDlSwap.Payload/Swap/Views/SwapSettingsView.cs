@@ -24,6 +24,7 @@ namespace PclDlSwap.Payload.Swap.Views
                         i18n.SetLanguage(index == 2 ? PCL2Swap.Api.SwapLanguage.English
                             : index == 1 ? PCL2Swap.Api.SwapLanguage.Chinese
                             : PCL2Swap.Api.SwapLanguage.Auto);
+                        PageRegistry.InvalidatePage("swap-addons");
                         PageRegistry.InvalidatePage("swap-settings");
                     }),
                 SwapUi.Buttons(

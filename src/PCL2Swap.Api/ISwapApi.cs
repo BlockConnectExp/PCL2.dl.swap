@@ -63,6 +63,27 @@ namespace PCL2Swap.Api
         object PclAssembly { get; }
     }
 
+    /// <summary>
+    /// Read-only startup recovery facts. Mutation stays in the built-in recovery UI so a module
+    /// cannot silently clear safe mode or disable another module while diagnosing a crash.
+    /// </summary>
+    public interface IRecoveryAccess
+    {
+        bool SafeMode { get; }
+        bool SafeModeExitPending { get; }
+        string SafeModeReason { get; }
+        string SafeModeReasonCode { get; }
+        string JournalPath { get; }
+        int UncleanStarts { get; }
+        int SafeModeUncleanStarts { get; }
+        string LifecyclePhase { get; }
+        string LastStartedModule { get; }
+        string LastCompletedModule { get; }
+        string SuspectModule { get; }
+        string SuspectPhase { get; }
+        string Diagnostics();
+    }
+
     /// <summary>Bytecode-hook surface. Attach() returns a token that detaches when disposed.</summary>
     public interface IHooks
     {
@@ -163,6 +184,12 @@ namespace PCL2Swap.Api
 
         /// <summary>A live progress row; update the returned handle from any thread.</summary>
         IProgressView Progress(string label, double initial = 0, bool indeterminate = false);
+
+        /// <summary>
+        /// A compact status banner with a semantic accent. Use for one important state or recovery
+        /// message instead of nesting another card inside the page.
+        /// </summary>
+        FrameworkElement Banner(string title, string text, SwapHintType type = SwapHintType.Warning);
     }
 
     /// <summary>Per-addon persisted key/value store.</summary>
@@ -195,6 +222,8 @@ namespace PCL2Swap.Api
         IPclAccess Pcl { get; }
         /// <summary>Bilingual text surface shared with the running launcher.</summary>
         II18n I18n { get; }
+        /// <summary>Read-only startup recovery state and diagnostics (API 1.5).</summary>
+        IRecoveryAccess Recovery { get; }
         void Log(string message);
         void LogWarning(string message);
         void LogError(string message, Exception exception = null);

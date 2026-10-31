@@ -690,6 +690,60 @@ namespace PclDlSwap.Payload.Swap.Views
             return new ProgressViewImpl(root, bar, status);
         }
 
+        /// <summary>
+        /// Compact semantic banner for a recovery state or one important page-level message. It is
+        /// deliberately not another card: a single accent rail and one text block keep hierarchy clear.
+        /// </summary>
+        internal static FrameworkElement Banner(string title, string text,
+            SwapHintType type = SwapHintType.Warning)
+        {
+            var accentColor = BannerColor(type);
+            var root = new Border
+            {
+                Margin = new Thickness(0, 0, 0, 12),
+                CornerRadius = new CornerRadius(5),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(72, accentColor.R, accentColor.G,
+                    accentColor.B))
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var accent = new Border
+            {
+                Background = new SolidColorBrush(accentColor),
+                CornerRadius = new CornerRadius(4, 0, 0, 4)
+            };
+            grid.Children.Add(accent);
+
+            var body = new StackPanel { Margin = new Thickness(14, 10, 15, 11) };
+            if (!string.IsNullOrWhiteSpace(title))
+                body.Children.Add(Text(title, 12.5, false, true, FontWeights.SemiBold));
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                var message = Note(text, true);
+                message.Margin = new Thickness(0, string.IsNullOrWhiteSpace(title) ? 0 : 3, 0, 0);
+                body.Children.Add(message);
+            }
+            Grid.SetColumn(body, 1);
+            grid.Children.Add(body);
+            root.Child = grid;
+            return root;
+        }
+
+        private static Color BannerColor(SwapHintType type)
+        {
+            switch (type)
+            {
+                case SwapHintType.Success: return Color.FromRgb(46, 139, 87);
+                case SwapHintType.Warning: return Color.FromRgb(197, 138, 0);
+                case SwapHintType.Error: return Color.FromRgb(199, 74, 66);
+                default: return Color.FromRgb(58, 123, 213);
+            }
+        }
+
         private sealed class ProgressViewImpl : IProgressView
         {
             private readonly ProgressBar _bar;

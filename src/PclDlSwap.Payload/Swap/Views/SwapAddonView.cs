@@ -20,6 +20,7 @@ namespace PclDlSwap.Payload.Swap.Views
     {
         public static FrameworkElement Build(ISwapApi api, AddonManager addons)
         {
+            var i18n = SwapI18n.Current;
             var page = SwapUi.Page();
             var records = addons?.Records;
             if (addons?.SafeMode == true)
@@ -28,7 +29,9 @@ namespace PclDlSwap.Payload.Swap.Views
             var list = new List<FrameworkElement>();
             if (records == null || records.Count == 0)
             {
-                list.Add(SwapUi.Note("尚未发现任何 Addon。把 .swapaddon 包放进 Addon 目录后重启 PCL 即可加载。"));
+                list.Add(SwapUi.Note(i18n.T(
+                    "尚未发现任何 Addon。把 .swapaddon 包放进 Addon 目录后重启 PCL 即可加载。",
+                    "No addons yet. Put a .swapaddon package in the addon directory and restart PCL to load it.")));
             }
             else
             {
@@ -39,20 +42,26 @@ namespace PclDlSwap.Payload.Swap.Views
                 }
             }
 
-            page.Children.Add(SwapUi.Card("已安装的 Addon", list.ToArray()));
+            page.Children.Add(SwapUi.Card(i18n.T("已安装的 Addon", "Installed addons"), list.ToArray()));
 
             // Manager-style detail view: the row's 详情 button selects a module and the page is
             // rebuilt around it (metadata, audit trail, hook chains, log tail, actions).
             var selected = addons?.Selected;
             if (selected != null) page.Children.Add(Detail(api, addons, selected));
 
-            page.Children.Add(SwapUi.Card("模块管理",
-                SwapUi.Note("安装会把包归档到 Addon 目录并立即启动，不需要重启 PCL；" +
-                            "卸载会停掉模块、撤下它的设置页并删除模块目录（入口 DLL 被占用时留到下次启动清理）。"),
+            page.Children.Add(SwapUi.Card(i18n.T("模块管理", "Module manager"),
+                SwapUi.Note(i18n.T(
+                    "安装会把包归档到 Addon 目录并立即启动，不需要重启 PCL；" +
+                    "卸载会停掉模块、撤下它的设置页并删除模块目录（入口 DLL 被占用时留到下次启动清理）。",
+                    "Installing archives the package into the addon directory and starts it without a PCL restart. " +
+                    "Uninstalling stops the module, removes its pages and deletes its directory; a locked entry DLL is cleaned up on the next start.")),
                 SwapUi.Buttons(
-                    SwapUi.Button("安装模块…", () => InstallFromDialog(api, addons)),
-                    SwapUi.Button("打开 Addon 目录", () => OpenFolder(api?.Host.AddonDirectory)),
-                    SwapUi.Button("刷新", () => PageRegistry.InvalidatePage("swap-addons")))));
+                    SwapUi.Button(i18n.T("安装模块…", "Install module..."),
+                        () => InstallFromDialog(api, addons)),
+                    SwapUi.Button(i18n.T("打开 Addon 目录", "Open addon directory"),
+                        () => OpenFolder(api?.Host.AddonDirectory)),
+                    SwapUi.Button(i18n.T("刷新", "Refresh"),
+                        () => PageRegistry.InvalidatePage("swap-addons")))));
 
             page.Children.Add(RepositoryCard(api, addons));
 
@@ -60,19 +69,31 @@ namespace PclDlSwap.Payload.Swap.Views
             if (chains.Count > 0)
             {
                 var lines = chains.Select(ChainRow).ToList();
-                lines.Add(SwapUi.Note("同一个宿主方法只有一条链：第一个钩子负责装 gate，后续模块加入这条链；" +
-                                      "链上 handler 全部失效时调用直通原方法。"));
-                page.Children.Add(SwapUi.Card("钩子链（模块作用域）", lines.ToArray()));
+                lines.Add(SwapUi.Note(i18n.T(
+                    "同一个宿主方法只有一条链：第一个钩子负责装 gate，后续模块加入这条链；" +
+                    "链上 handler 全部失效时调用直通原方法。",
+                    "Each host method has one chain: the first hook installs the gate, later modules join it, " +
+                    "and once every handler is inactive the call goes straight to the original method.")));
+                page.Children.Add(SwapUi.Card(i18n.T("钩子链（模块作用域）", "Hook chains (module scope)"),
+                    lines.ToArray()));
             }
 
-            page.Children.Add(SwapUi.Card("说明",
-                SwapUi.Note("开关立即生效并写入 modules.json（内置功能的钩子按开关放行/拦截）；" +
-                            "模块状态、配置与已安装的 Addon 都放在数据目录里，可在 Swap Settings 打开。"),
-                SwapUi.Note("注意：结构类修复（原版游戏页 / 下载侧栏）是启动时对宿主对象的一次性修复，" +
-                            "关闭模块后要重启 PCL 才会完全回退；OTA、弹窗类拦截则立即停用。"),
+            page.Children.Add(SwapUi.Card(i18n.T("说明", "Notes"),
+                SwapUi.Note(i18n.T(
+                    "开关立即生效并写入 modules.json（内置功能的钩子按开关放行/拦截）；" +
+                    "模块状态、配置与已安装的 Addon 都放在数据目录里，可在 Swap Settings 打开。",
+                    "Toggles apply immediately and persist to modules.json. Module state, configuration and installed addons " +
+                    "live under the data directory, reachable from Swap Settings.")),
+                SwapUi.Note(i18n.T(
+                    "注意：结构类修复（原版游戏页 / 下载侧栏）是启动时对宿主对象的一次性修复，" +
+                    "关闭模块后要重启 PCL 才会完全回退；OTA、弹窗类拦截则立即停用。",
+                    "Structural repairs such as the vanilla download page and sidebar run once at startup. Fully reverting " +
+                    "them requires a PCL restart; OTA and dialog interception stop immediately.")),
                 SwapUi.Buttons(
-                    SwapUi.Button("打开 Addon 目录", () => OpenFolder(api?.Host.AddonDirectory)),
-                    SwapUi.Button("刷新", () => PageRegistry.InvalidatePage("swap-addons")))));
+                    SwapUi.Button(i18n.T("打开 Addon 目录", "Open addon directory"),
+                        () => OpenFolder(api?.Host.AddonDirectory)),
+                    SwapUi.Button(i18n.T("刷新", "Refresh"),
+                        () => PageRegistry.InvalidatePage("swap-addons")))));
 
             return Wrap(page);
         }
@@ -83,17 +104,38 @@ namespace PclDlSwap.Payload.Swap.Views
         {
             var i18n = SwapI18n.Current;
             var recovery = addons?.Recovery;
-            if (recovery == null) return SwapUi.Note("(recovery unavailable)");
+            if (recovery == null) return SwapUi.Note(i18n.T("（恢复信息不可用）", "(recovery unavailable)"));
+
+            var suspectId = recovery.SuspectModule;
+            var suspect = addons?.Find(suspectId);
+            var suspectDisplay = suspect == null
+                ? suspectId
+                : string.IsNullOrEmpty(suspect.Name) ? suspect.Id : suspect.Name;
+            var suspectName = suspect == null
+                ? (string.IsNullOrEmpty(suspectId) ? i18n.T("（无）", "(none)") : suspectId)
+                : suspectDisplay + " (" + suspect.Id + ")";
 
             var rows = new List<FrameworkElement>
             {
-                SwapUi.Note(i18n.T(
-                    "安全模式已启用：本次会话不会加载任何 Addon，但 Swap 页面和恢复入口仍然可用。",
-                    "Safe mode is active: no addon is loaded in this session, but Swap pages and recovery controls remain available.")),
+                SwapUi.Banner(
+                    i18n.T("安全模式正在保护当前启动", "Safe mode is protecting this launch"),
+                    i18n.T(
+                        "本次会话不会加载任何 Addon，但 Swap 页面和恢复入口仍然可用。",
+                        "No addon is loaded in this session, but Swap pages and recovery controls remain available."),
+                    SwapHintType.Warning),
                 SwapUi.InfoRow(i18n.T("触发原因", "Reason"),
-                    string.IsNullOrEmpty(recovery.SafeModeReason) ? "(unknown)" : recovery.SafeModeReason),
+                    ReasonText(recovery, i18n)),
                 SwapUi.InfoRow(i18n.T("未稳定启动", "Unclean starts"),
                     recovery.SafeModeUncleanStarts + " " + i18n.T("次", "times")),
+                SwapUi.InfoRow(i18n.T("疑因模块", "Suspect module"), suspectName),
+                SwapUi.InfoRow(i18n.T("疑因阶段", "Suspect phase"),
+                    PhaseText(string.IsNullOrEmpty(recovery.SuspectPhase)
+                        ? recovery.LifecyclePhase
+                        : recovery.SuspectPhase)),
+                SwapUi.InfoRow(i18n.T("最后成功启用", "Last enabled module"),
+                    string.IsNullOrEmpty(recovery.LastCompletedModule)
+                        ? i18n.T("（无）", "(none)")
+                        : recovery.LastCompletedModule),
                 SwapUi.InfoRow(i18n.T("当前状态", "Current state"),
                     i18n.T("安全模式运行中", "Safe mode active")),
                 SwapUi.InfoRow(i18n.T("恢复目录", "Recovery directory"),
@@ -107,7 +149,34 @@ namespace PclDlSwap.Payload.Swap.Views
                     "The safe-mode flag is cleared. Restart PCL to load addons again with their saved enabled state.")));
             }
 
-            rows.Add(SwapUi.Buttons(
+            var actions = new List<FrameworkElement>();
+            if (suspect != null)
+            {
+                actions.Add(SwapUi.Button(
+                    i18n.T("禁用疑因模块并退出安全模式", "Disable suspect and leave safe mode"),
+                    () =>
+                    {
+                        var answer = api?.Ui.MsgBox(
+                            i18n.T(
+                                "将把“" + suspectDisplay + "”写入 modules.json 并禁用，然后清除安全模式旗标。" +
+                                "当前会话仍保持隔离；重启 PCL 后加载其余模块。是否继续？",
+                                "\"" + suspectDisplay + "\" will be disabled in modules.json and the safe-mode flag will be cleared. " +
+                                "This session remains isolated; restart PCL to load the remaining addons. Continue?"),
+                            i18n.T("PCL2 Swap · 安全模式", "PCL2 Swap - Safe mode"),
+                            i18n.T("禁用并退出", "Disable and leave"), i18n.T("取消", "Cancel")) ?? 1;
+                        if (answer != 1) return;
+                        if (addons.DisableSuspectAndLeaveSafeMode())
+                        {
+                            api?.Ui.Hint(i18n.T(
+                                "疑因模块已禁用，安全模式旗标已清除；重启 PCL 后加载其余模块。",
+                                "The suspect module is disabled and safe mode is cleared. Restart PCL to load the remaining addons."),
+                                SwapHintType.Success);
+                            PageRegistry.InvalidatePage("swap-addons");
+                        }
+                    }, "Red"));
+            }
+
+            actions.Add(
                 SwapUi.Button(i18n.T("退出安全模式（重启后生效）", "Leave safe mode (restart to apply)"),
                     () =>
                     {
@@ -123,7 +192,8 @@ namespace PclDlSwap.Payload.Swap.Views
                                 "Safe mode cleared; restart PCL to load addons."));
                             PageRegistry.InvalidatePage("swap-addons");
                         }
-                    }),
+                    }));
+            actions.Add(
                 SwapUi.Button(i18n.T("复制恢复诊断", "Copy recovery diagnostics"),
                     () =>
                     {
@@ -132,9 +202,13 @@ namespace PclDlSwap.Payload.Swap.Views
                             ? i18n.T("恢复诊断已复制。", "Recovery diagnostics copied.")
                             : i18n.T("复制恢复诊断失败。", "Failed to copy recovery diagnostics."),
                             copied ? SwapHintType.Success : SwapHintType.Error);
-                    }),
+                    }));
+            actions.Add(
                 SwapUi.Button(i18n.T("打开恢复目录", "Open recovery directory"),
-                    () => OpenFolder(api?.Host?.RecoveryDirectory))));
+                    () => OpenFolder(api?.Host?.RecoveryDirectory)));
+            var actionWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var action in actions) actionWrap.Children.Add(action);
+            rows.Add(actionWrap);
 
             return SwapUi.Card(i18n.T("恢复模式", "Recovery mode"), rows.ToArray());
         }
@@ -155,6 +229,7 @@ namespace PclDlSwap.Payload.Swap.Views
 
         private static FrameworkElement Row(AddonManager.AddonRecord record, ISwapApi api, AddonManager addons)
         {
+            var i18n = SwapI18n.Current;
             var grid = new Grid { Margin = new Thickness(0, 9, 0, 9), MinHeight = 46 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
@@ -164,10 +239,13 @@ namespace PclDlSwap.Payload.Swap.Views
 
             var headline = new StackPanel { Orientation = Orientation.Horizontal };
             headline.Children.Add(SwapUi.Text(record.Name ?? record.Id, 13, false, false, FontWeights.SemiBold));
-            var meta = (record.Version ?? string.Empty) + (record.BuiltIn ? "  ·  内置" : string.Empty);
+            var meta = (record.Version ?? string.Empty) +
+                       (record.BuiltIn ? "  ·  " + i18n.T("内置", "Built-in") : string.Empty);
             var hookCount = ScopedHook.CountFor(record.Id);
             if (hookCount > 0)
-                meta += $"  ·  钩子 {hookCount}（命中 {ScopedHook.HitsFor(record.Id)}）";
+                meta += "  ·  " + i18n.T(
+                    $"钩子 {hookCount}（命中 {ScopedHook.HitsFor(record.Id)}）",
+                    $"hooks {hookCount} (hits {ScopedHook.HitsFor(record.Id)})");
             if (meta.Trim().Length > 0)
             {
                 var version = SwapUi.Text(meta, 11.5, true, false);
@@ -195,7 +273,7 @@ namespace PclDlSwap.Payload.Swap.Views
 
             if (record.Failure != null)
             {
-                var failure = SwapUi.Text("错误：" + record.Failure.Message, 11.5, false);
+                var failure = SwapUi.Text(i18n.T("错误：", "Error: ") + record.Failure.Message, 11.5, false);
                 failure.Foreground = Brushes.IndianRed;
                 failure.Margin = new Thickness(0, 3, 12, 0);
                 left.Children.Add(failure);
@@ -206,7 +284,9 @@ namespace PclDlSwap.Payload.Swap.Views
             {
                 // Isolation report: a failing handler is deactivated on its first throw, so this is a
                 // record of "your module broke N times", not a still-broken state.
-                var errors = SwapUi.Text($"钩子抛错 {hookErrors} 次（失败的钩子已自动停用，详见该模块日志）",
+                var errors = SwapUi.Text(i18n.T(
+                    $"钩子抛错 {hookErrors} 次（失败的钩子已自动停用，详见该模块日志）",
+                    $"hooks threw {hookErrors} times (failed hooks were disabled; see the module log)"),
                     11.5, false);
                 errors.Foreground = Brushes.IndianRed;
                 errors.Margin = new Thickness(0, 3, 12, 0);
@@ -234,12 +314,14 @@ namespace PclDlSwap.Payload.Swap.Views
                     VerticalAlignment = VerticalAlignment.Center
                 };
 
-                var toggle = SwapUi.Button(record.Enabled ? "禁用" : "启用", () =>
+                var toggle = SwapUi.Button(record.Enabled
+                    ? i18n.T("禁用", "Disable")
+                    : i18n.T("启用", "Enable"), () =>
                 {
                     if (!addons.SetEnabled(id, !record.Enabled)) return;
                     PageRegistry.InvalidatePage("swap-addons");
                 });
-                var detail = SwapUi.Button("详情", () =>
+                var detail = SwapUi.Button(i18n.T("详情", "Details"), () =>
                 {
                     addons.SelectedAddonId = id;
                     PageRegistry.InvalidatePage("swap-addons");
@@ -254,7 +336,8 @@ namespace PclDlSwap.Payload.Swap.Views
                 PclUi.SetMember(toggle, "Margin", new Thickness(0, 0, 8, 0));
                 actions.Children.Add(toggle);
 
-                var logButton = SwapUi.Button("日志", () => OpenModuleLog(api, addons, record));
+                var logButton = SwapUi.Button(i18n.T("日志", "Log"),
+                    () => OpenModuleLog(api, addons, record));
                 PclUi.SetMember(logButton, "Height", 35.0);
                 PclUi.SetMember(logButton, "MinWidth", 64.0);
                 PclUi.SetMember(logButton, "Margin", new Thickness(0, 0, 8, 0));
@@ -262,7 +345,8 @@ namespace PclDlSwap.Payload.Swap.Views
 
                 if (!record.BuiltIn)
                 {
-                    var uninstall = SwapUi.Button("卸载", () => UninstallModule(api, addons, record), "Red");
+                    var uninstall = SwapUi.Button(i18n.T("卸载", "Uninstall"),
+                        () => UninstallModule(api, addons, record), "Red");
                     PclUi.SetMember(uninstall, "Height", 35.0);
                     PclUi.SetMember(uninstall, "MinWidth", 76.0);
                     PclUi.SetMember(uninstall, "Margin", new Thickness(0));
@@ -284,35 +368,43 @@ namespace PclDlSwap.Payload.Swap.Views
         private static FrameworkElement Detail(ISwapApi api, AddonManager addons,
             AddonManager.AddonRecord record)
         {
+            var i18n = SwapI18n.Current;
             var manifest = record.Manifest;
             var content = new List<FrameworkElement>
             {
-                SwapUi.InfoRow("状态", StatusText(record)),
-                SwapUi.InfoRow("id / 版本", record.Id + "  " + record.Version),
-                SwapUi.InfoRow("安装时间", record.InstalledAtUtc.HasValue
+                SwapUi.InfoRow(i18n.T("状态", "Status"), StatusText(record)),
+                SwapUi.InfoRow(i18n.T("id / 版本", "id / version"), record.Id + "  " + record.Version),
+                SwapUi.InfoRow(i18n.T("安装时间", "Installed at"), record.InstalledAtUtc.HasValue
                     ? record.InstalledAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
-                    : "（内置模块）"),
-                SwapUi.InfoRow("来源包", string.IsNullOrEmpty(record.SourcePath) ? "（内置模块）" : record.SourcePath),
-                SwapUi.InfoRow("包 SHA-256", string.IsNullOrEmpty(record.Sha256) ? "（内置模块）" : record.Sha256),
-                SwapUi.InfoRow("签名状态", string.IsNullOrEmpty(record.Signature) ? "（未记录）" : record.Signature),
-                SwapUi.InfoRow("模块目录", string.IsNullOrEmpty(record.Directory) ? "（内置模块）" : record.Directory),
-                SwapUi.InfoRow("配置文件", addons.GetModuleConfigPath(record.Id))
+                    : i18n.T("（内置模块）", "(built-in)")),
+                SwapUi.InfoRow(i18n.T("来源包", "Source package"),
+                    string.IsNullOrEmpty(record.SourcePath) ? i18n.T("（内置模块）", "(built-in)") : record.SourcePath),
+                SwapUi.InfoRow(i18n.T("包 SHA-256", "Package SHA-256"),
+                    string.IsNullOrEmpty(record.Sha256) ? i18n.T("（内置模块）", "(built-in)") : record.Sha256),
+                SwapUi.InfoRow(i18n.T("签名状态", "Signature"),
+                    string.IsNullOrEmpty(record.Signature) ? i18n.T("（未记录）", "(not recorded)") : record.Signature),
+                SwapUi.InfoRow(i18n.T("模块目录", "Module directory"),
+                    string.IsNullOrEmpty(record.Directory) ? i18n.T("（内置模块）", "(built-in)") : record.Directory),
+                SwapUi.InfoRow(i18n.T("配置文件", "Configuration"), addons.GetModuleConfigPath(record.Id))
             };
 
             if (manifest != null)
             {
-                content.Add(SwapUi.InfoRow("API 范围", manifest.ApiVersion));
-                content.Add(SwapUi.InfoRow("入口", manifest.Entry));
-                if (!string.IsNullOrEmpty(manifest.Author)) content.Add(SwapUi.InfoRow("作者", manifest.Author));
-                content.Add(SwapUi.InfoRow("形状作用域", manifest.Shapes.Count == 0
-                    ? "（未声明 —— 全部形状）"
-                    : string.Join("、", manifest.Shapes)));
-                content.Add(SwapUi.InfoRow("宿主版本", manifest.HostVersions.Count == 0
-                    ? "（未声明 —— 任意版本）"
-                    : string.Join("、", manifest.HostVersions)));
-                content.Add(SwapUi.InfoRow("权限声明", manifest.Permissions.Count == 0
-                    ? "（未声明 —— 兼容模式，全部访问）"
-                    : string.Join("、", manifest.Permissions) + "（严格门控）"));
+                var separator = i18n.IsEnglish ? ", " : "、";
+                content.Add(SwapUi.InfoRow(i18n.T("API 范围", "API range"), manifest.ApiVersion));
+                content.Add(SwapUi.InfoRow(i18n.T("入口", "Entry point"), manifest.Entry));
+                if (!string.IsNullOrEmpty(manifest.Author))
+                    content.Add(SwapUi.InfoRow(i18n.T("作者", "Author"), manifest.Author));
+                content.Add(SwapUi.InfoRow(i18n.T("形状作用域", "Shape scope"), manifest.Shapes.Count == 0
+                    ? i18n.T("（未声明 —— 全部形状）", "(not declared - all shapes)")
+                    : string.Join(separator, manifest.Shapes)));
+                content.Add(SwapUi.InfoRow(i18n.T("宿主版本", "Host versions"), manifest.HostVersions.Count == 0
+                    ? i18n.T("（未声明 —— 任意版本）", "(not declared - any version)")
+                    : string.Join(separator, manifest.HostVersions)));
+                content.Add(SwapUi.InfoRow(i18n.T("权限声明", "Permissions"), manifest.Permissions.Count == 0
+                    ? i18n.T("（未声明 —— 兼容模式，全部访问）",
+                        "(not declared - compatibility mode, all access)")
+                    : string.Join(separator, manifest.Permissions) + i18n.T("（严格门控）", " (strictly gated)")));
             }
 
             var chains = ScopedHook.Snapshot()
@@ -321,41 +413,46 @@ namespace PclDlSwap.Payload.Swap.Views
             var hooks = ScopedHook.CountFor(record.Id);
             var hits = ScopedHook.HitsFor(record.Id);
             var errors = ScopedHook.ErrorsFor(record.Id);
-            content.Add(SwapUi.InfoRow("钩子", hooks == 0
-                ? "（无）"
-                : $"{hooks} 个（命中 {hits}，抛错 {errors}）"));
+            content.Add(SwapUi.InfoRow(i18n.T("钩子", "Hooks"), hooks == 0
+                ? i18n.T("（无）", "(none)")
+                : i18n.T($"{hooks} 个（命中 {hits}，抛错 {errors}）",
+                    $"{hooks} (hits {hits}, errors {errors})")));
             if (chains.Count > 0) content.Add(SwapUi.Note(string.Join("；", chains)));
 
             var tail = addons.LogTail(record.Id, 12);
-            content.Add(SwapUi.Note("模块日志尾部："));
-            content.Add(SwapUi.Text(string.IsNullOrEmpty(tail) ? "（这个模块还没有日志）" : tail, 11, true));
+            content.Add(SwapUi.Note(i18n.T("模块日志尾部：", "Module log tail:")));
+            content.Add(SwapUi.Text(string.IsNullOrEmpty(tail)
+                ? i18n.T("（这个模块还没有日志）", "(this module has not logged yet)")
+                : tail, 11, true));
 
             var actions = new List<FrameworkElement>
             {
-                ActionButton(record.Enabled ? "禁用" : "启用", () =>
+                ActionButton(record.Enabled ? i18n.T("禁用", "Disable") : i18n.T("启用", "Enable"), () =>
                 {
                     addons.SetEnabled(record.Id, !record.Enabled);
                     PageRegistry.InvalidatePage("swap-addons");
                 }),
-                ActionButton("重载", () =>
+                ActionButton(i18n.T("重载", "Reload"), () =>
                 {
                     addons.Reload(record.Id);
                     PageRegistry.InvalidatePage("swap-addons");
                 }),
-                ActionButton("打开日志", () => OpenModuleLog(api, addons, record)),
-                ActionButton("打开配置目录", () =>
+                ActionButton(i18n.T("打开日志", "Open log"), () => OpenModuleLog(api, addons, record)),
+                ActionButton(i18n.T("打开配置目录", "Open config directory"), () =>
                     OpenFolder(System.IO.Path.GetDirectoryName(addons.GetModuleConfigPath(record.Id)))),
-                ActionButton("收起", () =>
+                ActionButton(i18n.T("收起", "Collapse"), () =>
                 {
                     addons.SelectedAddonId = null;
                     PageRegistry.InvalidatePage("swap-addons");
                 })
             };
             if (!record.BuiltIn)
-                actions.Add(ActionButton("卸载", () => UninstallModule(api, addons, record), "Red"));
+                actions.Add(ActionButton(i18n.T("卸载", "Uninstall"),
+                    () => UninstallModule(api, addons, record), "Red"));
             content.Add(SwapUi.Buttons(actions.ToArray()));
 
-            return SwapUi.Card("模块详情：" + (record.Name ?? record.Id), content.ToArray());
+            return SwapUi.Card(i18n.T("模块详情：", "Module details: ") + (record.Name ?? record.Id),
+                content.ToArray());
         }
 
         /// <summary>
@@ -389,6 +486,7 @@ namespace PclDlSwap.Payload.Swap.Views
         private static void InstallFromDialog(ISwapApi api, AddonManager addons)
         {
             if (addons == null) return;
+            var i18n = SwapI18n.Current;
             try
             {
                 var path = PickPackage();
@@ -404,8 +502,11 @@ namespace PclDlSwap.Payload.Swap.Views
                 if (api != null)
                 {
                     answer = api.Ui.MsgBox(preview,
-                        existing == null ? "PCL2 Swap · 安装模块" : "PCL2 Swap · 更新模块",
-                        existing == null ? "安装" : "更新", "取消");
+                        existing == null
+                            ? i18n.T("PCL2 Swap · 安装模块", "PCL2 Swap - Install module")
+                            : i18n.T("PCL2 Swap · 更新模块", "PCL2 Swap - Update module"),
+                        existing == null ? i18n.T("安装", "Install") : i18n.T("更新", "Update"),
+                        i18n.T("取消", "Cancel"));
                 }
                 if (answer != 1)
                 {
@@ -418,32 +519,48 @@ namespace PclDlSwap.Payload.Swap.Views
                 PageRegistry.InvalidatePage("swap-addons");
                 SwapLog.Info($"模块已安装：{record.Id} {record.Version}（状态 {record.Status}）");
                 api?.Ui.Hint(record.Status == "enabled"
-                    ? $"已安装并启用：{record.Name} {record.Version}"
-                    : $"已安装：{record.Name} {record.Version}（{StatusText(record)}）");
+                    ? i18n.T($"已安装并启用：{record.Name} {record.Version}",
+                        $"Installed and enabled: {record.Name} {record.Version}")
+                    : i18n.T($"已安装：{record.Name} {record.Version}（{StatusText(record)}）",
+                        $"Installed: {record.Name} {record.Version} ({StatusText(record)})"),
+                    SwapHintType.Success);
             }
             catch (Exception ex)
             {
                 SwapLog.Error("安装模块失败：" + ex.Message);
-                api?.Ui.MsgBox("安装失败：" + Environment.NewLine + ex.Message + Environment.NewLine +
-                               Environment.NewLine +
-                               "模块包需要包含 manifest.json（id / version / entry / apiVersion）。",
-                    "PCL2 Swap · 安装模块", "确定");
+                api?.Ui.MsgBox(i18n.T("安装失败：", "Install failed: ") + Environment.NewLine +
+                               ex.Message + Environment.NewLine + Environment.NewLine +
+                               i18n.T(
+                                   "模块包需要包含 manifest.json（id / version / entry / apiVersion）。",
+                                   "An addon package must contain manifest.json (id / version / entry / apiVersion)."),
+                    i18n.T("PCL2 Swap · 安装模块", "PCL2 Swap - Install module"),
+                    i18n.T("确定", "OK"));
             }
         }
 
         private static void UninstallModule(ISwapApi api, AddonManager addons, AddonManager.AddonRecord record)
         {
             if (addons == null || record == null) return;
+            var i18n = SwapI18n.Current;
             try
             {
                 var answer = 1;
                 if (api != null)
                 {
                     answer = api.Ui.MsgBox(
-                        $"确定要卸载“{record.Name} {record.Version}”吗？" + Environment.NewLine + Environment.NewLine +
-                        "模块立即停止（钩子放行原方法）、设置页从侧栏移除，模块目录与包文件被删除。" + Environment.NewLine +
-                        "被 PCL 占用的 DLL 会留到下次启动时清理。",
-                        "PCL2 Swap · 卸载模块", "卸载", "取消");
+                        i18n.T(
+                            $"确定要卸载“{record.Name} {record.Version}”吗？",
+                            $"Uninstall \"{record.Name} {record.Version}\"?") +
+                        Environment.NewLine + Environment.NewLine +
+                        i18n.T(
+                            "模块立即停止（钩子放行原方法）、设置页从侧栏移除，模块目录与包文件被删除。",
+                            "The module stops immediately, its hook gates pass through to the original methods, " +
+                            "its pages leave the sidebar, and its directory and package are deleted.") +
+                        Environment.NewLine +
+                        i18n.T("被 PCL 占用的 DLL 会留到下次启动时清理。",
+                            "A DLL locked by PCL is removed on the next start."),
+                        i18n.T("PCL2 Swap · 卸载模块", "PCL2 Swap - Uninstall module"),
+                        i18n.T("卸载", "Uninstall"), i18n.T("取消", "Cancel"));
                 }
                 if (answer != 1)
                 {
@@ -453,27 +570,37 @@ namespace PclDlSwap.Payload.Swap.Views
 
                 if (!addons.Uninstall(record.Id))
                 {
-                    api?.Ui.MsgBox("卸载失败：内置模块不能卸载，请在列表里禁用。", "PCL2 Swap · 卸载模块", "确定");
+                    api?.Ui.MsgBox(
+                        i18n.T("卸载失败：内置模块不能卸载，请在列表里禁用。",
+                            "Uninstall failed: built-in modules cannot be removed. Disable it in the list instead."),
+                        i18n.T("PCL2 Swap · 卸载模块", "PCL2 Swap - Uninstall module"),
+                        i18n.T("确定", "OK"));
                     return;
                 }
 
                 PageRegistry.RefreshSidebar();
                 PageRegistry.InvalidatePage("swap-addons");
-                api?.Ui.Hint($"已卸载：{record.Name} {record.Version}");
+                api?.Ui.Hint(i18n.T($"已卸载：{record.Name} {record.Version}",
+                    $"Uninstalled: {record.Name} {record.Version}"), SwapHintType.Success);
             }
             catch (Exception ex)
             {
                 SwapLog.Error("卸载模块失败：" + ex.Message);
-                api?.Ui.MsgBox("卸载失败：" + Environment.NewLine + ex.Message, "PCL2 Swap · 卸载模块", "确定");
+                api?.Ui.MsgBox(i18n.T("卸载失败：", "Uninstall failed: ") + Environment.NewLine + ex.Message,
+                    i18n.T("PCL2 Swap · 卸载模块", "PCL2 Swap - Uninstall module"),
+                    i18n.T("确定", "OK"));
             }
         }
 
         private static string PickPackage()
         {
+            var i18n = SwapI18n.Current;
             var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                Title = "选择 Swap 模块包",
-                Filter = "Swap 模块包 (*.swapaddon)|*.swapaddon|ZIP 压缩包 (*.zip)|*.zip|所有文件 (*.*)|*.*",
+                Title = i18n.T("选择 Swap 模块包", "Select a Swap addon package"),
+                Filter = i18n.T(
+                    "Swap 模块包 (*.swapaddon)|*.swapaddon|ZIP 压缩包 (*.zip)|*.zip|所有文件 (*.*)|*.*",
+                    "Swap addon packages (*.swapaddon)|*.swapaddon|ZIP archives (*.zip)|*.zip|All files (*.*)|*.*"),
                 CheckFileExists = true,
                 Multiselect = false
             };
@@ -483,6 +610,7 @@ namespace PclDlSwap.Payload.Swap.Views
         /// <summary>Opens a module's own log; shows the folder while the module has not logged yet.</summary>
         private static void OpenModuleLog(ISwapApi api, AddonManager addons, AddonManager.AddonRecord record)
         {
+            var i18n = SwapI18n.Current;
             try
             {
                 var path = addons?.GetModuleLogPath(record.Id);
@@ -498,7 +626,8 @@ namespace PclDlSwap.Payload.Swap.Views
                 if (string.IsNullOrEmpty(folder)) return;
                 System.IO.Directory.CreateDirectory(folder);
                 OpenFolder(folder);
-                api?.Ui.Hint("这个模块还没有日志；已经打开日志目录。");
+                api?.Ui.Hint(i18n.T("这个模块还没有日志；已经打开日志目录。",
+                    "This module has not logged yet; its log directory was opened."));
             }
             catch (Exception ex)
             {
@@ -511,20 +640,25 @@ namespace PclDlSwap.Payload.Swap.Views
         {
             var manifest = record.Manifest;
             if (manifest == null) return string.Empty;
+            var i18n = SwapI18n.Current;
+            var separator = i18n.IsEnglish ? ", " : "、";
 
             var parts = new List<string>();
-            if (!string.IsNullOrEmpty(manifest.Author)) parts.Add("作者 " + manifest.Author);
+            if (!string.IsNullOrEmpty(manifest.Author))
+                parts.Add(i18n.T("作者 ", "by ") + manifest.Author);
             if (!string.IsNullOrEmpty(manifest.ApiVersion)) parts.Add("API " + manifest.ApiVersion);
             if (manifest.Shapes != null && manifest.Shapes.Count > 0)
-                parts.Add("形状 " + string.Join("/", manifest.Shapes));
+                parts.Add(i18n.T("形状 ", "shapes ") + string.Join("/", manifest.Shapes));
             if (manifest.HostVersions != null && manifest.HostVersions.Count > 0)
-                parts.Add("宿主 " + string.Join("、", manifest.HostVersions));
+                parts.Add(i18n.T("宿主 ", "host ") + string.Join(separator, manifest.HostVersions));
             if (manifest.Permissions != null && manifest.Permissions.Count > 0)
             {
                 var shown = manifest.Permissions.Take(3).ToList();
-                var text = "权限 " + string.Join("、", shown);
-                if (manifest.Permissions.Count > shown.Count) text += " 等 " + manifest.Permissions.Count + " 项";
-                text += "（严格）";
+                var text = i18n.T("权限 ", "permissions ") + string.Join(separator, shown);
+                if (manifest.Permissions.Count > shown.Count)
+                    text += i18n.T(" 等 " + manifest.Permissions.Count + " 项",
+                        " and " + manifest.Permissions.Count + " total");
+                text += i18n.T("（严格）", " (strict)");
                 parts.Add(text);
             }
             return parts.Count == 0 ? string.Empty : string.Join(" · ", parts);
@@ -532,19 +666,62 @@ namespace PclDlSwap.Payload.Swap.Views
 
         private static string StatusText(AddonManager.AddonRecord record)
         {
+            var i18n = SwapI18n.Current;
             switch (record.Status)
             {
-                case "enabled": return "已启用";
-                case "disabled": return "已禁用";
-                case "failed": return "启动失败";
-                case "unpacked": return "已解包（待启用）";
-                case "skipped-shape": return "作用域不适用";
-                case "skipped-host": return "宿主版本不适用";
-                case "skipped-safe-mode": return SwapI18n.Current.T("安全跳过", "Safe skip");
-                case "removed": return "已卸载";
-                case "registered": return "已登记";
+                case "enabled": return i18n.T("已启用", "Enabled");
+                case "disabled": return i18n.T("已禁用", "Disabled");
+                case "failed": return i18n.T("启动失败", "Startup failed");
+                case "unpacked": return i18n.T("已解包（待启用）", "Unpacked (waiting to enable)");
+                case "skipped-shape": return i18n.T("作用域不适用", "Shape not applicable");
+                case "skipped-host": return i18n.T("宿主版本不适用", "Host version not applicable");
+                case "skipped-safe-mode": return i18n.T("安全跳过", "Safe skip");
+                case "removed": return i18n.T("已卸载", "Uninstalled");
+                case "registered": return i18n.T("已登记", "Registered");
                 default: return record.Status ?? string.Empty;
             }
+        }
+
+        private static string PhaseText(string phase)
+        {
+            var i18n = SwapI18n.Current;
+            switch ((phase ?? string.Empty).Trim())
+            {
+                case "starting": return i18n.T("正在启动", "Starting");
+                case "create": return i18n.T("创建模块实例", "Creating module instance");
+                case "onLoad": return i18n.T("OnLoad", "OnLoad");
+                case "onEnable": return i18n.T("OnEnable", "OnEnable");
+                case "enabled": return i18n.T("生命周期已完成", "Lifecycle completed");
+                case "stable": return i18n.T("启动已稳定", "Startup stable");
+                case "safe-mode": return i18n.T("安全模式", "Safe mode");
+                case "safe-mode-cleared": return i18n.T("安全模式已清除", "Safe mode cleared");
+                case "": return i18n.T("（无）", "(none)");
+                default: return phase;
+            }
+        }
+
+        private static string ReasonText(StartupRecovery recovery, SwapI18n i18n)
+        {
+            var code = recovery?.SafeModeReasonCode ?? string.Empty;
+            if (code == "forced-env" ||
+                (recovery?.SafeModeReason ?? string.Empty)
+                .StartsWith("PCL2SWAP_SAFE_MODE=1", StringComparison.OrdinalIgnoreCase))
+                return i18n.T("由 PCL2SWAP_SAFE_MODE=1 强制启用",
+                    "Forced by PCL2SWAP_SAFE_MODE=1");
+            if (code == "previous-safe-mode" ||
+                (recovery?.SafeModeReason ?? string.Empty).Contains("安全模式已在之前会话启用"))
+                return i18n.T("安全模式已在之前会话启用",
+                    "Safe mode was already enabled by a previous session");
+            if (code == "unstable-start" ||
+                (recovery?.SafeModeReason ?? string.Empty).Contains("未进入稳定窗口"))
+            {
+                var count = Math.Max(2, recovery?.SafeModeUncleanStarts ?? 0);
+                return i18n.T($"连续 {count} 次启动未进入稳定窗口",
+                    $"{count} consecutive launches did not reach the stable window");
+            }
+
+            var original = recovery?.SafeModeReason ?? string.Empty;
+            return string.IsNullOrEmpty(original) ? "(unknown)" : original;
         }
 
         // ------------------------------------------------------------------ chrome

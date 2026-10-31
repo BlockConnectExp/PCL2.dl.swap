@@ -761,13 +761,32 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("startup " + attempt + " recorded",
                     recovery != null &&
                     Convert.ToInt32(recovery.GetType().GetProperty("Attempt")?.GetValue(recovery)) == attempt);
+                if (attempt < 3)
+                {
+                    recovery?.GetType().GetMethod("MarkModuleCompleted")
+                        ?.Invoke(recovery, new object[] { "swap.cancel-button" });
+                    recovery?.GetType().GetMethod("MarkModuleStarting")
+                        ?.Invoke(recovery, new object[] { "demo.sample", "onEnable" });
+                }
             }
 
             var safeMode = recovery?.GetType().GetProperty("SafeMode")?.GetValue(recovery);
             Expect("two unclean starts trigger safe mode", Convert.ToBoolean(safeMode ?? false));
+            Expect("safe mode exposes a machine-readable trigger code",
+                Convert.ToString(recovery?.GetType().GetProperty("SafeModeReasonCode")
+                    ?.GetValue(recovery)) == "unstable-start");
             Expect("safe mode preserves the triggering unclean count",
                 Convert.ToInt32(recovery?.GetType().GetProperty("SafeModeUncleanStarts")
                     ?.GetValue(recovery) ?? 0) >= 2);
+            Expect("safe mode carries the module that was starting before the unclean exit",
+                Convert.ToString(recovery?.GetType().GetProperty("SuspectModule")?.GetValue(recovery)) ==
+                "demo.sample");
+            Expect("safe mode carries the suspect phase reached before the unclean exit",
+                Convert.ToString(recovery?.GetType().GetProperty("SuspectPhase")?.GetValue(recovery)) ==
+                "onEnable");
+            Expect("safe mode carries the last successfully enabled module",
+                Convert.ToString(recovery?.GetType().GetProperty("LastCompletedModule")?.GetValue(recovery)) ==
+                "swap.cancel-button");
             Expect("recovery journal exists",
                 File.Exists(Convert.ToString(recovery?.GetType().GetProperty("JournalPath")
                     ?.GetValue(recovery))));
@@ -808,12 +827,40 @@ namespace PclDlSwap.ExLoaderHarness
 
             var activeRecovery = manager?.GetType().GetProperty("Recovery",
                 BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(manager);
-            var clear = activeRecovery?.GetType().GetMethod("ClearSafeMode");
-            Expect("safe-mode flag can be cleared for the next launch",
-                Convert.ToBoolean(clear?.Invoke(activeRecovery, null) ?? false));
+            Expect("safe mode preserves the original machine-readable reason",
+                Convert.ToString(activeRecovery?.GetType().GetProperty("SafeModeReasonCode")
+                    ?.GetValue(activeRecovery)) == "unstable-start");
+            Expect("the active recovery journal retains the suspect module",
+                Convert.ToString(activeRecovery?.GetType().GetProperty("SuspectModule")
+                    ?.GetValue(activeRecovery)) == "demo.sample");
+
+            var disableSuspect = manager?.GetType().GetMethod("DisableSuspectAndLeaveSafeMode");
+            Expect("safe mode exposes one-step suspect disable and safe-mode exit",
+                Convert.ToBoolean(disableSuspect?.Invoke(manager, null) ?? false));
             Expect("clear is pending restart, not a live module load",
                 Convert.ToBoolean(activeRecovery.GetType().GetProperty("SafeModeExitPending")
                     ?.GetValue(activeRecovery) ?? false));
+            Expect("the current process remains isolated after clearing the persistent flag",
+                Convert.ToBoolean(activeRecovery.GetType().GetProperty("SafeMode")
+                    ?.GetValue(activeRecovery) ?? false) &&
+                !Convert.ToBoolean(isEnabled?.Invoke(manager,
+                    new object[] { "swap.download-mc" }) ?? true));
+            Expect("recovery keeps the triggering unclean count visible after clearing",
+                Convert.ToInt32(activeRecovery.GetType().GetProperty("SafeModeUncleanStarts")
+                    ?.GetValue(activeRecovery) ?? 0) >= 2);
+            var demoAfterDisable = records.FirstOrDefault(record =>
+                Convert.ToString(record.GetType().GetProperty("Id").GetValue(record)) == "demo.sample");
+            Expect("the suspect module is persisted as disabled",
+                demoAfterDisable != null &&
+                Convert.ToBoolean(demoAfterDisable.GetType().GetProperty("Enabled").GetValue(demoAfterDisable)) == false &&
+                Convert.ToString(demoAfterDisable.GetType().GetProperty("Status").GetValue(demoAfterDisable)) ==
+                "disabled");
+            var modulesJson = File.Exists(PCL2Swap.Api.SwapPaths.ModulesFile)
+                ? File.ReadAllText(PCL2Swap.Api.SwapPaths.ModulesFile)
+                : string.Empty;
+            Expect("modules.json records the disabled suspect",
+                modulesJson.IndexOf("\"demo.sample\":{\"enabled\":false}",
+                    StringComparison.OrdinalIgnoreCase) >= 0);
 
             var next = begin?.Invoke(null, new object[]
             {
@@ -821,6 +868,9 @@ namespace PclDlSwap.ExLoaderHarness
             });
             Expect("the next launch no longer enters safe mode",
                 !Convert.ToBoolean(next?.GetType().GetProperty("SafeMode")?.GetValue(next) ?? true));
+            Expect("the next launch has no stale suspect",
+                string.IsNullOrEmpty(Convert.ToString(next?.GetType().GetProperty("SuspectModule")
+                    ?.GetValue(next))));
 
             Console.WriteLine(failures == 0 ? "[safe] RESULT: PASS" : "[safe] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
@@ -887,8 +937,21 @@ namespace PclDlSwap.ExLoaderHarness
             var hostInfo = api?.GetType().GetProperty("Host")?.GetValue(api);
             var pclVersion = Convert.ToString(hostInfo?.GetType().GetProperty("PclVersion")?.GetValue(hostInfo));
             Expect("Host.PclVersion reports the bound PCL build", !string.IsNullOrEmpty(pclVersion));
-            Expect("Host.ApiVersion reports the additive 1.4 contract",
-                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.4.0");
+            Expect("Host.ApiVersion reports the additive 1.5 contract",
+                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.5.0");
+
+            var recovery = api?.GetType().GetProperty("Recovery")?.GetValue(api);
+            var recoveryDiagnostics = Convert.ToString(recovery?.GetType().GetMethod("Diagnostics")
+                ?.Invoke(recovery, null));
+            Expect("Recovery backend exposes the journal path",
+                !string.IsNullOrWhiteSpace(Convert.ToString(recovery?.GetType().GetProperty("JournalPath")
+                    ?.GetValue(recovery))));
+            Expect("Recovery backend exposes lifecycle diagnostics",
+                recoveryDiagnostics != null &&
+                recoveryDiagnostics.Contains("lifecycle phase:") &&
+                recoveryDiagnostics.Contains("suspect module:") &&
+                recoveryDiagnostics.Contains("suspect phase:") &&
+                recoveryDiagnostics.Contains("safe mode reason code:"));
 
             var secret = pcl?.GetType().GetProperty("Secret")?.GetValue(pcl);
             Expect("Secret family exposed", secret != null);
@@ -1422,7 +1485,7 @@ namespace PclDlSwap.ExLoaderHarness
 
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
-                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.4.0");
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.5.0");
 
                 // ---- module state: persisted, and it gates the built-in features ----
                 var isEnabled = manager?.GetType().GetMethod("IsEnabled");
@@ -1619,8 +1682,12 @@ namespace PclDlSwap.ExLoaderHarness
                         {
                             "选择", new[] { "A", "B" }, 0, (Action<int>)(_ => { })
                         }) as System.Windows.FrameworkElement;
+                        var banner = ui?.GetType().GetMethod("Banner")?.Invoke(ui, new object[]
+                        {
+                            "harness state", "semantic banner", PCL2Swap.Api.SwapHintType.Warning
+                        }) as System.Windows.FrameworkElement;
                         uiBuildOk = card != null && uiButton != null && infoRow != null &&
-                                    checkBox != null && combo != null;
+                                    checkBox != null && combo != null && banner != null;
                     }
                     catch (Exception ex)
                     {
@@ -2222,6 +2289,10 @@ namespace PclDlSwap.ExLoaderHarness
                         "progress", 0.25, false
                     });
                     var progressElement = progress?.GetType().GetProperty("Element")?.GetValue(progress);
+                    var banner = swapUi.GetMethod("Banner", flags)?.Invoke(null, new object[]
+                    {
+                        "state", "semantic banner", PCL2Swap.Api.SwapHintType.Success
+                    });
 
                     var i18nType = payload.GetType("PclDlSwap.Payload.Swap.SwapI18n",
                         throwOnError: true);
@@ -2260,10 +2331,11 @@ namespace PclDlSwap.ExLoaderHarness
                     }
                     frontendDetail = "radio=" + (radio != null) + ", number=" + (number != null) +
                                      ", password=" + (password != null) + ", multiline=" + (multiline != null) +
-                                     ", progress=" + (progressElement != null) + ", translated=" + translated +
+                                     ", progress=" + (progressElement != null) + ", banner=" + (banner != null) +
+                                     ", translated=" + translated +
                                      "; " + frontendDetail;
                     frontendOk = radio != null && number != null && password != null &&
-                                 multiline != null && progressElement != null && translated;
+                                 multiline != null && progressElement != null && banner != null && translated;
                 }
                 catch (Exception ex)
                 {
@@ -2276,7 +2348,7 @@ namespace PclDlSwap.ExLoaderHarness
                 }
             }));
             frontendDone.Wait(TimeSpan.FromSeconds(10));
-            Console.WriteLine("[uitest] API 1.3 frontends=" + (frontendOk ? "PASS" : "FAIL"));
+            Console.WriteLine("[uitest] API 1.5 frontends=" + (frontendOk ? "PASS" : "FAIL"));
             if (!frontendOk)
             {
                 Console.WriteLine("[uitest] frontend detail: " + frontendDetail);

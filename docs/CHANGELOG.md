@@ -6,6 +6,32 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-09:30:08 v26.2-Alpha 8: 疑因模块定位与 SDK 1.5
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\StartupRecovery.cs     模块生命周期 journal / 疑因模块
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs        生命周期落盘 / 禁用疑因并退出安全模式 / 双语安装预览
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs 疑因模块恢复卡与 Addon 页完整双语
+.\src\PclDlSwap.Payload\Swap\Views\SwapSettingsView.cs 语言切换重建 Swap Addon 页缓存
+.\src\PclDlSwap.Payload\Swap\Views\SwapUi.cs        Banner 状态横幅
+.\src\PCL2Swap.Api\ISwapApi.cs                      IRecoveryAccess + IUi.Banner（API 1.5）
+.\src\PclDlSwap.Payload\Swap\HostApi.cs             Recovery 后端 / Banner 实现 / API 1.5.0
+.\src\PclDlSwap.ExLoaderHarness\Program.cs         疑因模块隔离与恢复回归
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|生命周期定位|每个 Addon 执行 `create`、`OnLoad`、`OnEnable` 前先把模块 id 与阶段原子写入 journal；下一次未稳定启动因此能给出最后启动模块、最后完成模块和疑因模块|2026.10.31-09:30:08|PCL2.dl.swap
+2|安全恢复|恢复卡新增疑因模块/阶段、最后成功模块和“禁用疑因模块并退出安全模式”；该动作将疑因模块持久化禁用后清旗标，当前进程仍隔离，重启加载其余模块。修复 `ClearSafeMode` 后当前会话错误解除隔离的 Alpha7 缺陷|2026.10.31-09:30:08|PCL2.dl.swap
+3|英文支持|Swap Addon 管理页、详情页、安装/更新/卸载确认、状态、作用域、日志与恢复卡完成中英双语；结构化 reason code 让触发原因也本地化，语言切换同时失效 Swap Addon/Settings 两页缓存|2026.10.31-09:30:08|PCL2.dl.swap
+4|API 1.5|新增只读 `IRecoveryAccess`（journal、原因码、阶段、疑因模块、诊断）和 `IUi.Banner` 语义状态横幅；API 1.0-1.4 保持源码兼容|2026.10.31-09:30:08|PCL2.dl.swap
+5|验证|`--safemodetest` 覆盖生命周期/原因码落盘、疑因识别、一键禁用、modules.json 持久化、当前进程隔离和下一次普通启动；八套 harness PASS；2.99.0.1 英文恢复页真机 `ok=66 fail=0`|2026.10.31-09:30:08|PCL2.dl.swap
+
+---
 ## 2026.10.31-08:44:15 v26.2-Alpha 7: 启动恢复与安全模式
 
 GitCommitHash: (unreleased)

@@ -12,7 +12,7 @@
 | 2.14.0.0 | 411 | `e6e9028d-…` | `5582952ded3b4435` | `v2140-rel411` | 历史基线 | — | 早期提取基线 |
 | 2.14.0.0 快照 | 412 | `2a08e6c9-…` | `77fbc26a13abf725` | `v2140-snap412` | 历史基线 | — | — |
 | 2.99.0.0 | 413 | `926d447e-daff-4169-8c64-adc3d37d5f78` | `6b6e1260cb5a1d6a` | `v299-rel413` | `ok=30 fail=0` | 通过 | 主支持线 |
-| **2.99.0.1** | **415** | `5613aa62-1c0b-400f-9223-ece05dc28bef` | `0db34e19d9eeb6d4` | `v2990_1-rel415` | `ok=66 fail=0` | 通过 | Alpha7 正常/安全模式复验 |
+| **2.99.0.1** | **415** | `5613aa62-1c0b-400f-9223-ece05dc28bef` | `0db34e19d9eeb6d4` | `v2990_1-rel415` | `ok=66 fail=0` | 通过 | Alpha8 英文恢复页/疑因模块复验 |
 
 「注入自检」= 注入后 `PCL2SWAP_SELFTEST=1` 在宿主 UI 线程运行的只读自检，结果落在
 `%TEMP%\PCL2Swap\<版本>\pcl2swap.log`。
@@ -25,7 +25,7 @@
 | 下载页可用（非「关闭下载」桩） | ✅ | ✅ | 最新版本卡片/正式版/预览版等分区正常 |
 | 静默更新拦截 | ✅ | ✅ | `ModSecret.UpdateStart` detour 安装成功 |
 | 云下载沙箱查毒 | ✅ | ✅ | `NetDownloadByLoader` 两个重载 detour 安装成功 |
-| 关于页 Swap 品牌卡 | ✅ | ✅ | 「PCL2 Swap By BlockConnect · v26.1-Alpha 3」卡片显示在关于与鸣谢顶部 |
+| 关于页 Swap 品牌卡 | ✅ | ✅ | 「PCL2 Swap By BlockConnect · v26.2-Alpha 8」卡片显示在关于与鸣谢顶部 |
 | 反馈分流（PCL2 / Swap / 取消） | ✅ | ✅ | 三个按钮完整显示，选择后才跳转对应渠道 |
 | 设置子页 Swap Addon / Swap Settings | ✅ | ✅ | 子页可打开，无「未知的设置子页面种类：101」崩溃 |
 | 内置 Addon（Download MC / OTA Protector / Cancel Button） | ✅ | ✅ | 三张卡片均为「已启用」 |

@@ -24,18 +24,26 @@ namespace PclDlSwap.Payload.Swap
         private const int MaxStableDelayMs = 120000;
 
         private readonly object _gate = new object();
+        private readonly bool _enteredSafeMode;
         private Journal _journal;
 
-        private StartupRecovery(Journal journal, string journalPath)
+        private StartupRecovery(Journal journal, string journalPath, bool enteredSafeMode)
         {
             _journal = journal;
             JournalPath = journalPath;
+            _enteredSafeMode = enteredSafeMode;
         }
 
         public string JournalPath { get; }
-        public bool SafeMode => _journal?.SafeMode == true;
+        public bool SafeMode => _enteredSafeMode;
         public bool SafeModeExitPending { get; private set; }
         public string SafeModeReason => _journal?.SafeModeReason ?? string.Empty;
+        public string SafeModeReasonCode => _journal?.SafeModeReasonCode ?? string.Empty;
+        public string SuspectModule => _journal?.SuspectModule ?? string.Empty;
+        public string SuspectPhase => _journal?.SuspectPhase ?? string.Empty;
+        public string LifecyclePhase => _journal?.LifecyclePhase ?? string.Empty;
+        public string LastStartedModule => _journal?.LastStartedModule ?? string.Empty;
+        public string LastCompletedModule => _journal?.LastCompletedModule ?? string.Empty;
         public int UncleanStarts => _journal?.UncleanStarts ?? 0;
         public int SafeModeUncleanStarts => _journal?.SafeModeUncleanStarts ?? 0;
         public int Attempt => UncleanStarts + 1;
@@ -69,6 +77,27 @@ namespace PclDlSwap.Payload.Swap
                         : previous?.SafeMode == true
                             ? "安全模式已在之前会话启用"
                             : $"连续 {unclean} 次启动未进入稳定窗口";
+            var reasonCode = !safeMode
+                ? null
+                : forced
+                    ? "forced-env"
+                    : previous?.SafeMode == true
+                        ? FirstNonEmpty(previous.SafeModeReasonCode, "previous-safe-mode")
+                        : "unstable-start";
+            var suspect = previous == null
+                ? null
+                : previous.SafeMode
+                    ? FirstNonEmpty(previous.SuspectModule, previous.LastStartedModule)
+                    : !previous.Stable
+                        ? previous.LastStartedModule
+                        : null;
+            var suspectPhase = previous == null
+                ? null
+                : previous.SafeMode
+                    ? FirstNonEmpty(previous.SuspectPhase, previous.LifecyclePhase)
+                    : !previous.Stable
+                        ? previous.LifecyclePhase
+                        : null;
 
             var journal = new Journal
             {
@@ -86,12 +115,50 @@ namespace PclDlSwap.Payload.Swap
                 UncleanStarts = unclean,
                 SafeModeUncleanStarts = safeMode ? Math.Max(previousSafeCount, displayedUnclean) : 0,
                 SafeMode = safeMode,
-                SafeModeReason = reason
+                SafeModeReason = reason,
+                SafeModeReasonCode = reasonCode,
+                SuspectModule = suspect,
+                SuspectPhase = safeMode ? suspectPhase : null,
+                LastStartedModule = safeMode ? FirstNonEmpty(suspect, previous?.LastStartedModule) : null,
+                LastCompletedModule = safeMode ? previous?.LastCompletedModule : null,
+                LifecyclePhase = safeMode ? "safe-mode" : "starting"
             };
             Write(path, journal);
             SwapLog.Info($"[recovery] journal 已写入：attempt={unclean + 1}, " +
-                         $"safeMode={safeMode}, modules={journal.Modules.Count}, path={path}");
-            return new StartupRecovery(journal, path);
+                         $"safeMode={safeMode}, suspect={suspect ?? "(none)"}, " +
+                         $"modules={journal.Modules.Count}, path={path}");
+            return new StartupRecovery(journal, path, safeMode);
+        }
+
+        /// <summary>
+        /// Persists the module and lifecycle phase immediately before calling module code. A hard
+        /// crash then leaves enough evidence for the next safe-mode session to name a suspect.
+        /// </summary>
+        public void MarkModuleStarting(string moduleId, string phase)
+        {
+            if (string.IsNullOrWhiteSpace(moduleId)) return;
+            lock (_gate)
+            {
+                if (_journal == null) return;
+                _journal.LastStartedModule = moduleId.Trim();
+                _journal.LifecyclePhase = string.IsNullOrWhiteSpace(phase) ? "module" : phase.Trim();
+                _journal.LastActivityAtUtc = DateTime.UtcNow.ToString("o");
+                Write(JournalPath, _journal);
+            }
+        }
+
+        /// <summary>Records a module whose OnLoad/OnEnable returned successfully.</summary>
+        public void MarkModuleCompleted(string moduleId)
+        {
+            if (string.IsNullOrWhiteSpace(moduleId)) return;
+            lock (_gate)
+            {
+                if (_journal == null) return;
+                _journal.LastCompletedModule = moduleId.Trim();
+                _journal.LifecyclePhase = "enabled";
+                _journal.LastActivityAtUtc = DateTime.UtcNow.ToString("o");
+                Write(JournalPath, _journal);
+            }
         }
 
         /// <summary>Queues the stable heartbeat without blocking host startup.</summary>
@@ -120,6 +187,9 @@ namespace PclDlSwap.Payload.Swap
                 _journal.Stable = true;
                 _journal.UncleanStarts = 0;
                 _journal.StableAtUtc = DateTime.UtcNow.ToString("o");
+                _journal.LifecyclePhase = SafeMode
+                    ? (_journal.SafeMode ? "safe-mode" : "safe-mode-cleared")
+                    : "stable";
                 Write(JournalPath, _journal);
                 SwapLog.Info("[recovery] 本会话已进入稳定窗口。");
                 return true;
@@ -136,15 +206,28 @@ namespace PclDlSwap.Payload.Swap
             {
                 if (_journal == null) return false;
                 _journal.SafeMode = false;
-                _journal.SafeModeReason = null;
+                _journal.SuspectModule = null;
+                _journal.SuspectPhase = null;
                 _journal.UncleanStarts = 0;
-                _journal.SafeModeUncleanStarts = 0;
                 _journal.Stable = true;
+                _journal.LifecyclePhase = "safe-mode-cleared";
                 _journal.ClearedAtUtc = DateTime.UtcNow.ToString("o");
                 Write(JournalPath, _journal);
                 SafeModeExitPending = true;
                 SwapLog.Info("[recovery] 安全模式旗标已清除；重启 PCL 后加载模块。");
                 return true;
+            }
+        }
+
+        /// <summary>Clears the current suspicion after the manager has disabled that module.</summary>
+        public void AcknowledgeSuspect()
+        {
+            lock (_gate)
+            {
+                if (_journal == null) return;
+                _journal.SuspectModule = null;
+                _journal.LastActivityAtUtc = DateTime.UtcNow.ToString("o");
+                Write(JournalPath, _journal);
             }
         }
 
@@ -158,7 +241,14 @@ namespace PclDlSwap.Payload.Swap
                 "unclean starts: " + UncleanStarts,
                 "safe-mode unclean starts: " + SafeModeUncleanStarts,
                 "safe mode: " + SafeMode,
+                "safe mode reason code: " +
+                (string.IsNullOrEmpty(SafeModeReasonCode) ? "(none)" : SafeModeReasonCode),
                 "safe mode reason: " + (string.IsNullOrEmpty(SafeModeReason) ? "(none)" : SafeModeReason),
+                "lifecycle phase: " + (string.IsNullOrEmpty(LifecyclePhase) ? "(none)" : LifecyclePhase),
+                "last started module: " + (string.IsNullOrEmpty(LastStartedModule) ? "(none)" : LastStartedModule),
+                "last completed module: " + (string.IsNullOrEmpty(LastCompletedModule) ? "(none)" : LastCompletedModule),
+                "suspect module: " + (string.IsNullOrEmpty(SuspectModule) ? "(none)" : SuspectModule),
+                "suspect phase: " + (string.IsNullOrEmpty(SuspectPhase) ? "(none)" : SuspectPhase),
                 "host: " + (_journal?.HostVersion ?? "(unknown)"),
                 "platform: " + (_journal?.PlatformVersion ?? "(unknown)"),
                 "shape: " + (_journal?.Shape ?? "(unknown)"),
@@ -174,6 +264,9 @@ namespace PclDlSwap.Payload.Swap
                 return Math.Min(MaxStableDelayMs, Math.Max(MinStableDelayMs, parsed));
             return DefaultStableDelayMs;
         }
+
+        private static string FirstNonEmpty(params string[] values) =>
+            values?.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
         private static Journal Read(string path)
         {
@@ -226,6 +319,7 @@ namespace PclDlSwap.Payload.Swap
             public string StartedAtUtc { get; set; }
             public string StableAtUtc { get; set; }
             public string ClearedAtUtc { get; set; }
+            public string LastActivityAtUtc { get; set; }
             public string HostVersion { get; set; }
             public string PlatformVersion { get; set; }
             public string Shape { get; set; }
@@ -235,6 +329,12 @@ namespace PclDlSwap.Payload.Swap
             public int SafeModeUncleanStarts { get; set; }
             public bool SafeMode { get; set; }
             public string SafeModeReason { get; set; }
+            public string SafeModeReasonCode { get; set; }
+            public string LifecyclePhase { get; set; }
+            public string LastStartedModule { get; set; }
+            public string LastCompletedModule { get; set; }
+            public string SuspectModule { get; set; }
+            public string SuspectPhase { get; set; }
         }
     }
 }

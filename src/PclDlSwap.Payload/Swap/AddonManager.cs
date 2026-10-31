@@ -468,34 +468,47 @@ namespace PclDlSwap.Payload.Swap
             PackageTrustResult trust = null)
         {
             if (manifest == null) throw new ArgumentNullException(nameof(manifest));
+            var i18n = SwapI18n.Current;
+            var separator = i18n.IsEnglish ? ", " : "、";
             var existing = Find(manifest.Id);
             var packageHash = ShortHash(archivePath);
 
             var text = new StringBuilder();
             text.AppendLine(existing == null
-                ? "即将安装这个模块："
-                : $"即将更新这个模块（{existing.Version} → {manifest.Version}）：");
+                ? i18n.T("即将安装这个模块：", "About to install this addon:")
+                : i18n.T($"即将更新这个模块（{existing.Version} → {manifest.Version}）：",
+                    $"About to update this addon ({existing.Version} -> {manifest.Version}):"));
             text.AppendLine();
-            text.AppendLine("  名称：" + (string.IsNullOrEmpty(manifest.Name) ? manifest.Id : manifest.Name) +
+            text.AppendLine("  " + i18n.T("名称：", "Name: ") +
+                            (string.IsNullOrEmpty(manifest.Name) ? manifest.Id : manifest.Name) +
                             "  " + manifest.Version);
-            text.AppendLine("  id：" + manifest.Id);
-            text.AppendLine("  API：" + manifest.ApiVersion);
-            text.AppendLine("  入口：" + manifest.Entry);
-            if (!string.IsNullOrEmpty(manifest.Author)) text.AppendLine("  作者：" + manifest.Author);
-            if (!string.IsNullOrEmpty(manifest.Description)) text.AppendLine("  说明：" + manifest.Description);
+            text.AppendLine("  " + i18n.T("id：", "id: ") + manifest.Id);
+            text.AppendLine("  " + i18n.T("API：", "API: ") + manifest.ApiVersion);
+            text.AppendLine("  " + i18n.T("入口：", "Entry point: ") + manifest.Entry);
+            if (!string.IsNullOrEmpty(manifest.Author))
+                text.AppendLine("  " + i18n.T("作者：", "Author: ") + manifest.Author);
+            if (!string.IsNullOrEmpty(manifest.Description))
+                text.AppendLine("  " + i18n.T("说明：", "Description: ") + manifest.Description);
             if (manifest.Shapes != null && manifest.Shapes.Count > 0)
-                text.AppendLine("  形状作用域：" + string.Join("、", manifest.Shapes));
+                text.AppendLine("  " + i18n.T("形状作用域：", "Shape scope: ") +
+                                string.Join(separator, manifest.Shapes));
             if (manifest.HostVersions != null && manifest.HostVersions.Count > 0)
-                text.AppendLine("  宿主版本：" + string.Join("、", manifest.HostVersions));
-            text.AppendLine("  权限声明：" + (manifest.Permissions == null || manifest.Permissions.Count == 0
-                ? "（未声明 —— 按兼容模式获得全部访问）"
-                : string.Join("、", manifest.Permissions) + "（严格门控：未声明的敏感访问会被拒绝）"));
+                text.AppendLine("  " + i18n.T("宿主版本：", "Host versions: ") +
+                                string.Join(separator, manifest.HostVersions));
+            text.AppendLine("  " + i18n.T("权限声明：", "Permissions: ") +
+                            (manifest.Permissions == null || manifest.Permissions.Count == 0
+                                ? i18n.T("（未声明 —— 按兼容模式获得全部访问）",
+                                    "(not declared - compatibility mode grants all access)")
+                                : string.Join(separator, manifest.Permissions) +
+                                  i18n.T("（严格门控：未声明的敏感访问会被拒绝）",
+                                      " (strictly gated: undeclared sensitive access is rejected)")));
             text.AppendLine();
-            text.AppendLine("  包文件：" + Path.GetFileName(archivePath) +
-                            "（" + new FileInfo(archivePath).Length + " 字节）");
-            text.AppendLine("  SHA-256：" + packageHash);
+            text.AppendLine("  " + i18n.T("包文件：", "Package: ") + Path.GetFileName(archivePath) +
+                            i18n.T("（", " (") + new FileInfo(archivePath).Length +
+                            i18n.T(" 字节）", " bytes)"));
+            text.AppendLine("  " + i18n.T("SHA-256：", "SHA-256: ") + packageHash);
             if (trust != null)
-                text.AppendLine("  信任状态：" + trust.Summary);
+                text.AppendLine("  " + i18n.T("信任状态：", "Trust: ") + i18n.Translate(trust.Summary));
 
             // Version-level warnings: a downgrade, or the same version number with different content.
             if (existing != null)
@@ -504,7 +517,9 @@ namespace PclDlSwap.Payload.Swap
                 if (comparison < 0)
                 {
                     text.AppendLine();
-                    text.AppendLine($"  注意：这是降级安装（已装 {existing.Version} → 包内 {manifest.Version}）。");
+                    text.AppendLine(i18n.T(
+                        $"  注意：这是降级安装（已装 {existing.Version} → 包内 {manifest.Version}）。",
+                        $"  Warning: this is a downgrade (installed {existing.Version} -> package {manifest.Version})."));
                 }
                 else if (comparison == 0)
                 {
@@ -513,8 +528,11 @@ namespace PclDlSwap.Payload.Swap
                         !string.Equals(existing.PayloadDigest, incomingDigest, StringComparison.OrdinalIgnoreCase))
                     {
                         text.AppendLine();
-                        text.AppendLine("  注意：同一个版本号的包内容与已安装的不一致" +
-                                        $"（已装 {ShortText(existing.PayloadDigest)}，本包 {ShortText(incomingDigest)}）。");
+                        text.AppendLine(i18n.T(
+                            "  注意：同一个版本号的包内容与已安装的不一致" +
+                            $"（已装 {ShortText(existing.PayloadDigest)}，本包 {ShortText(incomingDigest)}）。",
+                            "  Warning: the package payload differs from the installed copy at the same version " +
+                            $"(installed {ShortText(existing.PayloadDigest)}, package {ShortText(incomingDigest)})."));
                     }
                 }
             }
@@ -529,7 +547,10 @@ namespace PclDlSwap.Payload.Swap
             if (!IsInScope(manifest, out _, out var scopeReason))
             {
                 text.AppendLine();
-                text.AppendLine("  注意：" + scopeReason + " —— 安装后不会启用。");
+                text.AppendLine(i18n.T(
+                    "  注意：" + scopeReason + " —— 安装后不会启用。",
+                    "  Warning: " + i18n.Translate(scopeReason) +
+                    " - the addon will remain disabled after installation."));
             }
             return text.ToString();
         }
@@ -749,14 +770,18 @@ namespace PclDlSwap.Payload.Swap
             record.Enabled = true;
             try
             {
+                _recovery?.MarkModuleStarting(record.Id, "create");
                 if (record.Instance == null) record.Instance = CreateInstance(record);
                 if (record.Instance == null) return;
 
                 var scoped = new ScopedApi(_api, record);
                 var context = new SwapContext(scoped, record.Manifest,
                     record.Directory ?? AppDomain.CurrentDomain.BaseDirectory);
+                _recovery?.MarkModuleStarting(record.Id, "onLoad");
                 record.Instance.OnLoad(context);
+                _recovery?.MarkModuleStarting(record.Id, "onEnable");
                 record.Instance.OnEnable();
+                _recovery?.MarkModuleCompleted(record.Id);
                 record.Status = "enabled";
                 record.Failure = null;
                 SwapLog.Info($"Addon 已启用：{record.Id}（{record.Name} {record.Version}）");
@@ -768,6 +793,41 @@ namespace PclDlSwap.Payload.Swap
                 record.Failure = ex;
                 SwapLog.Error($"Addon 启用失败：{record.Id}", ex);
             }
+        }
+
+        /// <summary>
+        /// Recovery escape hatch: persist the suspected module as disabled, then clear the safe-mode
+        /// flag. The current process remains isolated; the next launch loads the remaining modules.
+        /// </summary>
+        public bool DisableSuspectAndLeaveSafeMode()
+        {
+            var recovery = _recovery;
+            if (recovery == null || !recovery.SafeMode)
+            {
+                SwapLog.Warn("[recovery] 当前会话不在安全模式，忽略疑因模块禁用请求。");
+                return false;
+            }
+
+            var suspect = recovery.SuspectModule;
+            if (!string.IsNullOrWhiteSpace(suspect))
+            {
+                var record = Find(suspect);
+                if (record == null)
+                {
+                    SwapLog.Warn("[recovery] journal 指向未知模块，保留安全模式：" + suspect);
+                    return false;
+                }
+                if (!SetEnabled(record.Id, false))
+                {
+                    SwapLog.Warn("[recovery] 无法禁用疑因模块，保留安全模式：" + suspect);
+                    return false;
+                }
+                SwapLog.Info("[recovery] 疑因模块已禁用：" + suspect);
+            }
+
+            if (!recovery.ClearSafeMode()) return false;
+            SwapLog.Info("[recovery] 已禁用疑因模块并清除安全模式；当前进程保持隔离。");
+            return true;
         }
 
         /// <summary>
@@ -1270,6 +1330,7 @@ namespace PclDlSwap.Payload.Swap
 
             public IPclAccess Pcl { get; }
             public II18n I18n => _inner.I18n;
+            public IRecoveryAccess Recovery => _inner.Recovery;
 
             // Module lines keep their own file (LSPosed-style per-module log) and are tagged with the
             // module id in the global log, so "which module did this" never needs guessing.
@@ -1424,6 +1485,9 @@ namespace PclDlSwap.Payload.Swap
 
             public IProgressView Progress(string label, double initial = 0,
                 bool indeterminate = false) => _inner.Progress(label, initial, indeterminate);
+
+            public FrameworkElement Banner(string title, string text,
+                SwapHintType type = SwapHintType.Warning) => _inner.Banner(title, text, type);
         }
 
         /// <summary>

@@ -80,6 +80,16 @@ namespace PclDlSwap.Payload.Swap
             Probe("IAddonServices", () => api.Services != null
                 ? "ready (" + api.Services.Services.Count + " services)"
                 : throw new InvalidOperationException("api.Services is null"));
+            Probe("IAddonAssets", () => api.Assets != null
+                ? "ready (" + api.Assets.Assets.Count + " assets)"
+                : throw new InvalidOperationException("api.Assets is null"));
+            Probe("IAddonLocalization", () => api.Localization != null
+                ? "ready (" + api.Localization.AvailableLocales.Count + " locales)"
+                : throw new InvalidOperationException("api.Localization is null"));
+            Probe("Ui.API1.11.SearchBox", () => typeof(IUi).GetMethod("SearchBox") != null);
+            Probe("Ui.API1.11.SegmentedControl", () => typeof(IUi).GetMethod("SegmentedControl") != null);
+            Probe("Ui.API1.11.ColorInput", () => typeof(IUi).GetMethod("ColorInput") != null);
+            Probe("Ui.API1.11.SelectList", () => typeof(IUi).GetMethod("SelectList") != null);
             Probe("Host.Shape", () => api.Host.Shape);
             Probe("Host.ProcessId", () => api.Host.ProcessId);
             Probe("Host.AddonDirectory", () => api.Host.AddonDirectory);
@@ -147,6 +157,12 @@ namespace PclDlSwap.Payload.Swap
             Probe("Pcl.Environment", () =>
                 api.Pcl.Environment.HostPath + " | " + api.Pcl.Environment.DataDirectory);
             Probe("Pcl.Profiles", () => api.Pcl.Profiles != null);
+            Probe("Pcl.Appearance", () => api.Pcl.Appearance != null
+                ? "theme=" + api.Pcl.Appearance.ThemeId
+                : throw new InvalidOperationException("Pcl.Appearance is null"));
+            Probe("Pcl.Window", () => api.Pcl.Window != null
+                ? "state=" + api.Pcl.Window.State
+                : throw new InvalidOperationException("Pcl.Window is null"));
             Probe("Pcl.Net.Request", () => typeof(IPclNetAccess).GetMethod("Request") != null);
             Probe("Pcl.Shell.Family", () => api.Pcl.Shell != null);
             Probe("Pcl.Clipboard.Family", () => api.Pcl.Clipboard != null);

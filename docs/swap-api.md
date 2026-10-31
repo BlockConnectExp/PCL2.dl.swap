@@ -1,4 +1,4 @@
-# PCL2 Swap Addon 指南（API 1.10，v26.3 起）
+# PCL2 Swap Addon 指南（API 1.11，v26.3 起）
 
 > 面向 Addon 作者。平台设计背景见 `docs/swap-api-research.zh.md`。
 > 交付形状（ExLoader 注入 / 磁盘修补）对 Addon **透明**：目标都是同一套 SwapHost 运行时。
@@ -998,5 +998,100 @@ api.Services.Changed += (_, args) =>
 
 > 平台只保证 Swap 注册表和配置写入的线程安全，不把同进程 CLR 对象变成安全沙箱。模块仍不能
 > 访问其他模块的私有目录；服务通信应使用明确接口、不可变 DTO 或 JSON 字符串。
+
+## 23. API 1.11（v26.3）：包内资产、模块语言包与宿主外观
+
+`Host.ApiVersion` 现在是 **1.11.0**。新增成员均为附加项，API 1.0-1.10 的 Addon 不需要修改。
+
+### 23.1 `ISwapApi.Assets`
+
+`.swapaddon` 可以把只读文件放在 `assets/`，通过 `IAddonAssets` 读取：
+
+```csharp
+foreach (var asset in api.Assets.Assets)
+    api.Log($"{asset.Path} {asset.Length} {asset.Sha256}");
+
+var bytes = api.Assets.ReadBytes("branding/logo.png");
+var text = api.Assets.ReadText("licenses/notice.txt");
+using (var stream = api.Assets.OpenRead("audio/click.mp3")) { }
+```
+
+路径只能是包内相对路径，绝对路径和 `..` 越界都会被拒绝。`Assets` 是只读视图；
+需要写入时仍使用 `api.Files`。目录或文件内容变化后重新枚举 `Assets` 即可获得新的大小和
+SHA-256，模块目录本身仍由宿主管理。
+
+### 23.2 `ISwapApi.Localization`
+
+模块可以在包内提供 `i18n/en-US.json` 和 `i18n/zh-CN.json`。格式与原版词典相同：
+
+```json
+{
+  "示例设置": "Demo Settings",
+  "已处理 {0} 项": "Processed {0} items"
+}
+```
+
+```csharp
+var title = api.Localization.T("示例设置", "Demo Settings");
+var status = api.Localization.Format("已处理 {0} 项", "Processed {0} items", count);
+
+api.Localization.Register("同步完成", "Sync finished");
+api.Localization.Reload();
+```
+
+该语言包属于当前模块实例，不写入宿主全局词典；模块禁用、重载或卸载后自然失效。
+`AvailableLocales`、`CurrentLocale` 和 `Count` 可用于诊断页。英文键缺失时先使用显式的
+`english` 参数，再回退宿主词典，最后保留中文原文。
+
+`.swapaddon` 打包：
+
+```powershell
+.\tools\PclAddonPack\bin\Release\net48\PclAddonPack.exe `
+  --project .\bin\Release\net48 `
+  --id com.example.demo --name "Demo" --version 1.0.0 `
+  --entry Demo.Main --assets .\assets --i18n .\i18n `
+  --out .\dist\demo.swapaddon
+```
+
+`IModuleCatalog` 现在同时暴露 `AssetCount` 与 `Locales`，模块详情页也会显示包内资产数和语言包。
+
+### 23.3 `Pcl.Appearance` 与 `Pcl.Window`
+
+主题模块不再必须通过 `Reflect` 猜字段：
+
+```csharp
+api.Pcl.Appearance.ThemeId = 6;
+api.Pcl.Appearance.Hue = 210;
+api.Pcl.Appearance.Saturation = 85;
+api.Pcl.Appearance.LightAdjustment = 0;
+api.Pcl.Appearance.Refresh();       // ThemeRefreshMain，不重置 ThemeNow
+
+api.Pcl.Window.Title = "PCL";
+api.Pcl.Window.Topmost = true;
+api.Pcl.Window.Maximize();
+api.Pcl.Window.Restore();
+```
+
+严格模式新增 `theme` 与 `window` 权限，撤销后两个属性访问会立即抛出
+`UnauthorizedAccessException`。`Appearance` 只覆盖 2.99.x 已验证的整数主题字段；
+`Window` 操作的是 PCL 自己的主 WPF 窗口，所有写操作都在宿主 Dispatcher 上执行。
+
+### 23.4 新前端构件
+
+```csharp
+page.Children.Add(api.Ui.Card("API 1.11",
+    api.Ui.SearchBox("Filter", "Type a keyword", string.Empty, query => { }),
+    api.Ui.SegmentedControl("Density",
+        new[] { "Compact", "Standard", "Comfortable" }, 1, index => { }),
+    api.Ui.ColorInput("Accent color", "#3A7BD5", color => { }),
+    api.Ui.SelectList("Preset", new[] { "Launch", "Download", "Settings" }, 0, index => { })));
+```
+
+- `SearchBox` 带持久占位提示和清除按钮；
+- `SegmentedControl` 用单一选中态表达二至五个短模式；
+- `ColorInput` 校验 `#RRGGBB` 并实时更新色块；
+- `SelectList` 用于需要同时看见全部选项的短列表。
+
+它们沿用现有的 PCL 画刷和 35px 控件节奏；宿主缺少原生控件时仍以标准 WPF 渲染。
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

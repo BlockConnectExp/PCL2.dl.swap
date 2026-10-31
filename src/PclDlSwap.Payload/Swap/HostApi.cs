@@ -16,7 +16,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.10.0";
+        public const string ApiVersion = "1.11.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -40,6 +40,9 @@ namespace PclDlSwap.Payload.Swap
             Files = new AddonFileStore(Path.Combine(SwapPaths.DataRoot, "files", "host"));
             Messaging = new MessagingAccess("host");
             Services = new ServicesAccess("host");
+            Assets = new AddonAssetStore(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets"));
+            Localization = new AddonLocalizationStore(AppDomain.CurrentDomain.BaseDirectory,
+                SwapI18n.Current);
             Data = new AddonDataStore("host");
         }
 
@@ -57,6 +60,8 @@ namespace PclDlSwap.Payload.Swap
         public IAddonFiles Files { get; }
         public IAddonMessaging Messaging { get; }
         public IAddonServices Services { get; }
+        public IAddonAssets Assets { get; }
+        public IAddonLocalization Localization { get; }
 
         public IData Data { get; private set; }
         public IAddonConfig Config => Data as IAddonConfig;
@@ -606,6 +611,24 @@ namespace PclDlSwap.Payload.Swap
                 System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<string>> rows,
                 System.Collections.Generic.IReadOnlyList<double> columnWeights = null,
                 int maxHeight = 280) => Views.SwapUi.Table(columns, rows, columnWeights, maxHeight);
+
+            public System.Windows.FrameworkElement SearchBox(string label, string placeholder,
+                string initial, Action<string> onChange) =>
+                Views.SwapUi.SearchBox(label, placeholder, initial, onChange);
+
+            public System.Windows.FrameworkElement SegmentedControl(string label,
+                System.Collections.Generic.IReadOnlyList<string> options, int selectedIndex,
+                Action<int> onChange) =>
+                Views.SwapUi.SegmentedControl(label, options, selectedIndex, onChange);
+
+            public System.Windows.FrameworkElement ColorInput(string label, string initialHex,
+                Action<string> onChange) =>
+                Views.SwapUi.ColorInput(label, initialHex, onChange);
+
+            public System.Windows.FrameworkElement SelectList(string label,
+                System.Collections.Generic.IReadOnlyList<string> items, int selectedIndex,
+                Action<int> onChange) =>
+                Views.SwapUi.SelectList(label, items, selectedIndex, onChange);
 
             public System.Windows.FrameworkElement EmptyState(string title, string message,
                 System.Windows.FrameworkElement action = null) =>

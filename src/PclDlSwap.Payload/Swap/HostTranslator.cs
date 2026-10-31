@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -17,24 +19,41 @@ namespace PclDlSwap.Payload.Swap
     /// (MyButton and friends), string content/header, window titles and tooltips. Original text
     /// is recoverable because the dictionary maps English values back to their Chinese key.
     ///
-    /// The pass is idempotent and throttled: translated strings no longer match a Chinese key,
-    /// and LayoutUpdated ticks are coalesced to at most one pass per half second.
+    /// The pass is idempotent and coalesced: LayoutUpdated only schedules one background pass at
+    /// a time, while a slow fallback timer catches top-level dialogs that stop repainting.
     /// </summary>
     internal static class HostTranslator
     {
-        private const int PassIntervalMs = 500;
+        private const int FallbackIntervalSeconds = 4;
+        private const int SettleQuietMilliseconds = 500;
+        private const int MaxSettleLatencyMilliseconds = 1500;
 
         private static readonly object Gate = new object();
         private static readonly List<Window> Windows = new List<Window>();
         private static readonly HashSet<Window> Hooked = new HashSet<Window>();
+        private static readonly HashSet<Window> Pending = new HashSet<Window>();
         private static readonly ConditionalWeakTable<DependencyObject, TranslationState> Ledger =
             new ConditionalWeakTable<DependencyObject, TranslationState>();
-        private static DateTime _lastPass = DateTime.MinValue;
         private static volatile bool _started;
+        private static System.Windows.Threading.DispatcherTimer _settleTimer;
+        private static DateTime _lastLayoutUtc = DateTime.MinValue;
+        private static DateTime _dirtySinceUtc = DateTime.MinValue;
+        private static int _applying;
+        private static long _passes;
+        private static long _translatedTotal;
+        private static long _lastDurationTicks;
         private static int _lastHits;
 
         /// <summary>Strings translated by the most recent pass (diagnostics / self-test).</summary>
         public static int LastHits => _lastHits;
+        public static long Passes => Interlocked.Read(ref _passes);
+        public static long TranslatedTotal => Interlocked.Read(ref _translatedTotal);
+        public static double LastDurationMilliseconds =>
+            Interlocked.Read(ref _lastDurationTicks) * 1000.0 / Stopwatch.Frequency;
+        public static int TrackedWindows
+        {
+            get { lock (Gate) return Windows.Count; }
+        }
 
         public static void StartWatching(Assembly host)
         {
@@ -96,27 +115,38 @@ namespace PclDlSwap.Payload.Swap
                     if (!Hooked.Add(window)) return;
                 }
 
-                window.LayoutUpdated += (sender, args) =>
-                {
-                    if (!SwapI18n.Current.IsEnglish) return;
-                    var now = DateTime.UtcNow;
-                    if ((now - _lastPass).TotalMilliseconds < PassIntervalMs) return;
-                    _lastPass = now;
-                    Apply(window);
-                };
+                window.LayoutUpdated += (sender, args) => RequestApply(window);
 
                 // LayoutUpdated only fires while the launcher repaints; a slow timer catches
                 // pages that appear and then stay still (a freshly built Swap page, for example).
                 var timer = new System.Windows.Threading.DispatcherTimer
                 {
-                    Interval = TimeSpan.FromSeconds(2)
+                    Interval = TimeSpan.FromSeconds(FallbackIntervalSeconds)
                 };
                 timer.Tick += (sender, args) =>
                 {
                     if (!SwapI18n.Current.IsEnglish) return;
-                    try { ApplyAllWindows(); } catch { }
+                    try
+                    {
+                        lock (Gate)
+                        {
+                            Pending.Clear();
+                            _dirtySinceUtc = DateTime.MinValue;
+                        }
+                        ApplyAllWindows();
+                    }
+                    catch { }
                 };
                 timer.Start();
+
+                if (_settleTimer == null)
+                {
+                    _settleTimer = new System.Windows.Threading.DispatcherTimer
+                    {
+                        Interval = TimeSpan.FromMilliseconds(250)
+                    };
+                    _settleTimer.Tick += (sender, args) => ApplySettledWindows();
+                }
 
                 if (SwapI18n.Current.IsEnglish) Apply(window);
             }
@@ -126,9 +156,62 @@ namespace PclDlSwap.Payload.Swap
             }
         }
 
+        private static void RequestApply(Window window)
+        {
+            if (!SwapI18n.Current.IsEnglish) return;
+            lock (Gate)
+            {
+                Pending.Add(window);
+                var now = DateTime.UtcNow;
+                _lastLayoutUtc = now;
+                if (_dirtySinceUtc == DateTime.MinValue) _dirtySinceUtc = now;
+                if (_settleTimer != null && !_settleTimer.IsEnabled) _settleTimer.Start();
+            }
+        }
+
+        private static void ApplySettledWindows()
+        {
+            Window[] windows;
+            lock (Gate)
+            {
+                if (!SwapI18n.Current.IsEnglish || Pending.Count == 0)
+                {
+                    Pending.Clear();
+                    _dirtySinceUtc = DateTime.MinValue;
+                    if (_settleTimer != null) _settleTimer.Stop();
+                    return;
+                }
+
+                var now = DateTime.UtcNow;
+                var quiet = (now - _lastLayoutUtc).TotalMilliseconds >= SettleQuietMilliseconds;
+                var maxWait = (now - _dirtySinceUtc).TotalMilliseconds >=
+                              MaxSettleLatencyMilliseconds;
+                if (!quiet && !maxWait) return;
+
+                windows = Pending.ToArray();
+                Pending.Clear();
+                _dirtySinceUtc = DateTime.MinValue;
+            }
+
+            foreach (var window in windows)
+            {
+                try { Apply(window); }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("[i18n] deferred window pass failed: " + ex.Message);
+                }
+            }
+        }
+
         /// <summary>Re-applies the current language to every hooked window.</summary>
         public static void ReapplyAll()
         {
+            lock (Gate)
+            {
+                Pending.Clear();
+                _dirtySinceUtc = DateTime.MinValue;
+                if (_settleTimer != null) _settleTimer.Stop();
+            }
             Window[] snapshot;
             lock (Gate) snapshot = Windows.ToArray();
             foreach (var window in snapshot)
@@ -190,11 +273,26 @@ namespace PclDlSwap.Payload.Swap
 
         public static int Apply(object visualRoot)
         {
-            var i18n = SwapI18n.Current;
-            var hits = Walk(visualRoot, node => TranslateNode(node, i18n));
-            _lastHits = hits;
-            if (hits > 0) SwapLog.Info("[i18n] 本轮翻译 " + hits + " 处文本。");
-            return hits;
+            if (Interlocked.Exchange(ref _applying, 1) != 0) return 0;
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                var i18n = SwapI18n.Current;
+                var hits = Walk(visualRoot, node => TranslateNode(node, i18n));
+                _lastHits = hits;
+                Interlocked.Increment(ref _passes);
+                Interlocked.Add(ref _translatedTotal, hits);
+                stopwatch.Stop();
+                Interlocked.Exchange(ref _lastDurationTicks, stopwatch.ElapsedTicks);
+                if (hits > 0)
+                    SwapLog.Info("[i18n] 本轮翻译 " + hits + " 处文本（" +
+                                 stopwatch.Elapsed.TotalMilliseconds.ToString("0.0") + " ms）。");
+                return hits;
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _applying, 0);
+            }
         }
 
         public static int Restore(object visualRoot)

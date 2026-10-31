@@ -955,8 +955,8 @@ namespace PclDlSwap.ExLoaderHarness
             var hostInfo = api?.GetType().GetProperty("Host")?.GetValue(api);
             var pclVersion = Convert.ToString(hostInfo?.GetType().GetProperty("PclVersion")?.GetValue(hostInfo));
             Expect("Host.PclVersion reports the bound PCL build", !string.IsNullOrEmpty(pclVersion));
-            Expect("Host.ApiVersion reports the additive 1.10 contract",
-                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.10.0");
+            Expect("Host.ApiVersion reports the additive 1.11 contract",
+                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.11.0");
 
             var recovery = api?.GetType().GetProperty("Recovery")?.GetValue(api);
             var recoveryDiagnostics = Convert.ToString(recovery?.GetType().GetMethod("Diagnostics")
@@ -1004,6 +1004,9 @@ namespace PclDlSwap.ExLoaderHarness
             }
             Expect("IAddonFiles round-trips text inside its private root", fileRoundTrip);
             Expect("IAddonFiles rejects traversal outside its root", traversalRejected);
+            Expect("host exposes package assets and lifetime-scoped localization",
+                api?.Assets != null && api.Localization != null &&
+                api.Localization.AvailableLocales != null);
 
             var messageDeliveries = -1;
             var messagePayload = string.Empty;
@@ -1022,6 +1025,20 @@ namespace PclDlSwap.ExLoaderHarness
 
             var secret = pcl?.GetType().GetProperty("Secret")?.GetValue(pcl);
             Expect("Secret family exposed", secret != null);
+            Expect("Appearance and Window families exposed",
+                pcl?.GetType().GetProperty("Appearance")?.GetValue(pcl) != null &&
+                pcl.GetType().GetProperty("Window")?.GetValue(pcl) != null);
+            var appearance = pcl?.GetType().GetProperty("Appearance")?.GetValue(pcl);
+            if (appearance != null)
+            {
+                var themeBefore = PCL.ModSecret.ThemeRefreshMainCalls;
+                appearance.GetType().GetProperty("Hue")?.SetValue(appearance, 222.0, null);
+                appearance.GetType().GetMethod("Refresh")?.Invoke(appearance, null);
+                Expect("Appearance reads/writes host theme fields and calls ThemeRefreshMain",
+                    Convert.ToInt32(appearance.GetType().GetProperty("ThemeId")?.GetValue(appearance)) == 4 &&
+                    PCL.ModSecret.ColorHue == 222 &&
+                    PCL.ModSecret.ThemeRefreshMainCalls == themeBefore + 1);
+            }
             var before = Probes.UpdateStartCalls;
             secret?.GetType().GetMethod("UpdateStart")?.Invoke(secret, new object[] { false, null });
             var after = Probes.UpdateStartCalls;
@@ -1522,6 +1539,14 @@ namespace PclDlSwap.ExLoaderHarness
                     using (var target = dllEntry.Open())
                     using (var source = File.OpenRead(typeof(PCL2Swap.SampleAddon.SampleAddon).Assembly.Location))
                         source.CopyTo(target);
+                    WriteZipEntry(zip, "assets/branding/readme.txt",
+                        new UTF8Encoding(false).GetBytes("sample asset"));
+                    WriteZipEntry(zip, "i18n/en-US.json",
+                        new UTF8Encoding(false).GetBytes(
+                            "{\"示例设置\":\"Sample Settings Pack\",\"示例模块（Sample Addon）\":\"Sample Addon Pack\"}"));
+                    WriteZipEntry(zip, "i18n/zh-CN.json",
+                        new UTF8Encoding(false).GetBytes(
+                            "{\"示例设置\":\"示例设置\",\"示例模块（Sample Addon）\":\"示例模块（Sample Addon）\"}"));
                 }
                 Console.WriteLine("[addon] packed " + archive);
 
@@ -1538,8 +1563,10 @@ namespace PclDlSwap.ExLoaderHarness
                 foreach (var record in records)
                 {
                     var recordType = record.GetType();
+                    var failure = recordType.GetProperty("Failure").GetValue(record) as Exception;
                     Console.WriteLine("  - " + recordType.GetProperty("Id").GetValue(record) +
-                                      " status=" + recordType.GetProperty("Status").GetValue(record));
+                                      " status=" + recordType.GetProperty("Status").GetValue(record) +
+                                      (failure == null ? string.Empty : " failure=" + failure));
                 }
 
                 Expect("host started with three built-ins plus the packed addon", records.Count == 4);
@@ -1562,7 +1589,7 @@ namespace PclDlSwap.ExLoaderHarness
 
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
-                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.10.0");
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.11.0");
                 Expect("sample addon sees only the default-enabled feature scope",
                     StaticString("LastEnabledScopes") == "sample.hooks");
 
@@ -1633,6 +1660,31 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("scoped API exposes IModuleScopes", scopedApi?.Scopes != null);
                 Expect("scoped API exposes IAddonConfig", scopedApi?.Config != null);
                 Expect("scoped API exposes IAddonServices", scopedApi?.Services != null);
+                Expect("scoped API exposes package assets and module-localized text",
+                    scopedApi?.Assets != null &&
+                    scopedApi.Assets.Assets.Count == 1 &&
+                    scopedApi.Assets.Exists("branding/readme.txt") &&
+                    scopedApi.Localization != null &&
+                    scopedApi.Localization.AvailableLocales.Contains("en-US"));
+                var i18nApi = api?.I18n;
+                var languageBeforeAssetProbe = i18nApi?.Language ?? PCL2Swap.Api.SwapLanguage.Auto;
+                var localizedAssetText = string.Empty;
+                try
+                {
+                    i18nApi?.SetLanguage(PCL2Swap.Api.SwapLanguage.English);
+                    localizedAssetText = scopedApi?.Localization.T("示例设置", "fallback") ?? string.Empty;
+                }
+                finally
+                {
+                    i18nApi?.SetLanguage(languageBeforeAssetProbe);
+                }
+                Expect("module localization pack resolves across a live language switch",
+                    localizedAssetText == "Sample Settings Pack");
+                var escapedAsset = false;
+                try { scopedApi?.Assets.GetPath("../outside.txt"); }
+                catch (UnauthorizedAccessException) { escapedAsset = true; }
+                catch (ArgumentException) { escapedAsset = true; }
+                Expect("package asset paths cannot escape the addon directory", escapedAsset);
                 Expect("scope catalog localizes names and descriptions",
                     scopedApi?.Scopes.Scopes.Count == 2 &&
                     scopedApi.Scopes.Scopes[0].Name == "演示钩子" &&
@@ -1693,6 +1745,10 @@ namespace PclDlSwap.ExLoaderHarness
                 var configInfo = catalog?.Find("test.sample");
                 Expect("module catalog reflects the migrated config",
                     configInfo?.ConfigSchemaVersion == 2 && configInfo.ConfigKeyCount >= 1);
+                Expect("module catalog exposes packaged asset and locale inventories",
+                    configInfo?.AssetCount == 1 &&
+                    configInfo.Locales.Contains("en-US") &&
+                    configInfo.Locales.Contains("zh-CN"));
                 var serviceToken = scopedApi?.Services.Register(
                     "services/test.sample/probe", new object(), "1.0", "harness service");
                 Expect("module services register, query by contract and report provenance",
@@ -2136,7 +2192,7 @@ namespace PclDlSwap.ExLoaderHarness
                     "\"version\":\"2.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
                     "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"author\":\"harness\"," +
                     "\"description\":\"installed by the manager test\"," +
-                    "\"permissions\":[\"settings\",\"hooks\",\"files\",\"messaging\",\"services\"]," +
+                    "\"permissions\":[\"settings\",\"hooks\",\"files\",\"messaging\",\"services\",\"theme\",\"window\"]," +
                     "\"scopes\":[" +
                     "{\"id\":\"installed.core\",\"name\":\"核心\",\"nameEn\":\"Core\"," +
                     "\"description\":\"核心功能\",\"descriptionEn\":\"Core features\",\"defaultEnabled\":true}," +
@@ -2241,6 +2297,8 @@ namespace PclDlSwap.ExLoaderHarness
                         "{\"schema\":1,\"id\":\"test.slip\",\"name\":\"Slip\",\"version\":\"1.0.0\"," +
                         "\"apiVersion\":\">=1.0 <2.0\",\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\"}"));
                     WriteZipEntry(zip, "../evil.txt", Encoding.UTF8.GetBytes("escaped"));
+                    WriteZipEntry(zip, "../1.0.0-evil/prefix-evil.txt",
+                        Encoding.UTF8.GetBytes("escaped by a sibling-prefix collision"));
                     zip.CreateEntryFromFile(
                         typeof(PCL2Swap.SampleAddon.SampleAddon).Assembly.Location, "SampleAddon.dll");
                 }
@@ -2248,6 +2306,7 @@ namespace PclDlSwap.ExLoaderHarness
                 var escapedPaths = new[]
                 {
                     Path.Combine(addonRoot, "test.slip", "evil.txt"),
+                    Path.Combine(addonRoot, "test.slip", "1.0.0-evil", "prefix-evil.txt"),
                     Path.Combine(addonRoot, "evil.txt"),
                     Path.Combine(Path.GetDirectoryName(addonRoot) ?? addonRoot, "evil.txt")
                 };
@@ -2278,10 +2337,14 @@ namespace PclDlSwap.ExLoaderHarness
                     installedInfo.RequestedPermissions.Contains("hooks") &&
                     installedInfo.RequestedPermissions.Contains("files") &&
                     installedInfo.RequestedPermissions.Contains("messaging") &&
+                    installedInfo.RequestedPermissions.Contains("theme") &&
+                    installedInfo.RequestedPermissions.Contains("window") &&
                     installedInfo.GrantedPermissions.Contains("settings") &&
                     installedInfo.GrantedPermissions.Contains("hooks") &&
                     installedInfo.GrantedPermissions.Contains("files") &&
                     installedInfo.GrantedPermissions.Contains("messaging") &&
+                    installedInfo.GrantedPermissions.Contains("theme") &&
+                    installedInfo.GrantedPermissions.Contains("window") &&
                     installedInfo.DeniedPermissions.Count == 0);
                 Expect("installed module exposes localized scope metadata and defaults",
                     installedInfo?.Scopes.Count == 2 &&
@@ -2388,6 +2451,18 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("revoking hook permission immediately disables installed handlers",
                     hooksRevoked && governedHookHits == hooksBeforeRevocation &&
                     ungatedHookResult == 4);
+                var themeRevoked = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "theme", false }) ?? false);
+                var windowRevoked = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "window", false }) ?? false);
+                var themeDenied = false;
+                var windowDenied = false;
+                try { _ = governedScopedApi?.Pcl.Appearance; }
+                catch (UnauthorizedAccessException) { themeDenied = true; }
+                try { _ = governedScopedApi?.Pcl.Window; }
+                catch (UnauthorizedAccessException) { windowDenied = true; }
+                Expect("revoking theme/window permissions gates both host-control families",
+                    themeRevoked && windowRevoked && themeDenied && windowDenied);
                 var governedModules = File.ReadAllText(modulesFile);
                 Expect("permission grants persist independently of the enabled flag",
                     governedModules.Contains("\"test.installed\"") &&
@@ -2411,7 +2486,9 @@ namespace PclDlSwap.ExLoaderHarness
                 Expect("permission revocation survives module-state reload",
                     reloadedInstalled != null &&
                     reloadedInstalled.DeniedPermissions.Contains("settings") &&
-                    reloadedInstalled.DeniedPermissions.Contains("hooks"));
+                    reloadedInstalled.DeniedPermissions.Contains("hooks") &&
+                    reloadedInstalled.DeniedPermissions.Contains("theme") &&
+                    reloadedInstalled.DeniedPermissions.Contains("window"));
                 Expect("feature-scope selection survives module-state reload",
                     reloadedInstalled != null &&
                     reloadedInstalled.Scopes.First(scope => scope.Id == "installed.core").Enabled &&
@@ -2939,6 +3016,24 @@ namespace PclDlSwap.ExLoaderHarness
                         },
                         new[] { 1.0, 2.0 }, 180
                     });
+                    var search = swapUi.GetMethod("SearchBox", flags)?.Invoke(null, new object[]
+                    {
+                        "Search", "Type a keyword", string.Empty, (Action<string>)(_ => { })
+                    });
+                    var segmented = swapUi.GetMethod("SegmentedControl", flags)?.Invoke(null, new object[]
+                    {
+                        "Density", new[] { "Compact", "Standard", "Comfortable" }, 1,
+                        (Action<int>)(_ => { })
+                    });
+                    var color = swapUi.GetMethod("ColorInput", flags)?.Invoke(null, new object[]
+                    {
+                        "Accent", "#3A7BD5", (Action<string>)(_ => { })
+                    });
+                    var selectList = swapUi.GetMethod("SelectList", flags)?.Invoke(null, new object[]
+                    {
+                        "Preset", new[] { "Launch", "Download", "Settings" }, 0,
+                        (Action<int>)(_ => { })
+                    });
                     var emptyState = swapUi.GetMethod("EmptyState", flags)?.Invoke(null, new object[]
                     {
                         "Nothing here", "Add an item to continue.", null
@@ -3006,13 +3101,17 @@ namespace PclDlSwap.ExLoaderHarness
                                      ", tabs=" + (tabs != null) + ", timeline=" + (timeline != null) +
                                      ", table=" + (table != null) + ", empty=" + (emptyState != null) +
                                      ", code=" + (codeBlock != null) + ", scroll=" + (scroller != null) +
+                                     ", search=" + (search != null) + ", segmented=" + (segmented != null) +
+                                     ", color=" + (color != null) + ", select=" + (selectList != null) +
                                      ", translated=" + translated +
                                      "; " + frontendDetail;
                     frontendOk = radio != null && number != null && password != null &&
                                  multiline != null && progressElement != null && banner != null &&
                                  badge != null && expander != null && tabs != null &&
                                  timeline != null && table != null && emptyState != null &&
-                                 codeBlock != null && scroller != null && translated;
+                                  codeBlock != null && scroller != null && search != null &&
+                                  segmented != null && color != null && selectList != null &&
+                                  translated;
                 }
                 catch (Exception ex)
                 {
@@ -3025,7 +3124,7 @@ namespace PclDlSwap.ExLoaderHarness
                 }
             }));
             frontendDone.Wait(TimeSpan.FromSeconds(10));
-            Console.WriteLine("[uitest] API 1.10 frontends=" + (frontendOk ? "PASS" : "FAIL"));
+                Console.WriteLine("[uitest] API 1.11 frontends=" + (frontendOk ? "PASS" : "FAIL"));
             if (!frontendOk)
             {
                 Console.WriteLine("[uitest] frontend detail: " + frontendDetail);
@@ -3370,6 +3469,17 @@ namespace PCL
     /// </summary>
     public static class ModSecret
     {
+        public static int ThemeNow = 4;
+        public static int ColorHue = 210;
+        public static int ColorSat = 85;
+        public static int ColorLightAdjust;
+        public static int ThemeRefreshMainCalls;
+
+        public static void ThemeRefreshMain()
+        {
+            ThemeRefreshMainCalls++;
+        }
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static void UpdateStart(bool silent, IEnumerable<string> urlsOverride)
         {

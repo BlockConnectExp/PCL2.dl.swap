@@ -39,6 +39,8 @@ namespace PclDlSwap.Payload.Swap
             Threading = new ThreadingAccess(host);
             Environment = new EnvironmentAccess(host);
             Profiles = new ProfileAccess(host);
+            Appearance = new AppearanceAccess(host);
+            Window = new WindowAccess(host);
         }
 
         public IPclSecretAccess Secret { get; }
@@ -58,6 +60,8 @@ namespace PclDlSwap.Payload.Swap
         public IPclThreadingAccess Threading { get; }
         public IPclEnvironmentAccess Environment { get; }
         public IPclProfileAccess Profiles { get; }
+        public IPclAppearanceAccess Appearance { get; }
+        public IPclWindowAccess Window { get; }
 
         /// <summary>Open paths with PCL's own helpers (API 1.2).</summary>
         private sealed class ShellAccess : IPclShellAccess
@@ -468,6 +472,152 @@ namespace PclDlSwap.Payload.Swap
                         candidate => candidate.GetParameters().Length == 0);
                 if (method == null) throw new MissingMethodException("PCL." + name);
                 return method.Invoke(null, null);
+            }
+        }
+
+        /// <summary>
+        /// The theme values PCL's own appearance page writes. ThemeRefreshMain repaints without
+        /// resetting ThemeNow, avoiding the known ThemeRefresh(newId) reset on 2.99.0.1.
+        /// </summary>
+        private sealed class AppearanceAccess : IPclAppearanceAccess
+        {
+            private readonly Type _secret;
+
+            public AppearanceAccess(Assembly host) =>
+                _secret = host?.GetType("PCL.ModSecret", throwOnError: false);
+
+            public int ThemeId
+            {
+                get => Convert.ToInt32(Read("ThemeNow") ?? 0);
+                set => PclUi.OnUiThread(() => Write("ThemeNow", value));
+            }
+
+            public double Hue
+            {
+                get => Convert.ToDouble(Read("ColorHue") ?? 0.0);
+                set => PclUi.OnUiThread(() => Write("ColorHue", value));
+            }
+
+            public double Saturation
+            {
+                get => Convert.ToDouble(Read("ColorSat") ?? 0.0);
+                set => PclUi.OnUiThread(() => Write("ColorSat", value));
+            }
+
+            public double LightAdjustment
+            {
+                get => Convert.ToDouble(Read("ColorLightAdjust") ?? 0.0);
+                set => PclUi.OnUiThread(() => Write("ColorLightAdjust", value));
+            }
+
+            public void Refresh()
+            {
+                if (_secret == null) throw new MissingMemberException("PCL.ModSecret");
+                PclUi.OnUiThread(() =>
+                {
+                    var method = _secret.GetMethod("ThemeRefreshMain",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                        null, Type.EmptyTypes, null);
+                    if (method == null)
+                        throw new MissingMethodException(_secret.FullName, "ThemeRefreshMain");
+                    method.Invoke(null, null);
+                });
+            }
+
+            private object Read(string name)
+            {
+                if (_secret == null) throw new MissingMemberException("PCL.ModSecret");
+                return PclUi.GetMember(_secret, name);
+            }
+
+            private void Write(string name, object value)
+            {
+                if (_secret == null) throw new MissingMemberException("PCL.ModSecret");
+                var field = _secret.GetField(name,
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                var property = field == null
+                    ? _secret.GetProperty(name,
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                    : null;
+                var targetType = field?.FieldType ?? property?.PropertyType;
+                if (targetType == null || (property != null && !property.CanWrite))
+                    throw new MissingMemberException(_secret.FullName, name);
+
+                var converted = value == null || targetType.IsInstanceOfType(value)
+                    ? value
+                    : Convert.ChangeType(value, targetType, System.Globalization.CultureInfo.InvariantCulture);
+                if (field != null) field.SetValue(null, converted);
+                else property.SetValue(null, converted, null);
+            }
+        }
+
+        /// <summary>Small wrapper over the real PCL main window; mutations use its dispatcher.</summary>
+        private sealed class WindowAccess : IPclWindowAccess
+        {
+            private readonly Assembly _host;
+
+            public WindowAccess(Assembly host) => _host = host;
+
+            public bool IsVisible => Main().IsVisible;
+            public bool IsActive => Main().IsActive;
+
+            public string State
+            {
+                get => Main().WindowState.ToString();
+                set
+                {
+                    if (!Enum.TryParse(value ?? string.Empty, true,
+                            out System.Windows.WindowState state))
+                        throw new ArgumentException(
+                            "Window state must be Normal, Minimized or Maximized.", nameof(value));
+                    var window = Main();
+                    PclUi.OnUiThread(() => window.WindowState = state);
+                }
+            }
+
+            public bool Topmost
+            {
+                get => Main().Topmost;
+                set
+                {
+                    var window = Main();
+                    PclUi.OnUiThread(() => window.Topmost = value);
+                }
+            }
+
+            public string Title
+            {
+                get => Main().Title ?? string.Empty;
+                set
+                {
+                    var window = Main();
+                    PclUi.OnUiThread(() => window.Title = value ?? string.Empty);
+                }
+            }
+
+            public void Activate()
+            {
+                var window = Main();
+                PclUi.OnUiThread(() => window.Activate());
+            }
+
+            public void Minimize() => SetState(System.Windows.WindowState.Minimized);
+            public void Maximize() => SetState(System.Windows.WindowState.Maximized);
+            public void Restore() => SetState(System.Windows.WindowState.Normal);
+
+            private void SetState(System.Windows.WindowState state)
+            {
+                var window = Main();
+                PclUi.OnUiThread(() => window.WindowState = state);
+            }
+
+            private System.Windows.Window Main()
+            {
+                var window = PclUi.GetMember(_host?.GetType("PCL.ModMain", false), "FrmMain")
+                             as System.Windows.Window;
+                if (window == null)
+                    throw new InvalidOperationException("PCL main window is not ready.");
+                return window;
             }
         }
 

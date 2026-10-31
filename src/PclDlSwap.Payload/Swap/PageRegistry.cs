@@ -647,6 +647,31 @@ namespace PclDlSwap.Payload.Swap
             }
         }
 
+        /// <summary>
+        /// Test-only page navigation used by PCL2SWAP_E2E_PAGE. It still runs PCL's own
+        /// PageChange/PageChangeRun path so screenshots exercise the same route as a click.
+        /// </summary>
+        internal static bool OpenPage(string logicalId)
+        {
+            PageEntry entry;
+            lock (Gate)
+                entry = Pages.Values.FirstOrDefault(page => string.Equals(page.LogicalId,
+                    logicalId, StringComparison.OrdinalIgnoreCase));
+            if (entry == null) return false;
+
+            PclUi.OnUiThread(() =>
+            {
+                SwapHost.Api.Pcl.Navigation.Go("Setup", "Default");
+                Thread.Sleep(800);
+                var pageSetupLeft = PclUi.GetMember(_host?.GetType("PCL.ModMain", false),
+                    "FrmSetupLeft");
+                if (pageSetupLeft == null)
+                    throw new InvalidOperationException("PCL.ModMain.FrmSetupLeft is not ready.");
+                SwitchToPage(pageSetupLeft, entry.Id);
+            });
+            return true;
+        }
+
         private static List<PageEntry> Snapshot()
         {
             lock (Gate) return Pages.Values.OrderBy(entry => entry.Id).ToList();

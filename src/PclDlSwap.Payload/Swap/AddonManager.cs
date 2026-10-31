@@ -140,6 +140,8 @@ namespace PclDlSwap.Payload.Swap
                 ConfigSchemaVersion = record.ConfigStore?.SchemaVersion ?? 0,
                 ConfigKeyCount = record.ConfigStore?.Keys.Count ?? 0,
                 Services = AddonServiceRegistry.Snapshot(record.Id),
+                AssetCount = CountAssets(record.Directory),
+                Locales = ListLocales(record.Directory),
                 RequestedPermissions = RequestedPermissions(record),
                 GrantedPermissions = EffectiveGrantedPermissions(record),
                 DeniedPermissions = DeniedPermissions(record),
@@ -147,6 +149,34 @@ namespace PclDlSwap.Payload.Swap
                 HookHits = ScopedHook.HitsFor(record.Id),
                 HookErrors = ScopedHook.ErrorsFor(record.Id)
             };
+        }
+
+        private static int CountAssets(string directory)
+        {
+            try
+            {
+                var assets = Path.Combine(directory ?? string.Empty, "assets");
+                return string.IsNullOrEmpty(directory) || !Directory.Exists(assets)
+                    ? 0
+                    : Directory.GetFiles(assets, "*", SearchOption.AllDirectories).Length;
+            }
+            catch { return 0; }
+        }
+
+        private static IReadOnlyList<string> ListLocales(string directory)
+        {
+            try
+            {
+                var i18n = Path.Combine(directory ?? string.Empty, "i18n");
+                return string.IsNullOrEmpty(directory) || !Directory.Exists(i18n)
+                    ? Array.Empty<string>()
+                    : Directory.GetFiles(i18n, "*.json", SearchOption.TopDirectoryOnly)
+                        .Select(Path.GetFileNameWithoutExtension)
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+            }
+            catch { return Array.Empty<string>(); }
         }
 
         internal void ConfigureRecovery(StartupRecovery recovery)
@@ -168,7 +198,8 @@ namespace PclDlSwap.Payload.Swap
         internal static readonly string[] KnownPermissions =
         {
             "hooks", "pages", "files", "clipboard", "network", "logs",
-            "secret", "launch", "settings", "instance", "messaging", "services"
+            "secret", "launch", "settings", "instance", "messaging", "services",
+            "theme", "window"
         };
 
         private static bool ForceStrict
@@ -337,6 +368,12 @@ namespace PclDlSwap.Payload.Swap
                 case "service":
                 case "interop":
                 case "services": return "services";
+                case "theme.write":
+                case "appearance.write":
+                case "theme": return "theme";
+                case "window.manage":
+                case "window.control":
+                case "window": return "window";
                 case "logs.read":
                 case "logs": return "logs";
                 case "reflect":
@@ -1659,11 +1696,14 @@ namespace PclDlSwap.Payload.Swap
 
             using (var zip = ZipFile.OpenRead(archive))
             {
+                var targetPrefix = targetRoot.TrimEnd(Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
                 foreach (var entry in zip.Entries)
                 {
                     if (string.IsNullOrEmpty(entry.Name)) continue;   // directory marker
                     var path = Path.GetFullPath(Path.Combine(targetRoot, entry.FullName));
-                    if (!path.StartsWith(targetRoot, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(path, targetRoot, StringComparison.OrdinalIgnoreCase) &&
+                        !path.StartsWith(targetPrefix, StringComparison.OrdinalIgnoreCase))
                     {
                         SwapLog.Warn("Addon 包包含越界路径，已跳过：" + entry.FullName);
                         continue;
@@ -1759,6 +1799,9 @@ namespace PclDlSwap.Payload.Swap
                 Files = new AddonFileStore(Path.Combine(SwapPaths.AddonDirectory(record.Id), "files"),
                     record.Id);
                 Messaging = new MessagingAccess(record.Id, record.Id);
+                Assets = new AddonAssetStore(Path.Combine(record.Directory ?? string.Empty, "assets"));
+                Localization = new AddonLocalizationStore(record.Directory,
+                    SwapI18n.Current);
             }
 
             public IHostInfo Host => _inner.Host;
@@ -1782,6 +1825,8 @@ namespace PclDlSwap.Payload.Swap
             public IAddonFiles Files { get; }
             public IAddonMessaging Messaging { get; }
             public IAddonServices Services { get; }
+            public IAddonAssets Assets { get; }
+            public IAddonLocalization Localization { get; }
 
             // Module lines keep their own file (LSPosed-style per-module log) and are tagged with the
             // module id in the global log, so "which module did this" never needs guessing.
@@ -1906,6 +1951,8 @@ namespace PclDlSwap.Payload.Swap
             public IPclThreadingAccess Threading => _inner.Threading;
             public IPclEnvironmentAccess Environment => _inner.Environment;
             public IPclProfileAccess Profiles { get { Require("launch"); return _inner.Profiles; } }
+            public IPclAppearanceAccess Appearance { get { Require("theme"); return _inner.Appearance; } }
+            public IPclWindowAccess Window { get { Require("window"); return _inner.Window; } }
         }
 
         /// <summary>
@@ -2020,6 +2067,22 @@ namespace PclDlSwap.Payload.Swap
             public FrameworkElement Table(IReadOnlyList<string> columns,
                 IReadOnlyList<IReadOnlyList<string>> rows, IReadOnlyList<double> columnWeights = null,
                 int maxHeight = 280) => _inner.Table(columns, rows, columnWeights, maxHeight);
+
+            public FrameworkElement SearchBox(string label, string placeholder, string initial,
+                Action<string> onChange) =>
+                _inner.SearchBox(label, placeholder, initial, onChange);
+
+            public FrameworkElement SegmentedControl(string label, IReadOnlyList<string> options,
+                int selectedIndex, Action<int> onChange) =>
+                _inner.SegmentedControl(label, options, selectedIndex, onChange);
+
+            public FrameworkElement ColorInput(string label, string initialHex,
+                Action<string> onChange) =>
+                _inner.ColorInput(label, initialHex, onChange);
+
+            public FrameworkElement SelectList(string label, IReadOnlyList<string> items,
+                int selectedIndex, Action<int> onChange) =>
+                _inner.SelectList(label, items, selectedIndex, onChange);
 
             public FrameworkElement EmptyState(string title, string message,
                 FrameworkElement action = null) => _inner.EmptyState(title, message, action);

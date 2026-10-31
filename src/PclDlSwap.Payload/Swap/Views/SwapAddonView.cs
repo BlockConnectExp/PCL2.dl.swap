@@ -431,6 +431,21 @@ namespace PclDlSwap.Payload.Swap.Views
                         : "v" + record.ConfigStore.SchemaVersion + i18n.T(
                             "，" + record.ConfigStore.Keys.Count + " 项",
                             ", " + record.ConfigStore.Keys.Count + " keys")));
+                content.Add(SwapUi.InfoRow(i18n.T("包内资产", "Packaged assets"),
+                    manifest.Files.Count(file =>
+                        file.Path != null &&
+                        file.Path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase)).ToString()));
+                var locales = manifest.Files
+                    .Where(file => file.Path != null &&
+                                   file.Path.StartsWith("i18n/", StringComparison.OrdinalIgnoreCase) &&
+                                   file.Path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    .Select(file => System.IO.Path.GetFileNameWithoutExtension(file.Path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                content.Add(SwapUi.InfoRow(i18n.T("语言包", "Language packs"),
+                    locales.Count == 0 ? i18n.T("（未提供）", "(none)") :
+                    string.Join(separator, locales)));
                 content.Add(SwapUi.InfoRow(i18n.T("发布服务", "Published services"),
                     AddonServiceRegistry.Snapshot(record.Id).Count.ToString()));
                 content.Add(SwapUi.InfoRow(i18n.T("权限声明", "Permissions"), manifest.Permissions.Count == 0

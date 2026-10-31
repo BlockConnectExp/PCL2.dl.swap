@@ -221,6 +221,21 @@ namespace PCL2Swap.Api
             IReadOnlyList<IReadOnlyList<string>> rows, IReadOnlyList<double> columnWeights = null,
             int maxHeight = 280);
 
+        /// <summary>A labelled search field with a clear affordance and live query callback.</summary>
+        FrameworkElement SearchBox(string label, string placeholder, string initial,
+            Action<string> onChange);
+
+        /// <summary>A compact mutually-exclusive mode switch for two to five short options.</summary>
+        FrameworkElement SegmentedControl(string label, IReadOnlyList<string> options,
+            int selectedIndex, Action<int> onChange);
+
+        /// <summary>A labelled #RRGGBB color field with a live swatch preview.</summary>
+        FrameworkElement ColorInput(string label, string initialHex, Action<string> onChange);
+
+        /// <summary>A compact selectable list for a small fixed set of choices.</summary>
+        FrameworkElement SelectList(string label, IReadOnlyList<string> items, int selectedIndex,
+            Action<int> onChange);
+
         /// <summary>A centered zero-content state with an optional single action.</summary>
         FrameworkElement EmptyState(string title, string message,
             FrameworkElement action = null);
@@ -281,6 +296,10 @@ namespace PCL2Swap.Api
         IAddonMessaging Messaging { get; }
         /// <summary>Cross-module service registry (API 1.10).</summary>
         IAddonServices Services { get; }
+        /// <summary>Read-only package assets shipped under <c>assets/</c> (API 1.11).</summary>
+        IAddonAssets Assets { get; }
+        /// <summary>Module-owned, lifetime-scoped localization pack (API 1.11).</summary>
+        IAddonLocalization Localization { get; }
         void Log(string message);
         void LogWarning(string message);
         void LogError(string message, Exception exception = null);

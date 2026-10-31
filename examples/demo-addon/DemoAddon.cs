@@ -19,6 +19,10 @@ namespace DemoAddon
         private int _launches;
         private int _messageHits;
         private double _volume = 50;
+        private int _mode;
+        private int _preset;
+        private string _search = string.Empty;
+        private string _color = "#3A7BD5";
 
         public interface IDemoService
         {
@@ -34,6 +38,10 @@ namespace DemoAddon
         {
             _context = context;
             var api = context.Api;
+            _mode = AddonSettings.GetInt(api.Data, "demo.mode", 0);
+            _preset = AddonSettings.GetInt(api.Data, "demo.preset", 0);
+            _search = AddonSettings.GetString(api.Data, "demo.search");
+            _color = AddonSettings.GetString(api.Data, "demo.color", "#3A7BD5");
             _launches = int.Parse(api.Data.Get("launches", "0")) + 1;
             api.Data.Set("launches", _launches.ToString());
             api.Data.Save();
@@ -64,11 +72,12 @@ namespace DemoAddon
             }
 
             api.Ui.RegisterSettingsPage("settings",
-                api.I18n.T("示例设置", "Demo Settings"), () => BuildSettings(api));
+                api.Localization.T("示例设置", "Demo Settings"), () => BuildSettings(api));
             api.Ui.RegisterMorePage("more",
-                api.I18n.T("示例页面", "Demo Page"), () => BuildMore(api));
+                api.Localization.T("示例页面", "Demo Page"), () => BuildMore(api));
 
-            api.Log($"Demo addon loaded (launch #{_launches}).");
+            api.Log($"Demo addon loaded (launch #{_launches}, assets={api.Assets.Assets.Count}, " +
+                    $"locales={string.Join(",", api.Localization.AvailableLocales)}).");
         }
 
         public void OnEnable()
@@ -202,7 +211,7 @@ namespace DemoAddon
                     }),
                 api.Ui.Separator(),
                 api.Ui.Link(api.I18n.T("打开 Swap 仓库", "Open the Swap repository"),
-                    "https://github.com/BlockConnectExp/PCL2.dlswap"),
+                    "https://github.com/BlockConnectExp/PCL2.dl.swap"),
                 api.Ui.Buttons(
                     api.Ui.Button(api.I18n.T("复制宿主版本", "Copy host version"), () =>
                     {
@@ -265,6 +274,46 @@ namespace DemoAddon
                             "Enable demo.advanced and reopen this page to see the extended front end."))));
             }
 
+            page.Children.Add(api.Ui.Card(
+                api.Localization.T("API 1.11 资产、语言与前端", "API 1.11 assets, languages and frontends"),
+                api.Ui.Badge("Assets " + api.Assets.Assets.Count, SwapHintType.Info),
+                api.Ui.Badge(api.Localization.CurrentLocale, SwapHintType.Success),
+                api.Ui.InfoRow(api.Localization.T("语言包", "Language packs"),
+                    string.Join(", ", api.Localization.AvailableLocales)),
+                api.Ui.SearchBox(api.Localization.T("筛选", "Filter"),
+                    api.Localization.T("输入关键词", "Type a keyword"), _search, value =>
+                    {
+                        _search = value ?? string.Empty;
+                        AddonSettings.SetString(api.Data, "demo.search", _search);
+                    }),
+                api.Ui.SegmentedControl(api.Localization.T("密度", "Density"),
+                    new[]
+                    {
+                        api.Localization.T("紧凑", "Compact"),
+                        api.Localization.T("标准", "Standard"),
+                        api.Localization.T("宽松", "Comfortable")
+                    }, _mode, value =>
+                    {
+                        _mode = value;
+                        AddonSettings.SetInt(api.Data, "demo.mode", value);
+                    }),
+                api.Ui.ColorInput(api.Localization.T("强调色", "Accent color"), _color, value =>
+                {
+                    _color = value;
+                    AddonSettings.SetString(api.Data, "demo.color", value);
+                }),
+                api.Ui.SelectList(api.Localization.T("页面预设", "Page preset"),
+                    new[]
+                    {
+                        api.Localization.T("启动页", "Launch"),
+                        api.Localization.T("下载页", "Download"),
+                        api.Localization.T("设置页", "Settings")
+                    }, _preset, value =>
+                    {
+                        _preset = value;
+                        AddonSettings.SetInt(api.Data, "demo.preset", value);
+                    })));
+
             return api.Ui.Scroll(page);
         }
 
@@ -272,7 +321,7 @@ namespace DemoAddon
         {
             var page = Page();
             page.Children.Add(api.Ui.Card(
-                api.I18n.T("示例页面", "Demo page"),
+                api.Localization.T("示例页面", "Demo page"),
                 api.Ui.Text(api.I18n.T(
                     "这是在「更多」侧栏注册的第二个页面槽位。",
                     "This page uses the second page slot, registered into the More sidebar.")),

@@ -125,6 +125,30 @@ namespace PclDlSwap.Payload.Swap
                     };
                     worker.Start();
                 }
+
+                var page = Environment.GetEnvironmentVariable("PCL2SWAP_E2E_PAGE");
+                if (!string.IsNullOrWhiteSpace(page))
+                {
+                    var worker = new Thread(() =>
+                    {
+                        try { Thread.Sleep(9000); } catch { }
+                        try
+                        {
+                            SwapLog.Info("[e2e] 打开页面（PCL2SWAP_E2E_PAGE）：" + page);
+                            var opened = PageRegistry.OpenPage(page);
+                            SwapLog.Info("[e2e] 页面打开结果：" + opened);
+                        }
+                        catch (Exception ex)
+                        {
+                            SwapLog.Error("[e2e] 页面打开失败：" + ex);
+                        }
+                    })
+                    {
+                        IsBackground = true,
+                        Name = "PCL2Swap.E2ePage"
+                    };
+                    worker.Start();
+                }
             }
             catch (Exception ex)
             {

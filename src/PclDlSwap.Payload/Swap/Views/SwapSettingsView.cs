@@ -28,6 +28,12 @@ namespace PclDlSwap.Payload.Swap.Views
                         PageRegistry.InvalidatePage("swap-settings");
                     }),
                 SwapUi.InfoRow(i18n.T("词典条目", "Dictionary entries"), i18n.Count.ToString()),
+                SwapUi.InfoRow(i18n.T("翻译引擎", "Translation engine"),
+                    HostTranslator.Passes.ToString("N0") + i18n.T(" 次 · ", " passes · ") +
+                    HostTranslator.LastDurationMilliseconds.ToString("0.0") + " ms"),
+                SwapUi.InfoRow(i18n.T("最近一轮", "Last pass"),
+                    HostTranslator.LastHits + i18n.T(" 处文本 · ", " strings · ") +
+                    HostTranslator.TrackedWindows + i18n.T(" 个窗口", " windows")),
                 SwapUi.Note(i18n.T(
                     "切换语言会立即重放宿主视觉树；每个控件的原文会单独记录，切回中文时可逆恢复。",
                     "Switching language reapplies the host visual tree immediately. Each translated control keeps its original text so switching back is reversible.")),

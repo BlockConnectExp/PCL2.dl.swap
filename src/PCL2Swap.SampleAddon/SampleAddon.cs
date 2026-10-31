@@ -31,6 +31,10 @@ namespace PCL2Swap.SampleAddon
         public static string LastHookTarget;
         public static string LastHostPath;
         public static string LastEnabledScopes;
+        public static int LastAssetCount;
+        public static int LastLocaleCount;
+        public static string LastLocalizedTitle;
+        public static int LastDemoMode;
 
         private ISwapApi _api;
         private IDisposable _hook;
@@ -63,6 +67,10 @@ namespace PCL2Swap.SampleAddon
             _api?.Data?.Save();
             LastHostPath = _api?.Pcl?.Environment?.HostPath;
             LastEnabledScopes = string.Join(",", _api?.Scopes?.Enabled ?? new string[0]);
+            LastAssetCount = _api?.Assets?.Assets.Count ?? 0;
+            LastLocaleCount = _api?.Localization?.AvailableLocales.Count ?? 0;
+            LastLocalizedTitle = _api?.Localization?.T("示例模块（Sample Addon）",
+                "Sample Addon (Demo)");
             try
             {
                 _api?.Files?.WriteText("sample/hello.txt",
@@ -317,6 +325,19 @@ namespace PCL2Swap.SampleAddon
                     "api.Messaging.Publish(\"sample.ready\", payload);\n" +
                     "api.Files.WriteText(\"sample/hello.txt\", text);\n" +
                     "api.I18n.Format(\"已处理 {0} 项\", count);")));
+
+            page.Children.Add(_api.Ui.Card("API 1.11 资产、语言与前端",
+                _api.Ui.Badge("Assets " + (_api.Assets?.Assets.Count ?? 0), SwapHintType.Info),
+                _api.Ui.Badge("Locales " + (_api.Localization?.AvailableLocales.Count ?? 0),
+                    SwapHintType.Success),
+                _api.Ui.InfoRow("Localized title",
+                    _api.Localization?.T("示例模块（Sample Addon）", "Sample Addon (Demo)")),
+                _api.Ui.SearchBox("Search", "Type to filter", string.Empty, _ => { }),
+                _api.Ui.SegmentedControl("Density",
+                    new[] { "Compact", "Standard", "Comfortable" }, 1, index => LastDemoMode = index),
+                _api.Ui.ColorInput("Accent color", "#3A7BD5", _ => { }),
+                _api.Ui.SelectList("Preset",
+                    new[] { "Launch", "Download", "Settings" }, 0, _ => { })));
 
             // Live view: the page is built once and cached, so a timer keeps the counters honest
             // while the user is looking at it.

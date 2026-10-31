@@ -10,13 +10,14 @@
       dist\PCL2.dl.swap-Injector-<ver>.zip            the release asset
 
     Usage:
-      .\scripts\build-injector.ps1 -ToolVersion "v26.3-Alpha2"
+      .\scripts\build-injector.ps1 -ToolVersion "v26.3-Alpha3"
 #>
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [string]$ToolVersion = 'v26.3-Alpha2',
-    [string]$DistDir = 'dist'
+    [string]$ToolVersion = 'v26.3-Alpha3',
+    [string]$DistDir = 'dist',
+    [switch]$NoRestore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +30,13 @@ if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Path $out -Force | Out-Null
 
 Write-Host "[injector] publishing $project"
-& dotnet publish $project -c $Configuration -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -o $out --nologo
+$publishArgs = @(
+    'publish', $project, '-c', $Configuration,
+    '-p:Platform=x64', '-p:RuntimeIdentifier=win-x64',
+    '-o', $out, '--nologo'
+)
+if ($NoRestore) { $publishArgs += '--no-restore' }
+& dotnet @publishArgs
 if ($LASTEXITCODE -ne 0) { throw 'injector publish failed' }
 
 # Ship the same shim pair the ExLoader card uses, so the injector works offline.

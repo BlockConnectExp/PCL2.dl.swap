@@ -27,6 +27,8 @@ namespace PCL2Swap.Api
         IPclThreadingAccess Threading { get; }
         IPclEnvironmentAccess Environment { get; }
         IPclProfileAccess Profiles { get; }
+        IPclAppearanceAccess Appearance { get; }
+        IPclWindowAccess Window { get; }
     }
 
     /// <summary>
@@ -95,6 +97,36 @@ namespace PCL2Swap.Api
 
         /// <summary>PCL's McSkinInfo instance for the current selection.</summary>
         object SelectedSkin();
+    }
+
+    /// <summary>
+    /// Live theme fields used by PCL's own appearance page. Mutations stay on the launcher UI
+    /// thread; call <see cref="Refresh"/> after a batch of writes to repaint the host.
+    /// </summary>
+    public interface IPclAppearanceAccess
+    {
+        int ThemeId { get; set; }
+        double Hue { get; set; }
+        double Saturation { get; set; }
+        double LightAdjustment { get; set; }
+
+        /// <summary>Calls ModSecret.ThemeRefreshMain without resetting ThemeNow.</summary>
+        void Refresh();
+    }
+
+    /// <summary>Main-launcher window controls backed by the real WPF window.</summary>
+    public interface IPclWindowAccess
+    {
+        bool IsVisible { get; }
+        bool IsActive { get; }
+        string State { get; set; }
+        bool Topmost { get; set; }
+        string Title { get; set; }
+
+        void Activate();
+        void Minimize();
+        void Maximize();
+        void Restore();
     }
 
     /// <summary>Host helpers for opening paths with the user's shell (API 1.2).</summary>

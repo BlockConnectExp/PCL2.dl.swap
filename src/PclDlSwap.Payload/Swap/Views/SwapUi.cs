@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -392,6 +393,192 @@ namespace PclDlSwap.Payload.Swap.Views
                 catch (Exception ex) { SwapLog.Warn("SwapUi：输入回调失败：" + ex.Message); }
             };
             return Row(label, box);
+        }
+
+        /// <summary>Search field with a persistent placeholder and an inline clear action.</summary>
+        internal static FrameworkElement SearchBox(string label, string placeholder, string initial,
+            Action<string> onChange)
+        {
+            TextBox box = null;
+            var boxType = HostType("PCL.MyTextBox");
+            if (boxType != null)
+            {
+                try { box = Activator.CreateInstance(boxType) as TextBox; }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("SwapUi：MyTextBox(search) 构建失败，退回标准输入框：" + ex.Message);
+                }
+            }
+            if (box == null) box = new TextBox();
+            box.Text = initial ?? string.Empty;
+            box.Height = 35;
+            box.Padding = new Thickness(10, 0, 34, 0);
+            box.VerticalContentAlignment = VerticalAlignment.Center;
+
+            var hint = Text(placeholder ?? string.Empty, 12, true, false);
+            hint.Margin = new Thickness(11, 0, 0, 0);
+            hint.VerticalAlignment = VerticalAlignment.Center;
+            hint.IsHitTestVisible = false;
+
+            var clear = new Button
+            {
+                Content = "×",
+                Width = 30,
+                Height = 29,
+                Padding = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 2, 0),
+                ToolTip = SwapI18n.Current.IsEnglish ? "Clear search" : "清空搜索",
+                Visibility = string.IsNullOrEmpty(box.Text) ? Visibility.Collapsed : Visibility.Visible
+            };
+            clear.Click += (sender, args) => box.Text = string.Empty;
+
+            var host = new Grid();
+            host.Children.Add(box);
+            host.Children.Add(hint);
+            host.Children.Add(clear);
+
+            Action refresh = () =>
+            {
+                hint.Visibility = string.IsNullOrEmpty(box.Text) ? Visibility.Visible : Visibility.Collapsed;
+                clear.Visibility = string.IsNullOrEmpty(box.Text) ? Visibility.Collapsed : Visibility.Visible;
+            };
+            box.TextChanged += (sender, args) =>
+            {
+                refresh();
+                try { onChange?.Invoke(box.Text); }
+                catch (Exception ex) { SwapLog.Warn("SwapUi：搜索回调失败：" + ex.Message); }
+            };
+            refresh();
+            return string.IsNullOrEmpty(label) ? (FrameworkElement)host : Row(label, host);
+        }
+
+        /// <summary>Compact segmented switch for short mutually-exclusive modes.</summary>
+        internal static FrameworkElement SegmentedControl(string label, IReadOnlyList<string> options,
+            int selectedIndex, Action<int> onChange)
+        {
+            options = options ?? new string[0];
+            var grid = new UniformGrid
+            {
+                Rows = 1,
+                Height = 34,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var buttons = new List<Button>();
+            Action<int> select = selected =>
+            {
+                for (var index = 0; index < buttons.Count; index++)
+                {
+                    var active = index == selected;
+                    buttons[index].FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
+                    buttons[index].Opacity = active ? 1.0 : 0.66;
+                    buttons[index].Tag = active;
+                }
+                RelayInt(onChange, selected);
+            };
+
+            for (var index = 0; index < options.Count; index++)
+            {
+                var optionIndex = index;
+                var button = new Button
+                {
+                    Content = options[index] ?? string.Empty,
+                    Height = 34,
+                    Padding = new Thickness(10, 0, 10, 0),
+                    Margin = new Thickness(index == 0 ? 0 : -1, 0, 0, 0),
+                    BorderThickness = new Thickness(1),
+                    Tag = index == selectedIndex
+                };
+                UseBrush(button, Control.BorderBrushProperty, "ColorBrush7");
+                button.Click += (sender, args) => select(optionIndex);
+                buttons.Add(button);
+                grid.Children.Add(button);
+            }
+            if (buttons.Count > 0)
+            {
+                var safe = Math.Max(0, Math.Min(buttons.Count - 1, selectedIndex));
+                for (var index = 0; index < buttons.Count; index++)
+                {
+                    buttons[index].FontWeight = index == safe ? FontWeights.SemiBold : FontWeights.Normal;
+                    buttons[index].Opacity = index == safe ? 1.0 : 0.66;
+                }
+            }
+            return string.IsNullOrEmpty(label) ? (FrameworkElement)grid : Row(label, grid);
+        }
+
+        /// <summary>Hex colour field with a live swatch and validation without a third-party picker.</summary>
+        internal static FrameworkElement ColorInput(string label, string initialHex,
+            Action<string> onChange)
+        {
+            var swatch = new Border
+            {
+                Width = 32,
+                Height = 32,
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(50, 0, 0, 0)),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            var box = new TextBox
+            {
+                Text = initialHex ?? "#3A7BD5",
+                Width = 112,
+                Height = 35,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            var panel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            panel.Children.Add(swatch);
+            panel.Children.Add(box);
+
+            Action apply = () =>
+            {
+                try
+                {
+                    if (!(ColorConverter.ConvertFromString(box.Text) is Color color)) return;
+                    swatch.Background = new SolidColorBrush(color);
+                    var normalized = "#" + color.R.ToString("X2") + color.G.ToString("X2") +
+                                     color.B.ToString("X2");
+                    onChange?.Invoke(normalized);
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("SwapUi：颜色值无效：" + ex.Message);
+                }
+            };
+            box.TextChanged += (sender, args) => apply();
+            apply();
+            return Row(label, panel);
+        }
+
+        /// <summary>Short selectable list; the selected row stays visible without a dropdown.</summary>
+        internal static FrameworkElement SelectList(string label, IReadOnlyList<string> items,
+            int selectedIndex, Action<int> onChange)
+        {
+            items = items ?? new string[0];
+            var list = new ListBox
+            {
+                MinHeight = 38,
+                MaxHeight = 154,
+                Margin = new Thickness(0, 0, 0, 8),
+                BorderThickness = new Thickness(1),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch
+            };
+            UseBrush(list, Control.BorderBrushProperty, "ColorBrush7");
+            foreach (var item in items)
+                list.Items.Add(new ListBoxItem { Content = item ?? string.Empty, Padding = new Thickness(9, 5, 9, 5) });
+            if (items.Count > 0)
+                list.SelectedIndex = Math.Max(0, Math.Min(items.Count - 1, selectedIndex));
+            list.SelectionChanged += (sender, args) =>
+            {
+                if (list.SelectedIndex >= 0) RelayInt(onChange, list.SelectedIndex);
+            };
+            return string.IsNullOrEmpty(label) ? (FrameworkElement)list : Row(label, list);
         }
 
         /// <summary>Underlined link that opens through PCL's own OpenWebsite helper (API 1.1).</summary>

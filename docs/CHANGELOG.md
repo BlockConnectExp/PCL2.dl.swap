@@ -6,6 +6,42 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-20:00:00 v26.3-Alpha 3: 英文性能、包资产与 API 1.11
+
+GitCommitHash: pending
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\AddonAssets.cs                  只读包资产契约
+.\src\PCL2Swap.Api\AddonLocalization.cs            模块生命周期语言包契约
+.\src\PCL2Swap.Api\IPclAccess.cs                   Appearance / Window 后端
+.\src\PCL2Swap.Api\ISwapApi.cs                     Assets / Localization / 新前端（API 1.11）
+.\src\PCL2Swap.Api\ModuleCatalog.cs                资产数与语言包诊断
+.\src\PclDlSwap.Payload\Swap\AddonResources.cs     路径受限资产、模块语言包与热重载
+.\src\PclDlSwap.Payload\Swap\HostTranslator.cs     合并翻译调度与运行诊断
+.\src\PclDlSwap.Payload\Swap\I18n.Extra.cs         新增高频页面、联机、外观与错误词条
+.\src\PclDlSwap.Payload\Swap\PclAccess.cs          ThemeRefreshMain 与宿主窗口控制
+.\src\PclDlSwap.Payload\Swap\Views\SwapUi.cs       SearchBox / SegmentedControl / ColorInput / SelectList
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs       assets/i18n 装配、权限与 zip-slip 边界
+.\src\PclDlSwap.Payload\Swap\SelfTest.cs           API 1.11 真机探针
+.\src\PclDlSwap.ExLoaderHarness\Program.cs         资产、语言包、宿主控制、前端与安全回归
+.\tools\PclAddonPack\Program.cs                    --assets / --i18n 打包与哈希清单
+.\examples\demo-addon\                             Demo 实际使用 API 1.11
+.\scripts\i18n-audit.ps1                           exact / phrase 分离审计
+.\scripts\capture-window.ps1                       GPU 窗口截图辅助
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|英文支持|精确词典扩展到 610 条，并增加 60 条动态短语（10 条重叠，去重 660）；官方 2.99.0.1 页面审计为 388/1692（22.93%），审计脚本不再把短语混入精确覆盖率|2026.10.31-20:00:00|PCL2.dlswap
+2|翻译性能|LayoutUpdated 改为 500ms 静默合并、1.5s 最大延迟和 4s 兜底；实测首轮 13 处 37.5ms、后续 1.7ms，Swap Settings 显示轮次/耗时/窗口数|2026.10.31-20:00:00|PCL2.dlswap
+3|API 1.11|新增 `IAddonAssets`、`IAddonLocalization`、`IPclAppearanceAccess`、`IPclWindowAccess`；模块目录暴露资产数和 locale；严格模式新增 `theme` / `window`|2026.10.31-20:00:00|PCL2.dlswap
+4|前端与包格式|新增 SearchBox、SegmentedControl、ColorInput、SelectList；`.swapaddon` 的 assets/i18n 进入 manifest 哈希清单，模块语言包随禁用/重载/卸载失效|2026.10.31-20:00:00|PCL2.dlswap
+5|安全与共性修复|Addon 解包改用目录分隔符边界，覆盖兄弟前缀 zip-slip；内置模块空 `Directory` 不再触发 `Path.GetFullPath("")`；模块语言包 Reload 能识别同 locale 内容变化|2026.10.31-20:00:00|PCL2.dlswap
+6|验证|11 套 harness PASS；偏移清单 2.99.0.0/2.99.0.1 PASS；两版真机注入自检 `ok=84 fail=0`，Demo `assets=1`、双语包和真实页面导航 PASS|2026.10.31-20:00:00|PCL2.dlswap
+
+---
 ## 2026.10.31-16:20:00 v26.3-Alpha 2: 可靠配置与模块服务
 
 GitCommitHash: e0688ed

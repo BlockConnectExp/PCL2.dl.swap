@@ -15,7 +15,7 @@ namespace PclDlSwap.PclAddonPack
     ///                --entry &lt;type&gt; [--api "&gt;=1.0 &lt;2.0"] [--description "..."]
     ///                [--shapes "injected,patched"] [--host-versions "&gt;=2.99.0"]
     ///                [--permissions "host.hooks.attach"] [--scope "id;Name;Description;true;NameEn;DescriptionEn"]
-    ///                [--assets &lt;dir&gt;] [--out &lt;file&gt;]
+    ///                [--assets &lt;dir&gt;] [--i18n &lt;dir&gt;] [--out &lt;file&gt;]
     /// The entry type is validated with dnlib (no addon code is executed here), so a typo in
     /// --entry fails at packaging time instead of inside the launcher.
     /// </summary>
@@ -28,7 +28,7 @@ namespace PclDlSwap.PclAddonPack
             Console.OutputEncoding = Encoding.UTF8;
 
             string project = null, id = null, name = null, version = null, entry = null;
-            string api = ">=1.0 <2.0", description = null, assets = null, output = null;
+            string api = ">=1.0 <2.0", description = null, assets = null, i18n = null, output = null;
             string shapes = null, hostVersions = null, permissions = null;
             string signKey = null, genKey = null;
             var scopeSpecs = new List<string>();
@@ -51,6 +51,7 @@ namespace PclDlSwap.PclAddonPack
                     case "--sign": signKey = args[++i]; break;
                     case "--gen-key": genKey = args[++i]; break;
                     case "--assets": assets = args[++i]; break;
+                    case "--i18n": i18n = args[++i]; break;
                     case "--out": output = args[++i]; break;
                     default:
                         Console.Error.WriteLine("未知参数：" + args[i]);
@@ -87,13 +88,23 @@ namespace PclDlSwap.PclAddonPack
                     "                  [--shapes \"injected,patched\"] [--host-versions \">=2.99.0\"]\n" +
                     "                  [--permissions \"host.hooks.attach,host.settings.write\"]\n" +
                     "                  [--scope \"id;Name;Description;true;NameEn;DescriptionEn\"]   （可重复）\n" +
-                    "                  [--assets <dir>] [--out <file>] [--sign <private-key.xml>]\n" +
+                    "                  [--assets <dir>] [--i18n <dir>] [--out <file>] [--sign <private-key.xml>]\n" +
                     "       PclAddonPack --gen-key <private-key.xml>   （生成签名密钥对）");
                 return 2;
             }
             if (!Directory.Exists(project))
             {
                 Console.Error.WriteLine("项目目录不存在：" + project);
+                return 2;
+            }
+            if (assets != null && !Directory.Exists(assets))
+            {
+                Console.Error.WriteLine("assets 目录不存在：" + assets);
+                return 2;
+            }
+            if (i18n != null && !Directory.Exists(i18n))
+            {
+                Console.Error.WriteLine("i18n 目录不存在：" + i18n);
                 return 2;
             }
 
@@ -129,6 +140,12 @@ namespace PclDlSwap.PclAddonPack
                 payload.AddRange(Directory.GetFiles(assets, "*", SearchOption.AllDirectories)
                     .Select(file => new KeyValuePair<string, string>(
                         "assets/" + file.Substring(assetRoot.Length + 1).Replace('\\', '/'), file)));
+            }
+            if (i18n != null && Directory.Exists(i18n))
+            {
+                payload.AddRange(Directory.GetFiles(i18n, "*.json", SearchOption.TopDirectoryOnly)
+                    .Select(file => new KeyValuePair<string, string>(
+                        "i18n/" + Path.GetFileName(file), file)));
             }
 
             var fields = new List<string>

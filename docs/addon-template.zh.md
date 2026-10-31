@@ -2,7 +2,8 @@
 
 > Summary: the smallest complete, buildable PCL2 Swap addon. Copy `examples/demo-addon`, rename
 > the id, and you have a module with two page slots, widgets, persisted data, strict permissions,
-> bilingual feature scopes, versioned config, cross-module services and a live scope-event consumer.
+> bilingual feature scopes, package assets, a module language pack, versioned config,
+> cross-module services and a live scope-event consumer.
 
 ---
 
@@ -13,6 +14,8 @@ examples/demo-addon/
 ├── DemoAddon.csproj     net48 + WPF，引用 PCL2Swap.Api.dll（Private=false）
 ├── DemoAddon.cs         ISwapAddon 生命周期 + 设置页 + 更多页 + 控件
 ├── build.ps1            dotnet build + PclAddonPack → demo.sample.swapaddon
+├── assets/              只读包内资产（PclAddonPack --assets）
+├── i18n/                en-US.json / zh-CN.json（PclAddonPack --i18n）
 └── README.md            使用说明（含 Hook 示例）
 ```
 
@@ -48,7 +51,11 @@ cd examples\demo-addon
 | 模块消息 | `api.Messaging.Subscribe/Publish`（`messaging` 权限） |
 | 模块服务 | `api.Services.Register/TryGet/Get/Changed`（`services` 权限） |
 | 私有文件 | `api.Files.Read/Write/List/Delete`（`files` 权限，路径限制在模块根目录） |
+| 包内资产 | `api.Assets.List/ReadText/ReadBytes/OpenRead`（只读、含大小与 SHA-256） |
+| 模块语言包 | `api.Localization.T/Format/Register/Reload`；`i18n/en-US.json` + `zh-CN.json` |
 | 数据前端 | `api.Ui.Table` / `EmptyState` / `CodeBlock` / `Scroll` |
+| 新前端 | `api.Ui.SearchBox` / `SegmentedControl` / `ColorInput` / `SelectList` |
+| 宿主外观 | `api.Pcl.Appearance`（`theme` 权限）与 `api.Pcl.Window`（`window` 权限） |
 | 功能作用域 | `api.Scopes.Scopes/Enabled/IsEnabled/Changed`；manifest `scopes[]` 支持 `nameEn` / `descriptionEn` |
 | 作用域 Hook | `api.Hooks.Attach(target, hookId, scopeId, handler, mode)`，关闭 scope 即直通原方法 |
 

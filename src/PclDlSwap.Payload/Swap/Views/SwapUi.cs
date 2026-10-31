@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -810,6 +811,183 @@ namespace PclDlSwap.Payload.Swap.Views
             tabs.SelectedIndex = Math.Max(0, Math.Min(titles.Count - 1, selectedIndex));
             return tabs;
         }
+
+        /// <summary>Compact structured event stream with semantic dots and module attribution.</summary>
+        internal static FrameworkElement Timeline(IReadOnlyList<SwapDiagnosticEvent> events,
+            int maxHeight = 260)
+        {
+            if (events == null || events.Count == 0) return Note("(no events)", true);
+
+            var panel = new StackPanel { Margin = new Thickness(0, 2, 6, 2) };
+            foreach (var item in events.Reverse())
+            {
+                if (item == null) continue;
+                var row = new Grid { Margin = new Thickness(0, 0, 0, 9) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var dot = new Border
+                {
+                    Width = 7,
+                    Height = 7,
+                    CornerRadius = new CornerRadius(4),
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(2, 5, 0, 0),
+                    Background = new SolidColorBrush(BannerColor(item.Severity))
+                };
+                row.Children.Add(dot);
+
+                var text = new StackPanel();
+                var meta = new WrapPanel { Margin = new Thickness(0, 0, 0, 2) };
+                var time = Text(item.TimestampUtc.ToLocalTime().ToString("HH:mm:ss"),
+                    10.5, true, false);
+                time.Margin = new Thickness(0, 0, 8, 0);
+                meta.Children.Add(time);
+                if (!string.IsNullOrEmpty(item.ModuleId))
+                    meta.Children.Add(Badge(item.ModuleId, item.Severity));
+                meta.Children.Add(Badge(item.Level, item.Severity));
+                text.Children.Add(meta);
+                text.Children.Add(Text(item.Message ?? string.Empty, 12));
+                Grid.SetColumn(text, 1);
+                row.Children.Add(text);
+                panel.Children.Add(row);
+            }
+
+            return new ScrollViewer
+            {
+                Content = panel,
+                MaxHeight = Math.Max(80, Math.Min(600, maxHeight)),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+            };
+        }
+
+        /// <summary>Read-only table for inventories and comparisons without hand-building grids.</summary>
+        internal static FrameworkElement Table(IReadOnlyList<string> columns,
+            IReadOnlyList<IReadOnlyList<string>> rows, IReadOnlyList<double> columnWeights = null,
+            int maxHeight = 280)
+        {
+            if (columns == null || columns.Count == 0)
+                return Note(SwapI18n.Current.IsEnglish ? "(no columns)" : "（没有列）", true);
+
+            var table = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                CanUserDeleteRows = false,
+                CanUserReorderColumns = false,
+                CanUserResizeRows = false,
+                IsReadOnly = true,
+                HeadersVisibility = DataGridHeadersVisibility.Column,
+                GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+                RowHeaderWidth = 0,
+                ColumnHeaderHeight = 34,
+                RowHeight = 32,
+                MaxHeight = Math.Max(100, Math.Min(800, maxHeight)),
+                Margin = new Thickness(0, 0, 0, 8),
+                SelectionMode = DataGridSelectionMode.Single,
+                SelectionUnit = DataGridSelectionUnit.FullRow,
+                ItemsSource = rows ?? (IReadOnlyList<IReadOnlyList<string>>)
+                    Array.Empty<IReadOnlyList<string>>()
+            };
+
+            for (var index = 0; index < columns.Count; index++)
+            {
+                var weight = columnWeights != null && index < columnWeights.Count &&
+                             columnWeights[index] > 0
+                    ? columnWeights[index]
+                    : 1;
+                table.Columns.Add(new DataGridTextColumn
+                {
+                    Header = columns[index] ?? string.Empty,
+                    Binding = new System.Windows.Data.Binding("[" + index + "]"),
+                    Width = new DataGridLength(weight, DataGridLengthUnitType.Star)
+                });
+            }
+            return table;
+        }
+
+        /// <summary>Centered zero-content state; one action keeps the next step unambiguous.</summary>
+        internal static FrameworkElement EmptyState(string title, string message,
+            FrameworkElement action = null)
+        {
+            var body = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = 460
+            };
+
+            var heading = Text(title, 15, false, true, FontWeights.SemiBold);
+            heading.HorizontalAlignment = HorizontalAlignment.Center;
+            heading.Margin = new Thickness(0, 0, 0, 7);
+            body.Children.Add(heading);
+
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                var note = Text(message, 12, true);
+                note.TextAlignment = TextAlignment.Center;
+                note.HorizontalAlignment = HorizontalAlignment.Center;
+                note.LineHeight = 18;
+                note.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+                note.Margin = new Thickness(0, 0, 0, 6);
+                body.Children.Add(note);
+            }
+
+            if (action != null)
+            {
+                action.HorizontalAlignment = HorizontalAlignment.Center;
+                action.Margin = new Thickness(0, 9, 0, 0);
+                body.Children.Add(action);
+            }
+
+            return new Border
+            {
+                MinHeight = 150,
+                Padding = new Thickness(24, 28, 24, 28),
+                Margin = new Thickness(0, 0, 0, 12),
+                CornerRadius = new CornerRadius(5),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(36, 0, 0, 0)),
+                Child = body
+            };
+        }
+
+        /// <summary>Read-only monospace block for JSON, config snippets and crash excerpts.</summary>
+        internal static FrameworkElement CodeBlock(string text, int maxHeight = 240)
+        {
+            var box = new TextBox
+            {
+                Text = text ?? string.Empty,
+                IsReadOnly = true,
+                AcceptsReturn = true,
+                AcceptsTab = true,
+                TextWrapping = TextWrapping.NoWrap,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 11.5,
+                Padding = new Thickness(11, 9, 11, 9),
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MaxHeight = Math.Max(80, Math.Min(700, maxHeight))
+            };
+            UseBrush(box, TextBox.ForegroundProperty, "ColorBrush1");
+
+            return new Border
+            {
+                Margin = new Thickness(0, 0, 0, 8),
+                CornerRadius = new CornerRadius(5),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(38, 0, 0, 0)),
+                Background = new SolidColorBrush(Color.FromArgb(12, 0, 0, 0)),
+                Child = box
+            };
+        }
+
+        /// <summary>Wraps long addon pages in the host's scroll viewer, with a stock fallback.</summary>
+        internal static FrameworkElement Scroll(FrameworkElement content) =>
+            SwapAddonView.Wrap(content);
 
         private static Color BannerColor(SwapHintType type)
         {

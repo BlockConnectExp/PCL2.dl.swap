@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using PCL2Swap.Api;
 using PclDlSwap.Payload.Host;
@@ -65,6 +66,49 @@ namespace PclDlSwap.Payload.Swap
         {
             if (string.IsNullOrWhiteSpace(chinese) || string.IsNullOrEmpty(english)) return;
             lock (Gate) _english[chinese.Trim()] = english;
+        }
+
+        public int RegisterMany(IReadOnlyDictionary<string, string> entries)
+        {
+            if (entries == null || entries.Count == 0) return 0;
+            var changed = 0;
+            lock (Gate)
+            {
+                foreach (var pair in entries)
+                {
+                    if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrEmpty(pair.Value))
+                        continue;
+                    var key = pair.Key.Trim();
+                    if (_english.TryGetValue(key, out var current) &&
+                        string.Equals(current, pair.Value, StringComparison.Ordinal))
+                        continue;
+                    _english[key] = pair.Value;
+                    changed++;
+                }
+            }
+            return changed;
+        }
+
+        public string Format(string chineseFormat, params object[] arguments)
+        {
+            var format = T(chineseFormat);
+            if (arguments == null || arguments.Length == 0) return format;
+            try
+            {
+                return string.Format(CultureInfo.CurrentUICulture, format, arguments);
+            }
+            catch (FormatException)
+            {
+                // A dictionary override with an invalid placeholder must not break the host UI.
+                SwapLog.Warn("[i18n] 格式字符串占位符无效：" + (chineseFormat ?? string.Empty));
+                return format;
+            }
+        }
+
+        public bool TryTranslate(string chinese, out string translated)
+        {
+            translated = Lookup(chinese);
+            return translated != null;
         }
 
         public void SetLanguage(SwapLanguage language)
@@ -197,14 +241,36 @@ namespace PclDlSwap.Payload.Swap
         {
             try
             {
-                var path = Path.Combine(SwapPaths.DataRoot, "i18n", "en-US.json");
-                if (!File.Exists(path)) return;
-                var json = File.ReadAllText(path);
-                var parsed = new System.Web.Script.Serialization.JavaScriptSerializer()
-                    .Deserialize<Dictionary<string, string>>(json);
-                if (parsed == null) return;
-                foreach (var pair in parsed) _english[pair.Key] = pair.Value;
-                SwapLog.Info("[i18n] 磁盘覆盖已加载：" + path + "（" + parsed.Count + " 条）。");
+                var directory = Path.Combine(SwapPaths.DataRoot, "i18n");
+                var files = new List<string>();
+                var primary = Path.Combine(directory, "en-US.json");
+                if (File.Exists(primary)) files.Add(primary);
+
+                var packDirectory = Path.Combine(directory, "en-US");
+                if (Directory.Exists(packDirectory))
+                    files.AddRange(Directory.GetFiles(packDirectory, "*.json")
+                        .OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
+
+                var loaded = 0;
+                foreach (var path in files)
+                {
+                    try
+                    {
+                        var json = File.ReadAllText(path);
+                        var parsed = new System.Web.Script.Serialization.JavaScriptSerializer()
+                            .Deserialize<Dictionary<string, string>>(json);
+                        if (parsed == null) continue;
+                        foreach (var pair in parsed) _english[pair.Key] = pair.Value;
+                        loaded += parsed.Count;
+                        SwapLog.Info("[i18n] 磁盘覆盖已加载：" + path + "（" + parsed.Count + " 条）。");
+                    }
+                    catch (Exception ex)
+                    {
+                        SwapLog.Warn("[i18n] 语言包加载失败：" + path + " | " + ex.Message);
+                    }
+                }
+                if (loaded > 0)
+                    SwapLog.Info("[i18n] 磁盘覆盖合计 " + loaded + " 条（目录 " + packDirectory + "）。");
             }
             catch (Exception ex)
             {

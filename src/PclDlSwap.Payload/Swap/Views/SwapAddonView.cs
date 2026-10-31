@@ -256,7 +256,8 @@ namespace PclDlSwap.Payload.Swap.Views
 
             if (!string.IsNullOrEmpty(record.Description))
             {
-                var description = SwapUi.Text(record.Description, 11.5, true);
+                var description = SwapUi.Text(i18n.T(record.Description, GetBuiltInDescription(record, i18n)),
+                    11.5, true);
                 description.Margin = new Thickness(0, 3, 12, 0);
                 left.Children.Add(description);
             }
@@ -357,6 +358,25 @@ namespace PclDlSwap.Payload.Swap.Views
                 grid.Children.Add(actions);
             }
             return grid;
+        }
+
+        private static string GetBuiltInDescription(AddonManager.AddonRecord record,
+            SwapI18n i18n)
+        {
+            switch (record?.Id)
+            {
+                case "swap.download-mc":
+                    return i18n.T("恢复原版游戏下载页（LoaderInit 重驱动 + 2.99.0.1 侧栏修复）。",
+                        "Restores the vanilla download page (LoaderInit rerun plus the 2.99.0.1 sidebar repair).");
+                case "swap.ota-protector":
+                    return i18n.T("静默 OTA 显式确认；启动器文件下载完成后查毒（游戏内容不查）。",
+                        "Makes silent OTA updates explicit and scans launcher files after download (not game content).");
+                case "swap.cancel-button":
+                    return i18n.T("给本来没有取消按钮的弹窗追加一个取消（MyMsgBox 家族）。",
+                        "Adds a Cancel action to dialogs that otherwise have none (MyMsgBox family).");
+                default:
+                    return i18n.T(record?.Description ?? string.Empty);
+            }
         }
 
         /// <summary>
@@ -764,6 +784,7 @@ namespace PclDlSwap.Payload.Swap.Views
                 case "launch": return i18n.T("启动游戏和账户资料", "Launch games and account profiles");
                 case "settings": return i18n.T("读写 PCL 设置", "Read/write PCL settings");
                 case "instance": return i18n.T("访问游戏实例", "Access game instances");
+                case "messaging": return i18n.T("与模块交换消息", "Exchange module messages");
                 case "*": return i18n.T("全部权限", "All permissions");
                 default: return permission ?? "(unknown)";
             }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -26,6 +27,8 @@ namespace PclDlSwap.Payload.Swap
         private static readonly object Gate = new object();
         private static readonly List<Window> Windows = new List<Window>();
         private static readonly HashSet<Window> Hooked = new HashSet<Window>();
+        private static readonly ConditionalWeakTable<DependencyObject, TranslationState> Ledger =
+            new ConditionalWeakTable<DependencyObject, TranslationState>();
         private static DateTime _lastPass = DateTime.MinValue;
         private static volatile bool _started;
         private static int _lastHits;
@@ -244,16 +247,19 @@ namespace PclDlSwap.Payload.Swap
                 if (block.Inlines.Count > 0)
                     hits += TranslateInlines(block.Inlines, i18n);
                 else
-                    hits += Replace(block.Text, value => block.Text = value, i18n.Translate);
+                    hits += TranslateValue(block, "text", block.Text,
+                        value => block.Text = value, i18n);
             }
 
             if (node is AccessText access)
-                hits += Replace(access.Text, value => access.Text = value, i18n.Translate);
+                hits += TranslateValue(access, "text", access.Text,
+                    value => access.Text = value, i18n);
 
             // The launch log renders into a read-only TextBox on some builds; editable inputs are
             // deliberately left alone so user text is never rewritten.
             if (node is TextBox readOnly && readOnly.IsReadOnly)
-                hits += Replace(readOnly.Text, value => readOnly.Text = value, i18n.Translate);
+                hits += TranslateValue(readOnly, "text", readOnly.Text,
+                    value => readOnly.Text = value, i18n);
 
             if (node is RichTextBox richTextBox && richTextBox.Document != null)
             {
@@ -265,37 +271,26 @@ namespace PclDlSwap.Payload.Swap
             }
 
             if (node is Window window)
-                hits += Replace(window.Title, value => window.Title = value, i18n.Translate);
+                hits += TranslateValue(window, "title", window.Title,
+                    value => window.Title = value, i18n);
 
             if (node is ContentControl content && content.Content is string contentText)
             {
-                var updated = i18n.Translate(contentText);
-                if (!ReferenceEquals(updated, contentText) && updated != contentText)
-                {
-                    content.Content = updated;
-                    hits++;
-                }
+                hits += TranslateValue(content, "content", contentText,
+                    value => content.Content = value, i18n);
             }
 
             if (node is HeaderedContentControl headered && headered.Header is string headerText)
             {
-                var updated = i18n.Translate(headerText);
-                if (!ReferenceEquals(updated, headerText) && updated != headerText)
-                {
-                    headered.Header = updated;
-                    hits++;
-                }
+                hits += TranslateValue(headered, "header", headerText,
+                    value => headered.Header = value, i18n);
             }
 
             if (node is HeaderedItemsControl headeredItems &&
                 headeredItems.Header is string itemsHeader)
             {
-                var updated = i18n.Translate(itemsHeader);
-                if (!ReferenceEquals(updated, itemsHeader) && updated != itemsHeader)
-                {
-                    headeredItems.Header = updated;
-                    hits++;
-                }
+                hits += TranslateValue(headeredItems, "header", itemsHeader,
+                    value => headeredItems.Header = value, i18n);
             }
 
             if (node is DataGrid dataGrid)
@@ -303,10 +298,8 @@ namespace PclDlSwap.Payload.Swap
                 foreach (var column in dataGrid.Columns)
                 {
                     if (!(column.Header is string header)) continue;
-                    var updated = i18n.Translate(header);
-                    if (ReferenceEquals(updated, header) || updated == header) continue;
-                    column.Header = updated;
-                    hits++;
+                    hits += TranslateValue(column, "header", header,
+                        value => column.Header = value, i18n);
                 }
             }
 
@@ -314,12 +307,8 @@ namespace PclDlSwap.Payload.Swap
             {
                 if (element.ToolTip is string tooltip)
                 {
-                    var updated = i18n.Translate(tooltip);
-                    if (!ReferenceEquals(updated, tooltip) && updated != tooltip)
-                    {
-                        element.ToolTip = updated;
-                        hits++;
-                    }
+                    hits += TranslateValue(element, "tooltip", tooltip,
+                        value => element.ToolTip = value, i18n);
                 }
 
                 // PCL's MyButton keeps its caption in a writable string property rather than
@@ -339,14 +328,17 @@ namespace PclDlSwap.Payload.Swap
                 if (block.Inlines.Count > 0)
                     hits += RestoreInlines(block.Inlines, i18n);
                 else
-                    hits += Replace(block.Text, value => block.Text = value, text => Original(text, i18n));
+                    hits += RestoreValue(block, "text", block.Text,
+                        value => block.Text = value, i18n);
             }
 
             if (node is AccessText access)
-                hits += Replace(access.Text, value => access.Text = value, text => Original(text, i18n));
+                hits += RestoreValue(access, "text", access.Text,
+                    value => access.Text = value, i18n);
 
             if (node is TextBox readOnly && readOnly.IsReadOnly)
-                hits += Replace(readOnly.Text, value => readOnly.Text = value, text => Original(text, i18n));
+                hits += RestoreValue(readOnly, "text", readOnly.Text,
+                    value => readOnly.Text = value, i18n);
 
             if (node is RichTextBox richTextBox && richTextBox.Document != null)
             {
@@ -358,37 +350,26 @@ namespace PclDlSwap.Payload.Swap
             }
 
             if (node is Window window)
-                hits += Replace(window.Title, value => window.Title = value, text => Original(text, i18n));
+                hits += RestoreValue(window, "title", window.Title,
+                    value => window.Title = value, i18n);
 
             if (node is ContentControl content && content.Content is string contentText)
             {
-                var original = Original(contentText, i18n);
-                if (original != null)
-                {
-                    content.Content = original;
-                    hits++;
-                }
+                hits += RestoreValue(content, "content", contentText,
+                    value => content.Content = value, i18n);
             }
 
             if (node is HeaderedContentControl headered && headered.Header is string headerText)
             {
-                var original = Original(headerText, i18n);
-                if (original != null)
-                {
-                    headered.Header = original;
-                    hits++;
-                }
+                hits += RestoreValue(headered, "header", headerText,
+                    value => headered.Header = value, i18n);
             }
 
             if (node is HeaderedItemsControl headeredItems &&
                 headeredItems.Header is string itemsHeader)
             {
-                var original = Original(itemsHeader, i18n);
-                if (original != null)
-                {
-                    headeredItems.Header = original;
-                    hits++;
-                }
+                hits += RestoreValue(headeredItems, "header", itemsHeader,
+                    value => headeredItems.Header = value, i18n);
             }
 
             if (node is DataGrid dataGrid)
@@ -396,10 +377,8 @@ namespace PclDlSwap.Payload.Swap
                 foreach (var column in dataGrid.Columns)
                 {
                     if (!(column.Header is string header)) continue;
-                    var original = Original(header, i18n);
-                    if (original == null) continue;
-                    column.Header = original;
-                    hits++;
+                    hits += RestoreValue(column, "header", header,
+                        value => column.Header = value, i18n);
                 }
             }
 
@@ -407,12 +386,8 @@ namespace PclDlSwap.Payload.Swap
             {
                 if (element.ToolTip is string tooltip)
                 {
-                    var original = Original(tooltip, i18n);
-                    if (original != null)
-                    {
-                        element.ToolTip = original;
-                        hits++;
-                    }
+                    hits += RestoreValue(element, "tooltip", tooltip,
+                        value => element.ToolTip = value, i18n);
                 }
 
                 if (!(element is TextBox) && !(element is TextBlock))
@@ -425,13 +400,69 @@ namespace PclDlSwap.Payload.Swap
         private static string Original(string english, SwapI18n i18n) =>
             i18n.TryGetOriginal(english, out var chinese) ? chinese : null;
 
-        private static int Replace(string current, Action<string> assign, Func<string, string> map)
+        private static int TranslateValue(DependencyObject owner, string slot, string current,
+            Action<string> assign, SwapI18n i18n)
         {
-            if (string.IsNullOrEmpty(current)) return 0;
-            var updated = map(current);
+            if (owner == null || string.IsNullOrEmpty(current)) return 0;
+            var updated = i18n.Translate(current);
             if (string.IsNullOrEmpty(updated) || updated == current) return 0;
+
+            var state = Ledger.GetOrCreateValue(owner);
+            lock (state)
+            {
+                state.Slots[slot] = new TranslationSlot
+                {
+                    Original = current,
+                    Translated = updated
+                };
+            }
             assign(updated);
             return 1;
+        }
+
+        private static int RestoreValue(DependencyObject owner, string slot, string current,
+            Action<string> assign, SwapI18n i18n)
+        {
+            if (owner == null || string.IsNullOrEmpty(current)) return 0;
+
+            TranslationSlot translated = null;
+            if (Ledger.TryGetValue(owner, out var state))
+            {
+                lock (state)
+                {
+                    if (state.Slots.TryGetValue(slot, out translated))
+                        state.Slots.Remove(slot);
+                }
+            }
+
+            if (translated != null)
+            {
+                // The host may have regenerated the text since our pass. In that case its new value
+                // wins; never restore a stale value over fresh UI state.
+                if (!string.Equals(current, translated.Translated, StringComparison.Ordinal) ||
+                    string.Equals(current, translated.Original, StringComparison.Ordinal))
+                    return 0;
+                assign(translated.Original);
+                return 1;
+            }
+
+            // Compatibility fallback for a tree translated before this ledger existed.
+            var original = Original(current, i18n);
+            if (original == null) return 0;
+            assign(original);
+            return 1;
+        }
+
+        private sealed class TranslationState
+        {
+            public readonly Dictionary<string, TranslationSlot> Slots =
+                new Dictionary<string, TranslationSlot>(StringComparer.Ordinal);
+        }
+
+        private sealed class TranslationSlot
+        {
+            public string Original;
+            public string Translated;
         }
 
         private static int TranslateStringProperty(FrameworkElement element, SwapI18n i18n)
@@ -447,24 +478,16 @@ namespace PclDlSwap.Payload.Swap
                     property.CanRead)
                 {
                     var current = property.GetValue(element) as string;
-                    var updated = i18n.Translate(current);
-                    if (!string.IsNullOrEmpty(updated) && updated != current)
-                    {
-                        property.SetValue(element, updated);
-                        hits++;
-                    }
+                    hits += TranslateValue(element, "property:" + memberName, current,
+                        value => property.SetValue(element, value), i18n);
                 }
 
                 var field = type.GetField(memberName, BindingFlags.Public | BindingFlags.Instance);
                 if (field != null && field.FieldType == typeof(string) && !field.IsInitOnly)
                 {
                     var current = field.GetValue(element) as string;
-                    var updated = i18n.Translate(current);
-                    if (!string.IsNullOrEmpty(updated) && updated != current)
-                    {
-                        field.SetValue(element, updated);
-                        hits++;
-                    }
+                    hits += TranslateValue(element, "field:" + memberName, current,
+                        value => field.SetValue(element, value), i18n);
                 }
             }
 
@@ -483,24 +506,16 @@ namespace PclDlSwap.Payload.Swap
                     property.CanRead)
                 {
                     var current = property.GetValue(element) as string;
-                    var original = Original(current, i18n);
-                    if (original != null)
-                    {
-                        property.SetValue(element, original);
-                        hits++;
-                    }
+                    hits += RestoreValue(element, "property:" + memberName, current,
+                        value => property.SetValue(element, value), i18n);
                 }
 
                 var field = type.GetField(memberName, BindingFlags.Public | BindingFlags.Instance);
                 if (field != null && field.FieldType == typeof(string) && !field.IsInitOnly)
                 {
                     var current = field.GetValue(element) as string;
-                    var original = Original(current, i18n);
-                    if (original != null)
-                    {
-                        field.SetValue(element, original);
-                        hits++;
-                    }
+                    hits += RestoreValue(element, "field:" + memberName, current,
+                        value => field.SetValue(element, value), i18n);
                 }
             }
 
@@ -514,12 +529,8 @@ namespace PclDlSwap.Payload.Swap
             {
                 if (inline is Run run)
                 {
-                    var updated = i18n.Translate(run.Text);
-                    if (!string.IsNullOrEmpty(updated) && updated != run.Text)
-                    {
-                        run.Text = updated;
-                        hits++;
-                    }
+                    hits += TranslateValue(run, "text", run.Text,
+                        value => run.Text = value, i18n);
                 }
                 else if (inline is Span span)
                 {
@@ -537,12 +548,8 @@ namespace PclDlSwap.Payload.Swap
             {
                 if (inline is Run run)
                 {
-                    var original = Original(run.Text, i18n);
-                    if (original != null)
-                    {
-                        run.Text = original;
-                        hits++;
-                    }
+                    hits += RestoreValue(run, "text", run.Text,
+                        value => run.Text = value, i18n);
                 }
                 else if (inline is Span span)
                 {

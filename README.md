@@ -1,8 +1,10 @@
 <p style="font-size:28px;text-align:center;"><b>PCL2.dl.swap</b></p>
 
-> Restore Plain Craft Launcher's download capability on official builds that disable it, turn silent
-> OTA into an explicit cancellable prompt, and verify every launcher-cloud download in a sandbox
-> before it is allowed to land.
+> Restore Plain Craft Launcher's download capability, add reversible English UI, turn silent OTA
+> into explicit recovery-aware behaviour, and expose a governed addon SDK with hooks, diagnostics,
+> module messaging, private files and native WPF pages.
+
+Current release: **v26.2** · Addon API: **1.8.0** · Hosts: official PCL **2.99.0.0 / 2.99.0.1**.
 
 > [!IMPORTANT]
 > The generated `PclDlSwap.Patched.exe` is a patched **copy**; the official executable is never
@@ -24,6 +26,8 @@ pcl2swap-{PCL2Ver.}-{Ver.}.dll      the patch engine
 PclDlSwap.Loader.exe                patch a copy, launch it, optionally supervise
 PclDlSwap.Payload.dll               scanner / sandbox / landing watchdog
 data/offset-manifest.json           per-build tokens and RVAs
+Pcl2Swap.Shim.x64.dll/.dat          ExLoader-compatible native shim + embedded runtime
+PCL2Swap.Api.dll                    addon-facing SDK
 ```
 
 ## 2 Quick Start

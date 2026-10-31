@@ -146,7 +146,7 @@ namespace PclDlSwap.Payload.Swap
         internal static readonly string[] KnownPermissions =
         {
             "hooks", "pages", "files", "clipboard", "network", "logs",
-            "secret", "launch", "settings", "instance"
+            "secret", "launch", "settings", "instance", "messaging"
         };
 
         private static bool ForceStrict
@@ -309,6 +309,9 @@ namespace PclDlSwap.Payload.Swap
                 case "files": return "files";
                 case "network.download":
                 case "network": return "network";
+                case "events":
+                case "bus":
+                case "messaging": return "messaging";
                 case "logs.read":
                 case "logs": return "logs";
                 case "reflect":
@@ -406,6 +409,7 @@ namespace PclDlSwap.Payload.Swap
                 {
                     try { record.Instance?.OnDisable(); }
                     catch (Exception ex) { SwapLog.Warn($"Addon {record.Id} OnDisable 抛错：" + ex.Message); }
+                    AddonMessageBus.RemoveAll(record.Id);
                     record.Status = "disabled";
                 }
 
@@ -488,6 +492,7 @@ namespace PclDlSwap.Payload.Swap
             // Drop whatever the previous generation attached before it starts again, so a reloaded
             // Prefix handler does not end up stacked on top of itself.
             ScopedHook.RemoveAll(addonId);
+            AddonMessageBus.RemoveAll(addonId);
             var enabled = SetEnabled(addonId, true);
             return disabled && enabled && Find(addonId)?.Status == "enabled";
         }
@@ -763,6 +768,7 @@ namespace PclDlSwap.Payload.Swap
             // Platform-side cleanup: an uninstalled module's id is no longer in the list, and an
             // unknown id counts as "enabled", so any handler it left behind would keep firing.
             ScopedHook.RemoveAll(record.Id);
+            AddonMessageBus.RemoveAll(record.Id);
 
             foreach (var pageId in record.PageIds.ToList())
             {
@@ -964,6 +970,8 @@ namespace PclDlSwap.Payload.Swap
                 record.Status = "failed";
                 record.Enabled = false;
                 record.Failure = ex;
+                ScopedHook.RemoveAll(record.Id);
+                AddonMessageBus.RemoveAll(record.Id);
                 SwapLog.Error($"Addon 启用失败：{record.Id}", ex);
                 RaiseChanged();
             }
@@ -1543,6 +1551,9 @@ namespace PclDlSwap.Payload.Swap
                 Hooks = new ScopedHooks(inner.Hooks, inner as HostApi, record.Id, record);
                 Ui = new ScopedUi(inner.Ui, record);
                 Pcl = new ScopedPclAccess(inner.Pcl, record.Id);
+                Files = new AddonFileStore(Path.Combine(SwapPaths.AddonDirectory(record.Id), "files"),
+                    record.Id);
+                Messaging = new MessagingAccess(record.Id, record.Id);
             }
 
             public IHostInfo Host => _inner.Host;
@@ -1560,6 +1571,9 @@ namespace PclDlSwap.Payload.Swap
             public II18n I18n => _inner.I18n;
             public IRecoveryAccess Recovery => _inner.Recovery;
             public IModuleCatalog Modules => _inner.Modules;
+            public IDiagnosticsAccess Diagnostics => _inner.Diagnostics;
+            public IAddonFiles Files { get; }
+            public IAddonMessaging Messaging { get; }
 
             // Module lines keep their own file (LSPosed-style per-module log) and are tagged with the
             // module id in the global log, so "which module did this" never needs guessing.
@@ -1728,6 +1742,21 @@ namespace PclDlSwap.Payload.Swap
             public FrameworkElement Tabs(IReadOnlyList<string> titles, int selectedIndex,
                 Func<int, FrameworkElement> contentFactory) =>
                 _inner.Tabs(titles, selectedIndex, contentFactory);
+
+            public FrameworkElement Timeline(IReadOnlyList<SwapDiagnosticEvent> events,
+                int maxHeight = 260) => _inner.Timeline(events, maxHeight);
+
+            public FrameworkElement Table(IReadOnlyList<string> columns,
+                IReadOnlyList<IReadOnlyList<string>> rows, IReadOnlyList<double> columnWeights = null,
+                int maxHeight = 280) => _inner.Table(columns, rows, columnWeights, maxHeight);
+
+            public FrameworkElement EmptyState(string title, string message,
+                FrameworkElement action = null) => _inner.EmptyState(title, message, action);
+
+            public FrameworkElement CodeBlock(string text, int maxHeight = 240) =>
+                _inner.CodeBlock(text, maxHeight);
+
+            public FrameworkElement Scroll(FrameworkElement content) => _inner.Scroll(content);
         }
 
         /// <summary>

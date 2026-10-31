@@ -204,6 +204,27 @@ namespace PCL2Swap.Api
         /// <summary>A compact tabbed surface; contentFactory is called once per tab.</summary>
         FrameworkElement Tabs(IReadOnlyList<string> titles, int selectedIndex,
             Func<int, FrameworkElement> contentFactory);
+
+        /// <summary>A compact vertical event timeline using the tool's semantic accent colors.</summary>
+        FrameworkElement Timeline(IReadOnlyList<SwapDiagnosticEvent> events, int maxHeight = 260);
+
+        /// <summary>A compact read-only table with weighted columns and vertical scrolling.</summary>
+        FrameworkElement Table(IReadOnlyList<string> columns,
+            IReadOnlyList<IReadOnlyList<string>> rows, IReadOnlyList<double> columnWeights = null,
+            int maxHeight = 280);
+
+        /// <summary>A centered zero-content state with an optional single action.</summary>
+        FrameworkElement EmptyState(string title, string message,
+            FrameworkElement action = null);
+
+        /// <summary>A read-only monospace code block for diagnostics and configuration snippets.</summary>
+        FrameworkElement CodeBlock(string text, int maxHeight = 240);
+
+        /// <summary>
+        /// Wraps a long module page in PCL's native vertical scroller (falling back to stock WPF).
+        /// Page factories should return this when content can exceed the viewport.
+        /// </summary>
+        FrameworkElement Scroll(FrameworkElement content);
     }
 
     /// <summary>Per-addon persisted key/value store.</summary>
@@ -240,6 +261,12 @@ namespace PCL2Swap.Api
         IRecoveryAccess Recovery { get; }
         /// <summary>Read-only inventory of installed modules and their governance state (API 1.6).</summary>
         IModuleCatalog Modules { get; }
+        /// <summary>Bounded runtime diagnostic timeline and export surface (API 1.7).</summary>
+        IDiagnosticsAccess Diagnostics { get; }
+        /// <summary>Sandboxed per-module file storage (API 1.8).</summary>
+        IAddonFiles Files { get; }
+        /// <summary>In-process module message bus (API 1.8).</summary>
+        IAddonMessaging Messaging { get; }
         void Log(string message);
         void LogWarning(string message);
         void LogError(string message, Exception exception = null);

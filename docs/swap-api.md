@@ -1,4 +1,4 @@
-# PCL2 Swap Addon 指南（API 1.0，Alpha 3 起）
+# PCL2 Swap Addon 指南（API 1.8，v26.2 起）
 
 > 面向 Addon 作者。平台设计背景见 `docs/swap-api-research.zh.md`。
 > 交付形状（ExLoader 注入 / 磁盘修补）对 Addon **透明**：目标都是同一套 SwapHost 运行时。
@@ -711,5 +711,131 @@ page.Children.Add(api.Ui.Tabs(
 
 `Expander` 内容按需构建；`Tabs` 使用原生 WPF `TabControl`；模块详情页现在直接展示可编辑的
 权限授予区，撤销不会跳回页面顶部。
+
+## 19. API 1.7（v26.2）：HookContext、诊断后端与时间线
+
+`Host.ApiVersion` 为 **1.7.0**。新增成员仍然只增不改。
+
+### 19.1 `SwapHookContext`
+
+`Replace` handler 内可以通过 `SwapHookContext.Current` 读取本次调用的模块、hook id、模式、
+目标签名、接收者和参数。需要调用原方法时使用 `InvokeOriginal()`；不传参数会复用当前参数，
+传入数组则覆盖本次参数，并且不会递归进入当前 handler 链。
+
+```csharp
+using (api.Hooks.Attach(target, "demo.replace", (Func<int, int>)(value =>
+       {
+           var context = SwapHookContext.Current;
+           var original = Convert.ToInt32(context.InvokeOriginal());
+           return original + 10;
+       }), HookMode.Replace))
+{
+}
+```
+
+Context 是 `ThreadStatic`，嵌套调用会恢复上一层，handler 返回后恢复为 `null`。
+
+### 19.2 `ISwapApi.Diagnostics`
+
+运行时日志同时进入最多 512 条的有界时间线：
+
+```csharp
+foreach (var item in api.Diagnostics.Recent(50))
+    api.Log($"{item.TimestampUtc:O} {item.Severity} {item.ModuleId} {item.Message}");
+
+string text = api.Diagnostics.Export(200);
+api.Diagnostics.Changed += (_, __) => RefreshTimeline();
+```
+
+`ModuleId` 从模块作用域日志前缀解析；未归属模块的事件为空。`Changed` 只表示环形缓冲区新增
+事件，不保证每次事件都保留到消费者读取。
+
+### 19.3 `IUi.Timeline`
+
+`Timeline(events, maxHeight)` 构建只读 WPF 事件流，按语义色显示时间、等级和模块 id。它不启动
+定时器，调用方在 `Diagnostics.Changed` 或自己的刷新周期里重建/更新页面。
+
+## 20. API 1.8（v26.2）：英文质量、模块协作与更多前后端
+
+`Host.ApiVersion` 现在是 **1.8.0**。这是 v26.2 正式版收口版本，API 1.0-1.7 保持源码兼容。
+
+### 20.1 英文层增强
+
+- 内置词典扩展到 **507 条精确映射 + 60 条动态短语**；
+- 磁盘覆盖支持 `<数据根>\i18n\en-US.json`，以及 `<数据根>\i18n\en-US\*.json` 多文件语言包；
+- `RegisterMany(dictionary)` 原子式批量扩展，返回实际变化的条数；
+- `Format(chineseFormat, args)` 先翻译再按当前 UI 文化格式化；
+- `TryTranslate(chinese, out translated)` 做非破坏查询；
+- `HostTranslator` 为每个控件/属性记录原文、英文值和最后写入状态。切回中文时只恢复仍处于
+  本层写入值的控件；宿主已经重新生成的新文本不会被过期缓存覆盖。
+
+```csharp
+api.I18n.RegisterMany(new Dictionary<string, string>
+{
+    ["同步完成"] = "Sync completed",
+    ["已处理 {0} 项"] = "Processed {0} items"
+});
+
+var text = api.I18n.Format("已处理 {0} 项", 12);
+```
+
+### 20.2 `ISwapApi.Files`（沙箱化文件后端）
+
+每个模块拥有独立根目录，API 只接受相对路径，拒绝绝对路径和 `..` 越界：
+
+```csharp
+api.Files.WriteText("cache/index.json", json);
+var jsonAgain = api.Files.ReadText("cache/index.json");
+var files = api.Files.List("cache", "*.json", recursive: true);
+api.Files.WriteBytes("assets/blob.bin", bytes);
+api.Files.Delete("cache/index.json");
+```
+
+文本统一 UTF-8（无 BOM）。`Root` 暴露实际目录供诊断；严格模式需要 `files` 权限。该接口是同
+进程便利层，不是安全沙箱，模块仍可自己调用 `System.IO`，权限治理只约束平台入口。
+
+### 20.3 `ISwapApi.Messaging`（模块间消息）
+
+`IAddonMessaging` 提供进程内 topic 发布/订阅：
+
+```csharp
+using (api.Messaging.Subscribe("demo.refresh", message =>
+       api.Log($"from {message.Source}: {message.Payload}")))
+{
+    var delivered = api.Messaging.Publish("demo.refresh", new { value = 42 });
+}
+
+var topics = api.Messaging.Topics;
+```
+
+订阅支持 `"*"` 通配；发布 topic 不能是通配。payload 保留 CLR 对象引用，不序列化；需要跨模块
+稳定契约时使用字符串、JSON 或两边共同引用的不可变 DTO。订阅者异常被隔离并写入来源模块日志，
+不会阻断同 topic 的其他订阅者。严格模式需要 `messaging` 权限；模块禁用、重载或卸载时会自动
+移除它留下的订阅。
+
+### 20.4 新前端构件
+
+```csharp
+page.Children.Add(api.Ui.Table(
+    new[] { "Module", "Status" },
+    new IReadOnlyList<string>[]
+    {
+        new[] { "Demo", "Enabled" },
+        new[] { "Theme", "Disabled" }
+    },
+    new[] { 2.0, 1.0 }));
+
+page.Children.Add(api.Ui.EmptyState(
+    "No addons installed",
+    "Install a .swapaddon package to start.",
+    api.Ui.Button("Open addon folder", OpenFolder)));
+
+page.Children.Add(api.Ui.CodeBlock("{\"schema\":1,\"enabled\":true}", 180));
+page.Children.Add(api.Ui.Scroll(new StackPanel { /* long page content */ }));
+```
+
+`Table` 使用只读 `DataGrid`，列宽按权重分配；`EmptyState` 是居中零内容状态；`CodeBlock` 使用
+等宽字体和只读滚动区域；`Scroll` 用 PCL 的 `MyScrollViewer` 承载长页面，缺失时退回标准 WPF。
+四者与现有 Card/Text/Note 组合使用，不嵌套 Card。
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

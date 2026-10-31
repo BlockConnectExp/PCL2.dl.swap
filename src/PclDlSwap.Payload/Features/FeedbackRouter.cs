@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using PclDlSwap.Payload.Hook;
 using PclDlSwap.Payload.Host;
+using PclDlSwap.Payload.Swap;
 
 namespace PclDlSwap.Payload.Features
 {
@@ -53,12 +54,20 @@ namespace PclDlSwap.Payload.Features
         {
             try
             {
-                var body = "你想向哪一方提交反馈？" + Environment.NewLine + Environment.NewLine +
-                           "  PCL 启动器：Plain Craft Launcher 本身的 Bug 或建议（转交 PCL 官方反馈渠道）" +
-                           Environment.NewLine +
-                           "  PCL2 Swap：本工具（下载恢复 / 更新拦截 / 界面改动）的问题（转交 BlockConnect 项目）";
+                var i18n = SwapI18n.Current;
+                var body = i18n.IsEnglish
+                    ? "Which project should receive this report?" + Environment.NewLine + Environment.NewLine +
+                      "  PCL Launcher: Bugs or suggestions for Plain Craft Launcher itself " +
+                      "(opens PCL's official feedback channel)" + Environment.NewLine +
+                      "  PCL2 Swap: Problems with this tool, including download restore, update blocking " +
+                      "or UI changes (opens the BlockConnect project)"
+                    : "你想向哪一方提交反馈？" + Environment.NewLine + Environment.NewLine +
+                      "  PCL 启动器：Plain Craft Launcher 本身的 Bug 或建议（转交 PCL 官方反馈渠道）" +
+                      Environment.NewLine +
+                      "  PCL2 Swap：本工具（下载恢复 / 更新拦截 / 界面改动）的问题（转交 BlockConnect 项目）";
 
-                int choice = PclUi.MsgBox(body, "反馈", "PCL 启动器", "PCL2 Swap", "取消");
+                int choice = PclUi.MsgBox(body, i18n.T("反馈", "Feedback"),
+                    i18n.T("PCL 启动器", "PCL Launcher"), "PCL2 Swap", i18n.T("取消", "Cancel"));
                 switch (choice)
                 {
                     case 1:
@@ -67,7 +76,8 @@ namespace PclDlSwap.Payload.Features
                         return;
                     case 2:
                         SwapLog.Info("反馈分流：用户选择 PCL2 Swap，打开项目 Issues。");
-                        PclUi.Hint("正在打开 PCL2 Swap 的反馈页面……", "Blue");
+                        PclUi.Hint(i18n.T("正在打开 PCL2 Swap 的反馈页面……",
+                            "Opening the PCL2 Swap feedback page..."), "Blue");
                         PclUi.OpenWebsite(SwapIssuesUrl);
                         return;
                     default:

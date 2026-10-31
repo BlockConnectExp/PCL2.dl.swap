@@ -43,6 +43,18 @@ namespace PCL2Swap.Api
         /// <summary>Extends the dictionary (used by addons that ship their own pages).</summary>
         void Register(string chinese, string english);
 
+        /// <summary>Registers or replaces a batch of entries and returns the number changed.</summary>
+        int RegisterMany(System.Collections.Generic.IReadOnlyDictionary<string, string> entries);
+
+        /// <summary>
+        /// Translates a composite format string and then formats it with the current UI culture.
+        /// Unknown keys still pass through, so partial dictionaries never hide runtime values.
+        /// </summary>
+        string Format(string chineseFormat, params object[] arguments);
+
+        /// <summary>Looks up one translation without changing the active language.</summary>
+        bool TryTranslate(string chinese, out string translated);
+
         /// <summary>Switches the language, persists it and re-applies the host translation.</summary>
         void SetLanguage(SwapLanguage language);
     }

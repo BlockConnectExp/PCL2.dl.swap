@@ -916,7 +916,7 @@ namespace PclDlSwap.ExLoaderHarness
             {
                 var i18nType = i18n.GetType();
                 Expect("English layer loaded the expanded dictionary",
-                    Convert.ToInt32(i18nType.GetProperty("Count")?.GetValue(i18n) ?? 0) >= 250);
+                    Convert.ToInt32(i18nType.GetProperty("Count")?.GetValue(i18n) ?? 0) >= 450);
                 var original = i18nType.GetProperty("Language")?.GetValue(i18n);
                 var languageEvents = 0;
                 EventHandler languageHandler = (sender, args) => languageEvents++;
@@ -929,6 +929,19 @@ namespace PclDlSwap.ExLoaderHarness
                         Convert.ToString(i18nType.GetMethod("T", new[] { typeof(string), typeof(string) })
                             ?.Invoke(i18n, new object[] { "联机模块", "Multiplayer module" })) ==
                         "Multiplayer module");
+                    var registered = ((PCL2Swap.Api.II18n)i18n).RegisterMany(
+                        new Dictionary<string, string>
+                        {
+                            ["harness 已处理 {0} 项"] = "Harness processed {0} items"
+                        });
+                    Expect("I18n.RegisterMany updates the live dictionary", registered == 1);
+                    Expect("I18n.Format translates before formatting",
+                        ((PCL2Swap.Api.II18n)i18n).Format("harness 已处理 {0} 项", 7) ==
+                        "Harness processed 7 items");
+                    Expect("I18n.TryTranslate is non-mutating",
+                        ((PCL2Swap.Api.II18n)i18n).TryTranslate("背景图片已清除！",
+                            out var clearedTranslation) &&
+                        clearedTranslation == "Background image cleared.");
                 }
                 finally
                 {
@@ -942,8 +955,8 @@ namespace PclDlSwap.ExLoaderHarness
             var hostInfo = api?.GetType().GetProperty("Host")?.GetValue(api);
             var pclVersion = Convert.ToString(hostInfo?.GetType().GetProperty("PclVersion")?.GetValue(hostInfo));
             Expect("Host.PclVersion reports the bound PCL build", !string.IsNullOrEmpty(pclVersion));
-            Expect("Host.ApiVersion reports the additive 1.6 contract",
-                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.6.0");
+            Expect("Host.ApiVersion reports the additive 1.8 contract",
+                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.8.0");
 
             var recovery = api?.GetType().GetProperty("Recovery")?.GetValue(api);
             var recoveryDiagnostics = Convert.ToString(recovery?.GetType().GetMethod("Diagnostics")
@@ -963,6 +976,49 @@ namespace PclDlSwap.ExLoaderHarness
                 moduleCatalog != null &&
                 moduleCatalog.Modules.Count >= 3 &&
                 moduleCatalog.Find("swap.cancel-button") != null);
+
+            var diagnostics = api?.Diagnostics;
+            var diagnosticEvents = 0;
+            EventHandler diagnosticHandler = (sender, args) => diagnosticEvents++;
+            if (diagnostics != null) diagnostics.Changed += diagnosticHandler;
+            api?.LogWarning("diagnostics-harness-probe");
+            Expect("Diagnostics exposes the bounded structured timeline",
+                diagnostics != null &&
+                diagnostics.Recent(20).Any(item => item.Message.Contains("diagnostics-harness-probe")));
+            Expect("Diagnostics emits Changed and exports readable text",
+                diagnosticEvents > 0 &&
+                diagnostics.Export(20).Contains("diagnostics-harness-probe"));
+            if (diagnostics != null) diagnostics.Changed -= diagnosticHandler;
+
+            var files = api?.Files;
+            var fileRoundTrip = false;
+            var traversalRejected = false;
+            if (files != null)
+            {
+                files.WriteText("harness/probe.txt", "api18-file-probe", false);
+                fileRoundTrip = files.Exists("harness/probe.txt") &&
+                                files.ReadText("harness/probe.txt") == "api18-file-probe" &&
+                                files.List("harness").Contains("harness/probe.txt");
+                try { files.GetPath("../escape.txt"); }
+                catch (UnauthorizedAccessException) { traversalRejected = true; }
+            }
+            Expect("IAddonFiles round-trips text inside its private root", fileRoundTrip);
+            Expect("IAddonFiles rejects traversal outside its root", traversalRejected);
+
+            var messageDeliveries = -1;
+            var messagePayload = string.Empty;
+            if (api?.Messaging != null)
+            {
+                using (api.Messaging.Subscribe("harness.topic", message =>
+                       {
+                           messagePayload = Convert.ToString(message.Payload);
+                       }))
+                {
+                    messageDeliveries = api.Messaging.Publish("harness.topic", "api18-message");
+                }
+            }
+            Expect("IAddonMessaging publishes synchronously",
+                messageDeliveries == 1 && messagePayload == "api18-message");
 
             var secret = pcl?.GetType().GetProperty("Secret")?.GetValue(pcl);
             Expect("Secret family exposed", secret != null);
@@ -1498,7 +1554,7 @@ namespace PclDlSwap.ExLoaderHarness
 
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
-                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.6.0");
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.8.0");
 
                 // ---- module state: persisted, and it gates the built-in features ----
                 var isEnabled = manager?.GetType().GetMethod("IsEnabled");
@@ -1639,6 +1695,25 @@ namespace PclDlSwap.ExLoaderHarness
                 var createScopedApi = manager?.GetType().GetMethod("CreateScopedApi",
                     BindingFlags.NonPublic | BindingFlags.Instance);
                 var scopedApi = createScopedApi?.Invoke(manager, new[] { sample }) as PCL2Swap.Api.ISwapApi;
+                scopedApi?.Files.WriteText("nested/probe.txt", "scoped-file-probe", false);
+                Expect("scoped IAddonFiles stays below the module root",
+                    scopedApi?.Files.ReadText("nested/probe.txt") == "scoped-file-probe" &&
+                    scopedApi.Files.Root.StartsWith(dataRoot, StringComparison.OrdinalIgnoreCase));
+
+                var scopedMessages = 0;
+                string scopedSource = null;
+                using (scopedApi?.Messaging.Subscribe("sample.scoped", message =>
+                       {
+                           scopedMessages++;
+                           scopedSource = message.Source;
+                       }))
+                {
+                    scopedApi?.Messaging.Publish("sample.scoped", 18);
+                }
+                var sampleId = Convert.ToString(sample?.GetType().GetProperty("Id")?.GetValue(sample));
+                Expect("scoped IAddonMessaging stamps the module id as source",
+                    scopedMessages == 1 && scopedSource == sampleId);
+
                 var overloads = scopedApi?.Hooks.FindTargets("PCL.HookTarget", "Overloaded");
                 Expect("signature discovery sees both overloads",
                     overloads != null && overloads.Count == 2);
@@ -1646,6 +1721,9 @@ namespace PclDlSwap.ExLoaderHarness
                     target.ParameterTypes.Count == 1 &&
                     target.ParameterTypes[0] == typeof(string).FullName);
                 Expect("signature discovery exposes full parameter types", stringOverload != null);
+                var intOverload = overloads?.FirstOrDefault(target =>
+                    target.ParameterTypes.Count == 1 &&
+                    target.ParameterTypes[0] == typeof(int).FullName);
 
                 var stringHookHits = 0;
                 var signatureToken = stringOverload == null
@@ -1662,6 +1740,29 @@ namespace PclDlSwap.ExLoaderHarness
                 signatureToken?.Dispose();
                 Expect("disposing a signature hook clears its installed state",
                     scopedApi?.Hooks.IsHooked(stringOverload) == false);
+
+                PCL2Swap.Api.SwapHookContext capturedContext = null;
+                var originalResult = 0;
+                var contextToken = intOverload == null
+                    ? null
+                    : scopedApi.Hooks.Attach(intOverload, "sample.original-context",
+                        (Func<int, int>)(value =>
+                        {
+                            capturedContext = PCL2Swap.Api.SwapHookContext.Current;
+                            originalResult = Convert.ToInt32(capturedContext?.InvokeOriginal());
+                            return originalResult + 7;
+                        }), PCL2Swap.Api.HookMode.Replace);
+                var contextResult = PCL.HookTarget.Overloaded(4);
+                Expect("Replace handlers can invoke the original method through HookContext",
+                    contextResult == 19 && originalResult == 12);
+                Expect("HookContext exposes target metadata and restores after the handler",
+                    capturedContext != null &&
+                    capturedContext.Mode == PCL2Swap.Api.HookMode.Replace &&
+                    capturedContext.Target.Contains("Overloaded") &&
+                    capturedContext.Arguments.Length == 1 &&
+                    Convert.ToInt32(capturedContext.Arguments[0]) == 4 &&
+                    PCL2Swap.Api.SwapHookContext.Current == null);
+                contextToken?.Dispose();
 
                 try
                 {
@@ -1775,9 +1876,46 @@ namespace PclDlSwap.ExLoaderHarness
                             (Func<int, System.Windows.FrameworkElement>)(index =>
                                 new System.Windows.Controls.TextBlock { Text = "tab:" + index })
                         }) as System.Windows.FrameworkElement;
+                        var timeline = ui?.GetType().GetMethod("Timeline")?.Invoke(ui, new object[]
+                        {
+                            new[]
+                            {
+                                new PCL2Swap.Api.SwapDiagnosticEvent
+                                {
+                                    TimestampUtc = DateTime.UtcNow,
+                                    Level = "info",
+                                    Severity = PCL2Swap.Api.SwapHintType.Info,
+                                    Message = "timeline event"
+                                }
+                            }, 180
+                        }) as System.Windows.FrameworkElement;
+                        var table = ui?.GetType().GetMethod("Table")?.Invoke(ui, new object[]
+                        {
+                            new[] { "Key", "Value" },
+                            new IReadOnlyList<string>[]
+                            {
+                                new[] { "api", "1.8" },
+                                new[] { "status", "ready" }
+                            },
+                            new[] { 1.0, 2.0 }, 180
+                        }) as System.Windows.FrameworkElement;
+                        var emptyState = ui?.GetType().GetMethod("EmptyState")?.Invoke(ui, new object[]
+                        {
+                            "Nothing here", "Add an item to continue.", null
+                        }) as System.Windows.FrameworkElement;
+                        var codeBlock = ui?.GetType().GetMethod("CodeBlock")?.Invoke(ui, new object[]
+                        {
+                            "{\"ok\":true}", 120
+                        }) as System.Windows.FrameworkElement;
+                        var scroller = ui?.GetType().GetMethod("Scroll")?.Invoke(ui, new object[]
+                        {
+                            new System.Windows.Controls.StackPanel()
+                        }) as System.Windows.FrameworkElement;
                         uiBuildOk = card != null && uiButton != null && infoRow != null &&
                                     checkBox != null && combo != null && banner != null &&
-                                    badge != null && expander != null && tabs != null;
+                                    badge != null && expander != null && tabs != null && timeline != null &&
+                                    table != null && emptyState != null && codeBlock != null &&
+                                    scroller != null;
                     }
                     catch (Exception ex)
                     {
@@ -1834,7 +1972,8 @@ namespace PclDlSwap.ExLoaderHarness
                     "{\"schema\":1,\"id\":\"test.installed\",\"name\":\"Installed Sample\"," +
                     "\"version\":\"2.0.0\",\"apiVersion\":\">=1.0 <2.0\"," +
                     "\"entry\":\"PCL2Swap.SampleAddon.SampleAddon\",\"author\":\"harness\"," +
-                    "\"description\":\"installed by the manager test\",\"permissions\":[\"settings\",\"hooks\"]}",
+                    "\"description\":\"installed by the manager test\"," +
+                    "\"permissions\":[\"settings\",\"hooks\",\"files\",\"messaging\"]}",
                     null);
 
                 // ---- install preview: inspect without touching the store, then describe it ----
@@ -1862,7 +2001,8 @@ namespace PclDlSwap.ExLoaderHarness
                     previewText.Contains("SHA-256"));
                 Expect("the install preview repeats the declared permissions",
                     previewText.Contains("权限声明") && previewText.Contains("settings") &&
-                    previewText.Contains("hooks"));
+                    previewText.Contains("hooks") && previewText.Contains("files") &&
+                    previewText.Contains("messaging"));
 
                 // ---- trust chain: signature + payload hashes + version-level warnings -------------
                 object TrustOfReview(object review) =>
@@ -1964,8 +2104,12 @@ namespace PclDlSwap.ExLoaderHarness
                     installedInfo != null &&
                     installedInfo.RequestedPermissions.Contains("settings") &&
                     installedInfo.RequestedPermissions.Contains("hooks") &&
+                    installedInfo.RequestedPermissions.Contains("files") &&
+                    installedInfo.RequestedPermissions.Contains("messaging") &&
                     installedInfo.GrantedPermissions.Contains("settings") &&
                     installedInfo.GrantedPermissions.Contains("hooks") &&
+                    installedInfo.GrantedPermissions.Contains("files") &&
+                    installedInfo.GrantedPermissions.Contains("messaging") &&
                     installedInfo.DeniedPermissions.Count == 0);
                 var governedScopedApi = createScopedApi?.Invoke(manager,
                     new[] { installed }) as PCL2Swap.Api.ISwapApi;
@@ -2004,6 +2148,20 @@ namespace PclDlSwap.ExLoaderHarness
                     Expect("a revoked permission is enforced at the scoped API boundary",
                         ex.Message.Contains("未获得权限"));
                 }
+                var filesRevoked = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "files", false }) ?? false);
+                var filesDenied = false;
+                try { governedScopedApi?.Files.ReadText("missing.txt"); }
+                catch (UnauthorizedAccessException) { filesDenied = true; }
+                Expect("revoking files immediately gates IAddonFiles",
+                    filesRevoked && filesDenied);
+                var messagingRevoked = Convert.ToBoolean(setPermission?.Invoke(manager,
+                    new object[] { "test.installed", "messaging", false }) ?? false);
+                var messagingDenied = false;
+                try { governedScopedApi?.Messaging.Publish("denied.topic", "x"); }
+                catch (UnauthorizedAccessException) { messagingDenied = true; }
+                Expect("revoking messaging immediately gates IAddonMessaging",
+                    messagingRevoked && messagingDenied);
                 var hooksRevoked = Convert.ToBoolean(setPermission?.Invoke(manager,
                     new object[] { "test.installed", "hooks", false }) ?? false);
                 var hooksBeforeRevocation = governedHookHits;
@@ -2510,6 +2668,42 @@ namespace PclDlSwap.ExLoaderHarness
                         (Func<int, System.Windows.FrameworkElement>)(index =>
                             new System.Windows.Controls.TextBlock { Text = "tab:" + index })
                     });
+                    var timeline = swapUi.GetMethod("Timeline", flags)?.Invoke(null, new object[]
+                    {
+                        new[]
+                        {
+                            new PCL2Swap.Api.SwapDiagnosticEvent
+                            {
+                                TimestampUtc = DateTime.UtcNow,
+                                Level = "warn",
+                                Severity = PCL2Swap.Api.SwapHintType.Warning,
+                                ModuleId = "test.module",
+                                Message = "timeline event"
+                            }
+                        }, 180
+                    });
+                    var table = swapUi.GetMethod("Table", flags)?.Invoke(null, new object[]
+                    {
+                        new[] { "Key", "Value" },
+                        new IReadOnlyList<string>[]
+                        {
+                            new[] { "api", "1.8" },
+                            new[] { "status", "ready" }
+                        },
+                        new[] { 1.0, 2.0 }, 180
+                    });
+                    var emptyState = swapUi.GetMethod("EmptyState", flags)?.Invoke(null, new object[]
+                    {
+                        "Nothing here", "Add an item to continue.", null
+                    });
+                    var codeBlock = swapUi.GetMethod("CodeBlock", flags)?.Invoke(null, new object[]
+                    {
+                        "{\"ok\":true}", 120
+                    });
+                    var scroller = swapUi.GetMethod("Scroll", flags)?.Invoke(null, new object[]
+                    {
+                        new System.Windows.Controls.StackPanel()
+                    });
 
                     var i18nType = payload.GetType("PclDlSwap.Payload.Swap.SwapI18n",
                         throwOnError: true);
@@ -2521,23 +2715,35 @@ namespace PclDlSwap.ExLoaderHarness
                     {
                         i18nType.GetMethod("SetLanguage", BindingFlags.Public | BindingFlags.Instance)
                             ?.Invoke(i18n, new object[] { PCL2Swap.Api.SwapLanguage.English });
-                        var probe = new System.Windows.Controls.TextBlock { Text = "联机模块" };
+                        var probe = new System.Windows.Controls.TextBlock();
+                        var probeRun = new System.Windows.Documents.Run { Text = "联机模块" };
+                        probe.Inlines.Add(probeRun);
                         var direct = Convert.ToString(i18nType.GetMethod("T",
                                 BindingFlags.Public | BindingFlags.Instance,
                                 null, new[] { typeof(string) }, null)
                             ?.Invoke(i18n, new object[] { "联机模块" }));
-                        var probePanel = new System.Windows.Controls.StackPanel();
-                        probePanel.Children.Add(probe);
-                        payload.GetType("PclDlSwap.Payload.Swap.HostTranslator",
-                                throwOnError: true)
-                            .GetMethod("Apply", BindingFlags.Public | BindingFlags.Static)
-                            ?.Invoke(null, new object[] { probePanel });
+                        var translator = payload.GetType("PclDlSwap.Payload.Swap.HostTranslator",
+                            throwOnError: true);
+                        var internalFlags = BindingFlags.NonPublic | BindingFlags.Static;
+                        var assign = (Action<string>)(value => probeRun.Text = value);
+                        var applyHits = Convert.ToInt32(translator
+                            .GetMethod("TranslateValue", internalFlags)
+                            ?.Invoke(null, new object[] { probeRun, "text", probeRun.Text, assign, i18n }) ?? 0);
+                        var afterApply = probeRun.Text;
                         // A disconnected StackPanel is not guaranteed to expose its visual
                         // children until it has entered a presentation source. The direct
                         // dictionary hit proves the expanded table; the host translator itself is
                         // exercised by the real-host self-test.
-                        translated = direct == "Multiplayer module";
-                        frontendDetail = "direct=" + direct + ", probe=" + probe.Text +
+                        var restoreHits = Convert.ToInt32(translator
+                            .GetMethod("RestoreValue", internalFlags)
+                            ?.Invoke(null, new object[] { probeRun, "text", probeRun.Text, assign, i18n }) ?? 0);
+                        var restored = afterApply == "Multiplayer module" &&
+                                       restoreHits == 1 &&
+                                       probeRun.Text == "联机模块";
+                        translated = direct == "Multiplayer module" && restored;
+                        frontendDetail = "direct=" + direct + ", apply=" + applyHits +
+                                         ", restore=" + restoreHits + ", after=" + afterApply +
+                                         ", final=" + probeRun.Text +
                                          ", inlines=" + probe.Inlines.Count;
                     }
                     finally
@@ -2550,12 +2756,16 @@ namespace PclDlSwap.ExLoaderHarness
                                      ", password=" + (password != null) + ", multiline=" + (multiline != null) +
                                      ", progress=" + (progressElement != null) + ", banner=" + (banner != null) +
                                      ", badge=" + (badge != null) + ", expander=" + (expander != null) +
-                                     ", tabs=" + (tabs != null) +
+                                     ", tabs=" + (tabs != null) + ", timeline=" + (timeline != null) +
+                                     ", table=" + (table != null) + ", empty=" + (emptyState != null) +
+                                     ", code=" + (codeBlock != null) + ", scroll=" + (scroller != null) +
                                      ", translated=" + translated +
                                      "; " + frontendDetail;
                     frontendOk = radio != null && number != null && password != null &&
                                  multiline != null && progressElement != null && banner != null &&
-                                 badge != null && expander != null && tabs != null && translated;
+                                 badge != null && expander != null && tabs != null &&
+                                 timeline != null && table != null && emptyState != null &&
+                                 codeBlock != null && scroller != null && translated;
                 }
                 catch (Exception ex)
                 {
@@ -2568,7 +2778,7 @@ namespace PclDlSwap.ExLoaderHarness
                 }
             }));
             frontendDone.Wait(TimeSpan.FromSeconds(10));
-            Console.WriteLine("[uitest] API 1.6 frontends=" + (frontendOk ? "PASS" : "FAIL"));
+            Console.WriteLine("[uitest] API 1.8 frontends=" + (frontendOk ? "PASS" : "FAIL"));
             if (!frontendOk)
             {
                 Console.WriteLine("[uitest] frontend detail: " + frontendDetail);

@@ -80,9 +80,10 @@ namespace PclDlSwap.Payload.Swap
             Probe("Host.RecoveryDirectory", () => api.Host.RecoveryDirectory);
 
             Probe("I18n.Explicit", () => api.I18n.T("启动", "Launch"));
-            Probe("I18n.Count", () => api.I18n.Count >= 250 ? api.I18n.Count : 0);
+            Probe("I18n.Count", () => api.I18n.Count >= 450 ? api.I18n.Count : 0);
             Probe("I18n.Has(multiplayer)", () => api.I18n.Has("联机模块"));
             Probe("I18n.Roundtrip", () => RunI18nProbe(api));
+            Probe("I18n.Format", () => api.I18n.Format("已处理 {0} 项", 3));
             if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
             {
                 Probe("Ui.API1.1.Slider", () => api.Ui.Slider("v", 0, 10, 1, 5, _ => { }) != null);
@@ -99,7 +100,32 @@ namespace PclDlSwap.Payload.Swap
                     () => api.Ui.MultilineTextInput("notes", string.Empty, 70, _ => { }) != null);
                 Probe("Ui.API1.3.Progress",
                     () => api.Ui.Progress("progress", 0.25, false)?.Element != null);
+                Probe("Ui.API1.7.Timeline",
+                    () => api.Ui.Timeline(api.Diagnostics.Recent(5), 160) != null);
+                Probe("Ui.API1.8.Table",
+                    () => api.Ui.Table(new[] { "Key", "Value" },
+                        new IReadOnlyList<string>[] { new[] { "api", api.Host.ApiVersion } },
+                        new[] { 1.0, 2.0 }) != null);
+                Probe("Ui.API1.8.EmptyState",
+                    () => api.Ui.EmptyState("No items", "Add one to continue.") != null);
+                Probe("Ui.API1.8.CodeBlock",
+                    () => api.Ui.CodeBlock("{\"ok\":true}", 120) != null);
             }
+            Probe("Files.API1.8.RoundTrip", () =>
+            {
+                const string relative = "selftest/api18.txt";
+                api.Files.WriteText(relative, "ok", false);
+                var value = api.Files.ReadText(relative);
+                api.Files.Delete(relative);
+                return value;
+            });
+            Probe("Messaging.API1.8.RoundTrip", () =>
+            {
+                var received = string.Empty;
+                using (api.Messaging.Subscribe("selftest.api18", message => received = message.Payload as string))
+                    api.Messaging.Publish("selftest.api18", "ok");
+                return received;
+            });
             Probe("Pcl.Logs.LogPath", () => api.Pcl.Logs.LogPath);
             Probe("Pcl.Ui.CurrentPage", () => api.Pcl.Ui.CurrentPage);
             Probe("Pcl.Navigation", () => api.Pcl.Navigation != null);

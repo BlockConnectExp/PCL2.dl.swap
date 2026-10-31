@@ -1,7 +1,8 @@
 # Demo Addon
 
 The smallest complete PCL2 Swap addon: one settings page, one More page, persisted data and the
-API 1.1/1.2 widgets (Slider / TextInput / Link / Separator).
+API 1.8 surfaces: Table / EmptyState / CodeBlock, private files, module messaging,
+themed form widgets and two sidebar page slots.
 
 ## Build and pack
 

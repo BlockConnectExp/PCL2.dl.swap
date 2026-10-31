@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -24,6 +25,7 @@ namespace PCL2Swap.SampleAddon
         public static int UpdateEvents;
         public static int DownloadEvents;
         public static int HookHits;
+        public static int MessageEvents;
         public static string LastApiVersion;
         public static string LastDialogTitle;
         public static string LastHookTarget;
@@ -31,6 +33,7 @@ namespace PCL2Swap.SampleAddon
 
         private ISwapApi _api;
         private IDisposable _hook;
+        private IDisposable _messageSubscription;
         private DispatcherTimer _timer;
         private TextBlock _liveLabel;
         private IProgressView _progress;
@@ -45,6 +48,15 @@ namespace PCL2Swap.SampleAddon
             _api?.Data?.Set("loaded", "1");
             _api?.Data?.Save();
             LastHostPath = _api?.Pcl?.Environment?.HostPath;
+            try
+            {
+                _api?.Files?.WriteText("sample/hello.txt",
+                    "Written through IAddonFiles at " + DateTime.UtcNow.ToString("O") + Environment.NewLine);
+            }
+            catch (Exception ex)
+            {
+                _api?.LogWarning("写入模块文件失败：" + ex.Message);
+            }
             _api?.Log($"示例模块已加载（API {LastApiVersion}，宿主 {_api?.Host?.SwapVersion}，" +
                       $"数据目录 {_api?.Host?.AddonDirectory}，记录钩子命中={_countHook}）。");
         }
@@ -58,6 +70,19 @@ namespace PCL2Swap.SampleAddon
             hooks.DialogOpening += OnDialogOpening;
             hooks.UpdateRequested += OnUpdateRequested;
             hooks.DownloadCompleted += OnDownloadCompleted;
+            try
+            {
+                _messageSubscription = _api.Messaging.Subscribe("sample.ready", message =>
+                {
+                    MessageEvents++;
+                    _api.Log($"示例模块收到消息：{message.Source} → {message.Topic}");
+                });
+                _api.Messaging.Publish("sample.ready", "hello from the sample addon");
+            }
+            catch (Exception ex)
+            {
+                _api.LogWarning("模块消息总线演示失败：" + ex.Message);
+            }
 
             AttachDemoHook(hooks);
             RegisterPage();
@@ -77,6 +102,8 @@ namespace PCL2Swap.SampleAddon
 
             _hook?.Dispose();
             _hook = null;
+            _messageSubscription?.Dispose();
+            _messageSubscription = null;
             StopTimer();
         }
 
@@ -215,16 +242,39 @@ namespace PCL2Swap.SampleAddon
                 _api.LogWarning("创建 API 1.3 后端演示失败：" + ex.Message);
             }
 
-            page.Children.Add(_api.Ui.Card("API 1.6 模块治理",
+            page.Children.Add(_api.Ui.Card("API 1.7 运行时治理",
                 _api.Ui.Buttons(
                     _api.Ui.Badge("模块目录 " + (_api.Modules?.Modules.Count ?? 0), SwapHintType.Info),
-                    _api.Ui.Badge("签名钩子", SwapHintType.Success)),
+                    _api.Ui.Badge("签名钩子", SwapHintType.Success),
+                    _api.Ui.Badge("诊断事件 " + (_api.Diagnostics?.Recent(100).Count ?? 0), SwapHintType.Warning)),
                 _api.Ui.Tabs(new[] { "概览", "说明" }, 0, index =>
                     _api.Ui.Text(index == 0
-                        ? "模块目录、权限授予和签名目标选择均由宿主统一提供。"
-                        : "旧 API 保持兼容；新模块可精确选择重载，并按用户授权运行。", 12.5, true)),
+                        ? "模块目录、权限授予、签名目标与 HookContext 由宿主统一提供。"
+                        : "旧 API 保持兼容；Replace handler 可通过 HookContext 调用原方法。", 12.5, true)),
+                _api.Ui.Timeline(_api.Diagnostics?.Recent(8) ?? new SwapDiagnosticEvent[0], 160),
                 _api.Ui.Expander("高级信息", false, () =>
-                    _api.Ui.Note("这个区域由 IUi.Expander 构建，内容在展开前不会干扰主页面。"))));
+                    _api.Ui.Note("这个区域由 IUi.Expander 构建；诊断时间线来自有界结构化日志。"))));
+
+            page.Children.Add(_api.Ui.Card("API 1.8 模块协作",
+                _api.Ui.Badge("消息 " + MessageEvents, SwapHintType.Success),
+                _api.Ui.Table(
+                    new[] { "能力", "后端 / 前端", "用途" },
+                    new IReadOnlyList<string>[]
+                    {
+                        new[] { "IAddonMessaging", "后端", "模块间 topic 消息" },
+                        new[] { "IAddonFiles", "后端", "模块私有文件存储" },
+                        new[] { "IUi.Table", "前端", "只读清单与对比" },
+                        new[] { "IUi.EmptyState", "前端", "零结果与首次使用" },
+                        new[] { "IUi.CodeBlock", "前端", "日志、JSON 与配置片段" }
+                    },
+                    new[] { 1.2, 1.0, 1.8 }),
+                _api.Ui.EmptyState("这里是一张空状态",
+                    "当集合没有内容时，用一句原因和一个明确动作代替空白区域。",
+                    _api.Ui.Button("刷新示例", RefreshLabel)),
+                _api.Ui.CodeBlock(
+                    "api.Messaging.Publish(\"sample.ready\", payload);\n" +
+                    "api.Files.WriteText(\"sample/hello.txt\", text);\n" +
+                    "api.I18n.Format(\"已处理 {0} 项\", count);")));
 
             // Live view: the page is built once and cached, so a timer keeps the counters honest
             // while the user is looking at it.
@@ -232,7 +282,7 @@ namespace PCL2Swap.SampleAddon
             _timer.Tick += (sender, args) => RefreshLabel();
             _timer.Start();
 
-            return page;
+            return _api.Ui.Scroll(page);
         }
 
         /// <summary>Applies a persisted dropdown choice to the live timer.</summary>

@@ -6,6 +6,41 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-11:57:40 v26.2: 英文支持与 API 1.8 正式版
+
+GitCommitHash: (release commit pending)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\Collaboration.cs                 模块消息总线契约
+.\src\PCL2Swap.Api\AddonFiles.cs                    沙箱化模块文件契约
+.\src\PCL2Swap.Api\Diagnostics.cs                   诊断时间线契约（API 1.7）
+.\src\PCL2Swap.Api\HookContext.cs                   HookContext 原方法调用（API 1.7）
+.\src\PCL2Swap.Api\ISwapApi.cs                      Table / EmptyState / CodeBlock / Scroll（API 1.8）
+.\src\PCL2Swap.Api\II18n.cs                         RegisterMany / Format / TryTranslate
+.\src\PclDlSwap.Payload\Swap\AddonCollaboration.cs  消息总线与路径受限文件存储
+.\src\PclDlSwap.Payload\Swap\SwapDiagnostics.cs     512 条有界诊断时间线
+.\src\PclDlSwap.Payload\Swap\HostTranslator.cs      逐控件原文账本与可逆动态翻译
+.\src\PclDlSwap.Payload\Swap\I18n.Extra.cs          507 条精确映射 + 60 条动态短语
+.\src\PclDlSwap.Payload\Features\FeedbackRouter.cs  反馈分流正文显式双语
+.\src\PclDlSwap.Payload\Swap\Views\SwapUi.cs        Timeline / Table / EmptyState / CodeBlock / Scroll
+.\src\PclDlSwap.Payload\Swap\Views\SwapSettingsView.cs 英文词典计数与运行诊断时间线
+.\src\PclDlSwap.ExLoaderHarness\Program.cs          API 1.7/1.8 八套回归
+.\src\PCL2Swap.SampleAddon\SampleAddon.cs           API 1.8 示例
+.\examples\demo-addon\DemoAddon.cs                  API 1.8 公共模板与可滚动页面
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|英文支持|词典扩展到 507 条精确映射 + 60 条动态短语；新增多文件 `i18n/en-US/*.json` 语言包、批量注册、格式化和非破坏查询|2026.10.31-11:57:40|PCL2.dlswap
+2|可逆翻译|`HostTranslator` 从英文反查改为逐控件原文账本；只恢复仍处于本层最后写入值的控件，动态短语/重复英文不再误回退或覆盖宿主新文本|2026.10.31-11:57:40|PCL2.dlswap
+3|API 1.7|`SwapHookContext.Current.InvokeOriginal()` 支持不递归调用原方法；`IDiagnosticsAccess` 提供 512 条有界时间线、导出与变更事件；`IUi.Timeline` 提供原生事件流|2026.10.31-11:57:40|PCL2.dlswap
+4|API 1.8 后端|`IAddonFiles` 提供模块根目录内相对路径文件读写；`IAddonMessaging` 提供带来源、通配订阅和异常隔离的进程内 topic 总线；严格模式新增 `files`/`messaging` 实时门控|2026.10.31-11:57:40|PCL2.dlswap
+5|API 1.8 前端|`IUi.Table`、`IUi.EmptyState`、`IUi.CodeBlock`、`IUi.Scroll` 使用原生 WPF/现有主题画笔，覆盖清单、零内容、代码/JSON 与长页面滚动|2026.10.31-11:57:40|PCL2.dlswap
+6|验证|八套 harness PASS；最终 v26.2 在 PCL 2.99.0.1 完成正常注入、模块/权限、API 1.8 页面、安全模式清除与重启恢复，自检均为 `ok=73 fail=0`|2026.10.31-11:57:40|PCL2.dlswap
+
+---
 ## 2026.10.31-11:02:05 v26.2-Alpha 9: 模块治理与 API 1.6
 
 GitCommitHash: (unreleased)

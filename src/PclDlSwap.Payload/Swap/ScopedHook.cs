@@ -52,12 +52,13 @@ namespace PclDlSwap.Payload.Swap
             /// </summary>
             internal static readonly object CallFailed = new object();
 
-            public object Call(object[] arguments)
+            public object Call(object[] arguments, SwapHookContext context)
             {
                 Interlocked.Increment(ref Calls);
                 try
                 {
-                    return Handler.DynamicInvoke(arguments);
+                    using (context?.Activate())
+                        return Handler.DynamicInvoke(arguments);
                 }
                 catch (Exception ex)
                 {
@@ -247,7 +248,8 @@ namespace PclDlSwap.Payload.Swap
             foreach (var registration in registrations)
             {
                 if (registration.Mode != HookMode.Prefix) continue;
-                if (registration.IsLive) registration.Call(arguments);
+                if (registration.IsLive)
+                    registration.Call(arguments, BuildContext(chain, registration, self, args));
                 else registration.MarkSkipped();
             }
 
@@ -261,7 +263,7 @@ namespace PclDlSwap.Payload.Swap
                     registration.MarkSkipped();
                     continue;
                 }
-                result = registration.Call(arguments);
+                result = registration.Call(arguments, BuildContext(chain, registration, self, args));
                 if (ReferenceEquals(result, Registration.CallFailed))
                 {
                     // The module's Replace handler blew up and deactivated itself; keep looking for a
@@ -282,11 +284,33 @@ namespace PclDlSwap.Payload.Swap
             foreach (var registration in registrations)
             {
                 if (registration.Mode != HookMode.Postfix) continue;
-                if (registration.IsLive) registration.Call(arguments);
+                if (registration.IsLive)
+                    registration.Call(arguments, BuildContext(chain, registration, self, args));
                 else registration.MarkSkipped();
             }
 
             return result;
+        }
+
+        private static SwapHookContext BuildContext(Chain chain, Registration registration,
+            object self, object[] arguments)
+        {
+            var target = chain?.Target;
+            var signature = target == null
+                ? string.Empty
+                : (target.DeclaringType?.FullName ?? "?") + "." + target.Name + "(" +
+                  string.Join(", ", target.GetParameters()
+                      .Select(parameter => parameter.ParameterType.FullName ?? parameter.ParameterType.Name)) +
+                  ")";
+            return new SwapHookContext(
+                registration?.AddonId, registration?.HookId, registration?.Mode ?? HookMode.Prefix,
+                signature, self, arguments, overrideArguments =>
+                {
+                    var installer = chain?.Installer;
+                    return installer == null
+                        ? null
+                        : installer.InvokeOriginal(self, overrideArguments ?? new object[0]);
+                });
         }
 
         private static object[] BuildArguments(object self, object[] args)

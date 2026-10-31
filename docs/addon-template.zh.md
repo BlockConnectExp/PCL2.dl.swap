@@ -42,6 +42,10 @@ cd examples\demo-addon
 | 权限 | manifest 请求 `["pages","files","clipboard"]`，用户可在模块详情逐项授予/撤销 |
 | 模块目录 | `api.Modules.Modules` / `Find` / `Changed` |
 | 签名钩子 | `api.Hooks.FindTargets` + `SwapMethodTarget` 精确选择重载 |
+| 诊断时间线 | `api.Diagnostics.Recent/Export/Changed` + `api.Ui.Timeline` |
+| 模块消息 | `api.Messaging.Subscribe/Publish`（`messaging` 权限） |
+| 私有文件 | `api.Files.Read/Write/List/Delete`（`files` 权限，路径限制在模块根目录） |
+| 数据前端 | `api.Ui.Table` / `EmptyState` / `CodeBlock` / `Scroll` |
 
 ## 4 安装与验证
 
@@ -56,7 +60,7 @@ $env:PCL2SWAP_SELFTEST = '1'
 预期：设置侧栏出现「示例设置 / Demo Settings」，更多侧栏出现「示例页面 / Demo Page」；
 重启后 Launch count 递增（Data 持久化）。
 
-## 5 已验证的生命周期（v26.1-Alpha 9）
+## 5 已验证的生命周期（v26.2）
 
 | 阶段 | 证据 |
 |---|---|

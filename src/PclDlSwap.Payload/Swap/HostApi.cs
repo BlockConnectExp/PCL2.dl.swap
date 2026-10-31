@@ -18,7 +18,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.6.0";
+        public const string ApiVersion = "1.8.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -37,6 +37,9 @@ namespace PclDlSwap.Payload.Swap
             _pcl = new PclAccess(_host);
             Recovery = new RecoveryAccessImpl();
             Modules = new ModuleCatalogImpl();
+            Diagnostics = new DiagnosticsAccessImpl();
+            Files = new AddonFileStore(Path.Combine(SwapPaths.DataRoot, "files", "host"));
+            Messaging = new MessagingAccess("host");
         }
 
         public IHostInfo Host { get; }
@@ -48,6 +51,9 @@ namespace PclDlSwap.Payload.Swap
         public II18n I18n => SwapI18n.Current;
         public IRecoveryAccess Recovery { get; }
         public IModuleCatalog Modules { get; }
+        public IDiagnosticsAccess Diagnostics { get; }
+        public IAddonFiles Files { get; }
+        public IAddonMessaging Messaging { get; }
 
         public IData Data { get; private set; }
 
@@ -159,6 +165,20 @@ namespace PclDlSwap.Payload.Swap
                     var manager = SwapHost.Addons;
                     if (manager != null) manager.Changed -= value;
                 }
+            }
+        }
+
+        private sealed class DiagnosticsAccessImpl : IDiagnosticsAccess
+        {
+            public IReadOnlyList<SwapDiagnosticEvent> Recent(int limit = 100) =>
+                SwapDiagnostics.Recent(limit);
+
+            public string Export(int limit = 200) => SwapDiagnostics.Export(limit);
+
+            public event EventHandler Changed
+            {
+                add => SwapDiagnostics.Changed += value;
+                remove => SwapDiagnostics.Changed -= value;
             }
         }
 
@@ -552,6 +572,26 @@ namespace PclDlSwap.Payload.Swap
                 System.Collections.Generic.IReadOnlyList<string> titles, int selectedIndex,
                 Func<int, System.Windows.FrameworkElement> contentFactory) =>
                 Views.SwapUi.Tabs(titles, selectedIndex, contentFactory);
+
+            public System.Windows.FrameworkElement Timeline(
+                System.Collections.Generic.IReadOnlyList<SwapDiagnosticEvent> events,
+                int maxHeight = 260) => Views.SwapUi.Timeline(events, maxHeight);
+
+            public System.Windows.FrameworkElement Table(
+                System.Collections.Generic.IReadOnlyList<string> columns,
+                System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<string>> rows,
+                System.Collections.Generic.IReadOnlyList<double> columnWeights = null,
+                int maxHeight = 280) => Views.SwapUi.Table(columns, rows, columnWeights, maxHeight);
+
+            public System.Windows.FrameworkElement EmptyState(string title, string message,
+                System.Windows.FrameworkElement action = null) =>
+                Views.SwapUi.EmptyState(title, message, action);
+
+            public System.Windows.FrameworkElement CodeBlock(string text, int maxHeight = 240) =>
+                Views.SwapUi.CodeBlock(text, maxHeight);
+
+            public System.Windows.FrameworkElement Scroll(System.Windows.FrameworkElement content) =>
+                Views.SwapUi.Scroll(content);
         }
 
         private sealed class ReflectionImpl : IReflection

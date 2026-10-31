@@ -12,7 +12,7 @@
 | 2.14.0.0 | 411 | `e6e9028d-…` | `5582952ded3b4435` | `v2140-rel411` | 历史基线 | — | 早期提取基线 |
 | 2.14.0.0 快照 | 412 | `2a08e6c9-…` | `77fbc26a13abf725` | `v2140-snap412` | 历史基线 | — | — |
 | 2.99.0.0 | 413 | `926d447e-daff-4169-8c64-adc3d37d5f78` | `6b6e1260cb5a1d6a` | `v299-rel413` | `ok=30 fail=0` | 通过 | 主支持线 |
-| **2.99.0.1** | **415** | `5613aa62-1c0b-400f-9223-ece05dc28bef` | `0db34e19d9eeb6d4` | `v2990_1-rel415` | `ok=66 fail=0` | 通过 | Alpha9 英文权限治理/API 1.6 复验 |
+| **2.99.0.1** | **415** | `5613aa62-1c0b-400f-9223-ece05dc28bef` | `0db34e19d9eeb6d4` | `v2990_1-rel415` | `ok=73 fail=0` | 通过（四轮） | v26.2 API 1.8 正式版复验 |
 
 「注入自检」= 注入后 `PCL2SWAP_SELFTEST=1` 在宿主 UI 线程运行的只读自检，结果落在
 `%TEMP%\PCL2Swap\<版本>\pcl2swap.log`。
@@ -25,16 +25,17 @@
 | 下载页可用（非「关闭下载」桩） | ✅ | ✅ | 最新版本卡片/正式版/预览版等分区正常 |
 | 静默更新拦截 | ✅ | ✅ | `ModSecret.UpdateStart` detour 安装成功 |
 | 云下载沙箱查毒 | ✅ | ✅ | `NetDownloadByLoader` 两个重载 detour 安装成功 |
-| 关于页 Swap 品牌卡 | ✅ | ✅ | 「PCL2 Swap By BlockConnect · v26.2-Alpha 9」卡片显示在关于与鸣谢顶部 |
+| 关于页 Swap 品牌卡 | ✅ | ✅ | 「PCL2 Swap By BlockConnect · v26.2」卡片显示在关于与鸣谢顶部 |
 | 反馈分流（PCL2 / Swap / 取消） | ✅ | ✅ | 三个按钮完整显示，选择后才跳转对应渠道 |
 | 设置子页 Swap Addon / Swap Settings | ✅ | ✅ | 子页可打开，无「未知的设置子页面种类：101」崩溃 |
 | 内置 Addon（Download MC / OTA Protector / Cancel Button） | ✅ | ✅ | 三张卡片均为「已启用」 |
 | 英文支持（运行时翻译） | ✅ | ✅ | 导航/按钮/设置卡片/启动日志/Swap 页面英文化，语言可切回中文 |
-| 英文扩展（下载/登录/联机） | 历史基线 | ✅ | 2.99.0.1 Alpha6：354 条词典；Settings/Download/About/More 真机截图，顶层对话框与菜单 Header 纳入 |
+| 英文扩展（下载/登录/联机） | 历史基线 | ✅ | v26.2：507 条精确映射 + 60 条动态短语；逐控件原文账本支持动态句可逆恢复 |
 | 更多页槽位（PageOtherLeft） | ✅ | ✅ | 自检页 `Swap Selftest` 插入更多侧栏并切换到 PageID 200 |
 | 权限严格门控（opt-in） | ✅ | ✅ | 声明 permissions 的模块未授权访问被拦截；无声明模块保持兼容模式 |
 | SDK 1.3 后端/前端 | ✅（harness） | ✅ | Navigation / Threading / Environment / Profiles / Net.Request 与 6 个新控件；真机 `ok=63` |
 | 启动恢复/安全模式 | ✅（harness） | ✅ | 三次未稳定启动后全部 Addon `skipped-safe-mode`；恢复卡片可见；清旗标后下次启动恢复 |
+| SDK 1.7/1.8 后端与前端 | ✅ | ✅ | HookContext、诊断时间线、消息总线、沙箱文件、Table/EmptyState/CodeBlock/Scroll 真机通过 |
 
 ## 3 2.99.0.1 特殊适配（历史坑位）
 

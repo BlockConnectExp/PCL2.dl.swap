@@ -27,6 +27,10 @@ namespace PclDlSwap.Payload.Swap.Views
                         PageRegistry.InvalidatePage("swap-addons");
                         PageRegistry.InvalidatePage("swap-settings");
                     }),
+                SwapUi.InfoRow(i18n.T("词典条目", "Dictionary entries"), i18n.Count.ToString()),
+                SwapUi.Note(i18n.T(
+                    "切换语言会立即重放宿主视觉树；每个控件的原文会单独记录，切回中文时可逆恢复。",
+                    "Switching language reapplies the host visual tree immediately. Each translated control keeps its original text so switching back is reversible.")),
                 SwapUi.Buttons(
                     SwapUi.Button(i18n.T("立即翻译宿主界面", "Translate launcher now"), () =>
                     {
@@ -40,6 +44,10 @@ namespace PclDlSwap.Payload.Swap.Views
                         api?.Ui.Hint((i18n.IsEnglish ? "Restored " : "已恢复 ") + hits +
                                      (i18n.IsEnglish ? " strings." : " 处文本。"));
                     }))));
+
+            page.Children.Add(SwapUi.Card(i18n.T("运行诊断", "Runtime diagnostics"),
+                SwapUi.Timeline(api?.Diagnostics?.Recent(12) ??
+                                new PCL2Swap.Api.SwapDiagnosticEvent[0], 220)));
 
             page.Children.Add(SwapUi.Card(i18n.T("宿主信息", "Host information"),
                 SwapUi.InfoRow(i18n.T("宿主版本", "Host version"), api?.Host.SwapVersion),

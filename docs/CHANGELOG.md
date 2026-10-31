@@ -6,6 +6,30 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-08:44:15 v26.2-Alpha 7: 启动恢复与安全模式
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PclDlSwap.Payload\Swap\StartupRecovery.cs      新文件：启动 journal / 稳定心跳 / 安全模式
+.\src\PclDlSwap.Payload\Swap\SwapHost.cs            启动恢复接入
+.\src\PclDlSwap.Payload\Swap\AddonManager.cs        安全模式跳过与门控
+.\src\PclDlSwap.Payload\Swap\Views\SwapAddonView.cs 恢复卡片与诊断入口
+.\src\PCL2Swap.Api\ISwapApi.cs                      Host.SafeMode / SafeModeReason / RecoveryDirectory
+.\src\PclDlSwap.ExLoaderHarness\Program.cs          --safemodetest
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|启动哨兵|每次启动先写 `recovery/startup-journal.json`，12 秒稳定心跳后才标记稳定；连续两次未稳定启动触发安全模式|2026.10.31-08:44:15|PCL2.dl.swap
+2|安全模式|安全模式会话跳过所有 Addon 的 `OnLoad/OnEnable`，但保留 Swap 页面、模块列表和恢复入口；安全模式旗标持久化到 journal|2026.10.31-08:44:15|PCL2.dl.swap
+3|恢复 UI|Swap Addon 页新增恢复卡片：原因、未稳定次数/当前状态、恢复目录、复制诊断、退出安全模式（重启生效）、打开目录|2026.10.31-08:44:15|PCL2.dl.swap
+4|API 1.4|`IHostInfo` 增加 `SafeMode` / `SafeModeReason` / `RecoveryDirectory`，只增不改|2026.10.31-08:44:15|PCL2.dl.swap
+5|验证|harness 八套件 PASS；`--safemodetest` 断言三次未稳定启动进入安全模式、全部模块跳过、清旗标后下次启动恢复；2.99.0.1 正常/安全模式真机均 `ok=66 fail=0`|2026.10.31-08:44:15|PCL2.dl.swap
+
+---
 ## 2026.10.31-07:56:03 v26.2-Alpha 6: 英文覆盖与 SDK 1.3
 
 GitCommitHash: (unreleased)

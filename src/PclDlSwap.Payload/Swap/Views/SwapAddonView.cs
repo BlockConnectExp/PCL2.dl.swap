@@ -22,6 +22,8 @@ namespace PclDlSwap.Payload.Swap.Views
         {
             var page = SwapUi.Page();
             var records = addons?.Records;
+            if (addons?.SafeMode == true)
+                page.Children.Add(SafeModeCard(api, addons));
 
             var list = new List<FrameworkElement>();
             if (records == null || records.Count == 0)
@@ -76,6 +78,66 @@ namespace PclDlSwap.Payload.Swap.Views
         }
 
         // ------------------------------------------------------------------ rows
+
+        private static FrameworkElement SafeModeCard(ISwapApi api, AddonManager addons)
+        {
+            var i18n = SwapI18n.Current;
+            var recovery = addons?.Recovery;
+            if (recovery == null) return SwapUi.Note("(recovery unavailable)");
+
+            var rows = new List<FrameworkElement>
+            {
+                SwapUi.Note(i18n.T(
+                    "安全模式已启用：本次会话不会加载任何 Addon，但 Swap 页面和恢复入口仍然可用。",
+                    "Safe mode is active: no addon is loaded in this session, but Swap pages and recovery controls remain available.")),
+                SwapUi.InfoRow(i18n.T("触发原因", "Reason"),
+                    string.IsNullOrEmpty(recovery.SafeModeReason) ? "(unknown)" : recovery.SafeModeReason),
+                SwapUi.InfoRow(i18n.T("未稳定启动", "Unclean starts"),
+                    recovery.SafeModeUncleanStarts + " " + i18n.T("次", "times")),
+                SwapUi.InfoRow(i18n.T("当前状态", "Current state"),
+                    i18n.T("安全模式运行中", "Safe mode active")),
+                SwapUi.InfoRow(i18n.T("恢复目录", "Recovery directory"),
+                    api?.Host?.RecoveryDirectory ?? string.Empty)
+            };
+
+            if (recovery.SafeModeExitPending)
+            {
+                rows.Add(SwapUi.Note(i18n.T(
+                    "安全模式旗标已清除。重启 PCL 后 Addon 会按原配置重新加载。",
+                    "The safe-mode flag is cleared. Restart PCL to load addons again with their saved enabled state.")));
+            }
+
+            rows.Add(SwapUi.Buttons(
+                SwapUi.Button(i18n.T("退出安全模式（重启后生效）", "Leave safe mode (restart to apply)"),
+                    () =>
+                    {
+                        var answer = api?.Ui.MsgBox(
+                            i18n.T("这会清除安全模式旗标，但当前会话仍不会加载 Addon。是否继续？",
+                                "This clears the safe-mode flag, but the current session still will not load addons. Continue?"),
+                            i18n.T("PCL2 Swap · 安全模式", "PCL2 Swap - Safe mode"),
+                            i18n.T("退出安全模式", "Leave safe mode"), i18n.T("取消", "Cancel")) ?? 1;
+                        if (answer != 1) return;
+                        if (recovery.ClearSafeMode())
+                        {
+                            api?.Ui.Hint(i18n.T("安全模式已清除；重启 PCL 后加载模块。",
+                                "Safe mode cleared; restart PCL to load addons."));
+                            PageRegistry.InvalidatePage("swap-addons");
+                        }
+                    }),
+                SwapUi.Button(i18n.T("复制恢复诊断", "Copy recovery diagnostics"),
+                    () =>
+                    {
+                        var copied = api?.Pcl?.Clipboard?.SetText(recovery.Diagnostics()) == true;
+                        api?.Ui.Hint(copied
+                            ? i18n.T("恢复诊断已复制。", "Recovery diagnostics copied.")
+                            : i18n.T("复制恢复诊断失败。", "Failed to copy recovery diagnostics."),
+                            copied ? SwapHintType.Success : SwapHintType.Error);
+                    }),
+                SwapUi.Button(i18n.T("打开恢复目录", "Open recovery directory"),
+                    () => OpenFolder(api?.Host?.RecoveryDirectory))));
+
+            return SwapUi.Card(i18n.T("恢复模式", "Recovery mode"), rows.ToArray());
+        }
 
         /// <summary>
         /// One chain as a two-line block (target on the first line, module/mode/hits on the second)
@@ -478,6 +540,7 @@ namespace PclDlSwap.Payload.Swap.Views
                 case "unpacked": return "已解包（待启用）";
                 case "skipped-shape": return "作用域不适用";
                 case "skipped-host": return "宿主版本不适用";
+                case "skipped-safe-mode": return SwapI18n.Current.T("安全跳过", "Safe skip");
                 case "removed": return "已卸载";
                 case "registered": return "已登记";
                 default: return record.Status ?? string.Empty;

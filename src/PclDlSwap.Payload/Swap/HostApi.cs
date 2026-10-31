@@ -18,7 +18,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.3.0";
+        public const string ApiVersion = "1.4.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -107,6 +107,9 @@ namespace PclDlSwap.Payload.Swap
             public int ProcessId => System.Diagnostics.Process.GetCurrentProcess().Id;
             public string LogDirectory => Path.GetDirectoryName(SwapLog.LogPath) ?? string.Empty;
             public string AddonDirectory => SwapPaths.AddonsDirectory;
+            public bool SafeMode => SwapHost.Recovery?.SafeMode ?? false;
+            public string SafeModeReason => SwapHost.Recovery?.SafeModeReason ?? string.Empty;
+            public string RecoveryDirectory => SwapPaths.RecoveryDirectory;
             public object PclAssembly { get; }
         }
 

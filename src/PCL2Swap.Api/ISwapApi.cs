@@ -53,6 +53,12 @@ namespace PCL2Swap.Api
         int ProcessId { get; }
         string LogDirectory { get; }
         string AddonDirectory { get; }
+        /// <summary>True when this process skipped addons after an unclean-start recovery decision.</summary>
+        bool SafeMode { get; }
+        /// <summary>Why safe mode was entered; empty in a normal start.</summary>
+        string SafeModeReason { get; }
+        /// <summary>Directory containing the startup journal and recovery diagnostics.</summary>
+        string RecoveryDirectory { get; }
         /// <summary>The PCL assembly the swap is bound to (may be null before the host resolves it).</summary>
         object PclAssembly { get; }
     }

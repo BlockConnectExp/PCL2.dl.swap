@@ -75,6 +75,9 @@ namespace PclDlSwap.Payload.Swap
             Probe("Host.ProcessId", () => api.Host.ProcessId);
             Probe("Host.AddonDirectory", () => api.Host.AddonDirectory);
             Probe("Host.LogDirectory", () => api.Host.LogDirectory);
+            Probe("Host.SafeMode", () => api.Host.SafeMode);
+            Probe("Host.SafeModeReason", () => api.Host.SafeModeReason);
+            Probe("Host.RecoveryDirectory", () => api.Host.RecoveryDirectory);
 
             Probe("I18n.Explicit", () => api.I18n.T("启动", "Launch"));
             Probe("I18n.Count", () => api.I18n.Count >= 250 ? api.I18n.Count : 0);

@@ -287,6 +287,7 @@ namespace PclDlSwap.ExLoaderHarness
             if (args.Length >= 2 && args[0] == "--surfacetest") return RunSurfaceTest(args[1]);
             if (args.Length >= 2 && args[0] == "--pcltest") return RunPclAccessTest(args[1]);
             if (args.Length >= 2 && args[0] == "--pagetest") return RunPageRegistryTest(args[1]);
+            if (args.Length >= 2 && args[0] == "--safemodetest") return RunSafeModeTest(args[1]);
 
             var reversedOta = args.Contains("--reversed-ota");
             var positional = args.Where(a => !a.StartsWith("--")).ToArray();
@@ -305,6 +306,7 @@ namespace PclDlSwap.ExLoaderHarness
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --surfacetest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --pcltest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --pagetest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --safemodetest <payload.dll>");
                 return 2;
             }
 
@@ -706,6 +708,125 @@ namespace PclDlSwap.ExLoaderHarness
         }
 
         /// <summary>
+        /// Exercises the recovery journal as a real startup sequence: three unclean starts must
+        /// enter safe mode, every addon must be skipped for that process, and clearing the flag must
+        /// make the next start normal again.
+        /// </summary>
+        private static int RunSafeModeTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var failures = 0;
+            void Expect(string label, bool ok)
+            {
+                Console.WriteLine((ok ? "[safe] ok   " : "[safe] FAIL ") + label);
+                if (!ok) failures++;
+            }
+
+            var dataRoot = Path.Combine(Path.GetTempPath(),
+                "Pcl2SwapSafeModeTest-" + Guid.NewGuid().ToString("N"));
+            Environment.SetEnvironmentVariable("PCL2SWAP_DATA", dataRoot);
+            Directory.CreateDirectory(PCL2Swap.Api.SwapPaths.AddonsDirectory);
+
+            var packageSource = Path.GetFullPath(Path.Combine(
+                "examples", "demo-addon", "demo.sample.swapaddon"));
+            if (!File.Exists(packageSource))
+            {
+                Console.Error.WriteLine("[safe] package not found: " + packageSource);
+                return 2;
+            }
+            File.Copy(packageSource,
+                Path.Combine(PCL2Swap.Api.SwapPaths.AddonsDirectory, "demo.sample.swapaddon"),
+                true);
+
+            var payload = Assembly.LoadFrom(full);
+            var recoveryType = payload.GetType("PclDlSwap.Payload.Swap.StartupRecovery",
+                throwOnError: true);
+            var begin = recoveryType.GetMethod("Begin", BindingFlags.Public | BindingFlags.NonPublic |
+                                                        BindingFlags.Static);
+            Expect("StartupRecovery.Begin exposed", begin != null);
+
+            var moduleIds = new[]
+            {
+                "swap.download-mc", "swap.ota-protector", "swap.cancel-button", "demo.sample"
+            };
+            object recovery = null;
+            for (var attempt = 1; attempt <= 3; attempt++)
+            {
+                recovery = begin?.Invoke(null, new object[]
+                {
+                    PCL2Swap.Api.SwapShape.Injected, "2.99.0.1", moduleIds
+                });
+                Expect("startup " + attempt + " recorded",
+                    recovery != null &&
+                    Convert.ToInt32(recovery.GetType().GetProperty("Attempt")?.GetValue(recovery)) == attempt);
+            }
+
+            var safeMode = recovery?.GetType().GetProperty("SafeMode")?.GetValue(recovery);
+            Expect("two unclean starts trigger safe mode", Convert.ToBoolean(safeMode ?? false));
+            Expect("safe mode preserves the triggering unclean count",
+                Convert.ToInt32(recovery?.GetType().GetProperty("SafeModeUncleanStarts")
+                    ?.GetValue(recovery) ?? 0) >= 2);
+            Expect("recovery journal exists",
+                File.Exists(Convert.ToString(recovery?.GetType().GetProperty("JournalPath")
+                    ?.GetValue(recovery))));
+
+            var hostType = payload.GetType("PclDlSwap.Payload.Swap.SwapHost", throwOnError: true);
+            hostType.GetMethod("Start", BindingFlags.Public | BindingFlags.Static)
+                .Invoke(null, new object[] { PCL2Swap.Api.SwapShape.Injected, typeof(PCL.ModMain).Assembly });
+
+            var api = hostType.GetProperty("Api", BindingFlags.Public | BindingFlags.Static)?.GetValue(null)
+                      as PCL2Swap.Api.ISwapApi;
+            Expect("Host.SafeMode reports safe mode", api?.Host?.SafeMode == true);
+            Expect("Host.SafeModeReason is populated",
+                !string.IsNullOrWhiteSpace(api?.Host?.SafeModeReason));
+            Expect("Host.RecoveryDirectory reports the data root",
+                (api?.Host?.RecoveryDirectory ?? string.Empty)
+                .StartsWith(dataRoot, StringComparison.OrdinalIgnoreCase));
+
+            var manager = hostType.GetProperty("Addons", BindingFlags.NonPublic | BindingFlags.Static)
+                ?.GetValue(null);
+            var records = (manager?.GetType().GetProperty("Records")?.GetValue(manager)
+                           as System.Collections.IEnumerable)
+                ?.Cast<object>().ToList() ?? new List<object>();
+            Expect("all built-ins and the package remain visible", records.Count == 4);
+            Expect("every addon is skipped in safe mode",
+                records.Count == 4 && records.All(record =>
+                    Convert.ToString(record.GetType().GetProperty("Status").GetValue(record)) ==
+                    "skipped-safe-mode"));
+
+            var isEnabled = manager?.GetType().GetMethod("IsEnabled");
+            Expect("safe mode blocks runtime enablement for built-ins and third-party modules",
+                !Convert.ToBoolean(isEnabled?.Invoke(manager, new object[] { "swap.download-mc" }) ?? true) &&
+                !Convert.ToBoolean(isEnabled?.Invoke(manager, new object[] { "demo.sample" }) ?? true));
+
+            var setEnabled = manager?.GetType().GetMethod("SetEnabled");
+            Expect("safe mode rejects a live enable request",
+                !Convert.ToBoolean(setEnabled?.Invoke(manager,
+                    new object[] { "demo.sample", true }) ?? true));
+
+            var activeRecovery = manager?.GetType().GetProperty("Recovery",
+                BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(manager);
+            var clear = activeRecovery?.GetType().GetMethod("ClearSafeMode");
+            Expect("safe-mode flag can be cleared for the next launch",
+                Convert.ToBoolean(clear?.Invoke(activeRecovery, null) ?? false));
+            Expect("clear is pending restart, not a live module load",
+                Convert.ToBoolean(activeRecovery.GetType().GetProperty("SafeModeExitPending")
+                    ?.GetValue(activeRecovery) ?? false));
+
+            var next = begin?.Invoke(null, new object[]
+            {
+                PCL2Swap.Api.SwapShape.Injected, "2.99.0.1", moduleIds
+            });
+            Expect("the next launch no longer enters safe mode",
+                !Convert.ToBoolean(next?.GetType().GetProperty("SafeMode")?.GetValue(next) ?? true));
+
+            Console.WriteLine(failures == 0 ? "[safe] RESULT: PASS" : "[safe] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
         /// Regression test for the typed PCL access families: Secret.UpdateStart and
         /// Net.DownloadByClient must reach the real host methods (the harness stubs count calls).
         /// </summary>
@@ -766,8 +887,8 @@ namespace PclDlSwap.ExLoaderHarness
             var hostInfo = api?.GetType().GetProperty("Host")?.GetValue(api);
             var pclVersion = Convert.ToString(hostInfo?.GetType().GetProperty("PclVersion")?.GetValue(hostInfo));
             Expect("Host.PclVersion reports the bound PCL build", !string.IsNullOrEmpty(pclVersion));
-            Expect("Host.ApiVersion reports the additive 1.3 contract",
-                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.3.0");
+            Expect("Host.ApiVersion reports the additive 1.4 contract",
+                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.4.0");
 
             var secret = pcl?.GetType().GetProperty("Secret")?.GetValue(pcl);
             Expect("Secret family exposed", secret != null);
@@ -1301,7 +1422,7 @@ namespace PclDlSwap.ExLoaderHarness
 
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
-                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.3.0");
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.4.0");
 
                 // ---- module state: persisted, and it gates the built-in features ----
                 var isEnabled = manager?.GetType().GetMethod("IsEnabled");

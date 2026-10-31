@@ -12,7 +12,7 @@
 | 2.14.0.0 | 411 | `e6e9028d-…` | `5582952ded3b4435` | `v2140-rel411` | 历史基线 | — | 早期提取基线 |
 | 2.14.0.0 快照 | 412 | `2a08e6c9-…` | `77fbc26a13abf725` | `v2140-snap412` | 历史基线 | — | — |
 | 2.99.0.0 | 413 | `926d447e-daff-4169-8c64-adc3d37d5f78` | `6b6e1260cb5a1d6a` | `v299-rel413` | `ok=30 fail=0` | 通过 | 主支持线 |
-| **2.99.0.1** | **415** | `5613aa62-1c0b-400f-9223-ece05dc28bef` | `0db34e19d9eeb6d4` | `v2990_1-rel415` | `ok=63 fail=0` | 通过 | Alpha6 复验，见 §3 特殊适配 |
+| **2.99.0.1** | **415** | `5613aa62-1c0b-400f-9223-ece05dc28bef` | `0db34e19d9eeb6d4` | `v2990_1-rel415` | `ok=66 fail=0` | 通过 | Alpha7 正常/安全模式复验 |
 
 「注入自检」= 注入后 `PCL2SWAP_SELFTEST=1` 在宿主 UI 线程运行的只读自检，结果落在
 `%TEMP%\PCL2Swap\<版本>\pcl2swap.log`。
@@ -34,6 +34,7 @@
 | 更多页槽位（PageOtherLeft） | ✅ | ✅ | 自检页 `Swap Selftest` 插入更多侧栏并切换到 PageID 200 |
 | 权限严格门控（opt-in） | ✅ | ✅ | 声明 permissions 的模块未授权访问被拦截；无声明模块保持兼容模式 |
 | SDK 1.3 后端/前端 | ✅（harness） | ✅ | Navigation / Threading / Environment / Profiles / Net.Request 与 6 个新控件；真机 `ok=63` |
+| 启动恢复/安全模式 | ✅（harness） | ✅ | 三次未稳定启动后全部 Addon `skipped-safe-mode`；恢复卡片可见；清旗标后下次启动恢复 |
 
 ## 3 2.99.0.1 特殊适配（历史坑位）
 

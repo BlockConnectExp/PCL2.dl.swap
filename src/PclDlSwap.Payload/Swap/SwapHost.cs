@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using PCL2Swap.Api;
@@ -19,6 +20,7 @@ namespace PclDlSwap.Payload.Swap
         public static SwapShape Shape { get; private set; }
         public static ISwapApi Api { get; private set; }
         internal static AddonManager Addons { get; private set; }
+        internal static StartupRecovery Recovery { get; private set; }
         internal static Assembly HostAssembly { get; private set; }
 
         public static void Start(SwapShape shape, Assembly host)
@@ -41,8 +43,11 @@ namespace PclDlSwap.Payload.Swap
 
                     Addons = new AddonManager(Api);
                     Addons.RegisterBuiltIns();
-                    PageRegistry.RegisterBuiltInPages(Api);   // built-ins own ids 100/101
                     Addons.LoadFromDisk();
+                    Recovery = StartupRecovery.Begin(shape, Api.Host.PclVersion,
+                        Addons.Records.Select(record => record.Id));
+                    Addons.ConfigureRecovery(Recovery);
+                    PageRegistry.RegisterBuiltInPages(Api);   // built-ins own ids 100/101
                     Addons.EnableAll();                       // third-party pages register from 102 on
 
                     PageRegistry.Install(HostAssembly);
@@ -51,6 +56,7 @@ namespace PclDlSwap.Payload.Swap
                     SelfTest.RunIfRequested(Api);
                     RunScenarioHooks();
                     SwapLog.Info("SwapHost 就绪。");
+                    Recovery.ScheduleStable();
                 }
             }
             catch (Exception ex)

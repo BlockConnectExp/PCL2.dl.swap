@@ -40,6 +40,7 @@ namespace PCL2Swap.Api
 
         public static string AddonsDirectory => Path.Combine(DataRoot, "addons");
         public static string LogsDirectory => Path.Combine(Root, "logs");
+        public static string RecoveryDirectory => Path.Combine(DataRoot, "recovery");
         public static string AddonDirectory(string id) => Path.Combine(AddonsDirectory, Sanitize(id ?? "unnamed"));
         public static string AddonConfigFile(string id) =>
             Path.Combine(AddonDirectory(id), "config.json");

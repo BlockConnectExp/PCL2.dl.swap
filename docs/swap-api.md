@@ -532,7 +532,7 @@ settings/instance）。
 
 ## 15. API 1.3（v26.2-Alpha 6 起）：更多后端与前端
 
-`Host.ApiVersion` 现在是 **1.3.0**。本次仍只增加成员，API 1.0/1.1/1.2 的 addon 继续有效。
+Alpha 6 时 `Host.ApiVersion` 为 **1.3.0**。本次只增加成员，API 1.0/1.1/1.2 的 addon 继续有效。
 
 ### 15.1 导航、线程、环境、账户/皮肤后端
 
@@ -596,5 +596,21 @@ progress.Value = 0.42;
 
 `Hint` 新增 `SwapHintType.Info/Success/Warning/Error` 重载，分别映射到 PCL 的 Blue/Green/Red
 通知样式。`Image` 只读取本地文件，不下载远程图片；远程内容请先用 `Pcl.Net` 获取再交给 addon。
+
+## 16. API 1.4（v26.2-Alpha 7 起）：启动恢复与安全模式
+
+`Host.ApiVersion` 现在是 **1.4.0**。新增宿主事实：
+
+```csharp
+bool safe = api.Host.SafeMode;
+string why = api.Host.SafeModeReason;
+string recovery = api.Host.RecoveryDirectory;
+```
+
+宿主每次启动写入 `<数据根>\recovery\startup-journal.json`。连续两次在稳定窗口前异常退出会进入
+安全模式；该会话跳过全部 Addon，但保留 Swap 页面和恢复入口。`Download MC`、`OTA Protector`
+等内置模块也遵守这一隔离规则。
+
+完整的恢复流程和环境变量见 `docs/recovery.zh.md`。
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

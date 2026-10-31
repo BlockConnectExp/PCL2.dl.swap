@@ -65,10 +65,19 @@ namespace PclDlSwap.Payload.Swap
         private readonly Dictionary<string, bool> _savedState =
             new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         private bool _stateLoaded;
+        private StartupRecovery _recovery;
 
         public AddonManager(ISwapApi api) => _api = api ?? throw new ArgumentNullException(nameof(api));
 
         public IReadOnlyList<AddonRecord> Records => _records;
+        internal StartupRecovery Recovery => _recovery;
+        internal bool SafeMode => _recovery?.SafeMode == true;
+
+        internal void ConfigureRecovery(StartupRecovery recovery)
+        {
+            _recovery = recovery;
+            SwapLog.Info("[recovery] AddonManager " + (SafeMode ? "进入安全模式" : "正常运行"));
+        }
 
         // ---------------------------------------------------------------- permissions (API 1.3)
         //
@@ -200,7 +209,7 @@ namespace PclDlSwap.Payload.Swap
         public bool IsEnabled(string addonId)
         {
             var record = Find(addonId);
-            return record == null || record.Enabled;
+            return record == null || (record.Enabled && !SafeMode);
         }
 
         public AddonRecord Find(string addonId) =>
@@ -216,6 +225,13 @@ namespace PclDlSwap.Payload.Swap
             if (record == null)
             {
                 SwapLog.Warn("Addon 开关：未找到 " + addonId);
+                return false;
+            }
+            if (SafeMode && enabled)
+            {
+                record.Status = "skipped-safe-mode";
+                record.Failure = null;
+                SwapLog.Warn($"Addon 启用被安全模式阻止：{addonId}（重启前保持跳过）");
                 return false;
             }
             if (record.Enabled == enabled) return true;
@@ -302,6 +318,11 @@ namespace PclDlSwap.Payload.Swap
             if (record.BuiltIn)
             {
                 SwapLog.Info($"Addon 重载：{addonId} 是内置模块，请用启用/禁用开关。");
+                return false;
+            }
+            if (SafeMode)
+            {
+                SwapLog.Warn($"Addon 重载被安全模式阻止：{addonId}");
                 return false;
             }
 
@@ -706,6 +727,13 @@ namespace PclDlSwap.Payload.Swap
         /// </summary>
         private void EnableRecord(AddonRecord record)
         {
+            if (SafeMode)
+            {
+                record.Status = "skipped-safe-mode";
+                record.Failure = null;
+                SwapLog.Warn($"Addon 已跳过（安全模式）：{record.Id}");
+                return;
+            }
             if (!IsInScope(record, out var scopeStatus, out var scopeReason))
             {
                 record.Status = scopeStatus;
@@ -1174,6 +1202,13 @@ namespace PclDlSwap.Payload.Swap
             ApplySavedState();
             foreach (var record in _records.ToList())
             {
+                if (SafeMode)
+                {
+                    record.Status = "skipped-safe-mode";
+                    record.Failure = null;
+                    SwapLog.Warn($"Addon 已跳过（安全模式）：{record.Id}");
+                    continue;
+                }
                 if (!record.Enabled)
                 {
                     record.Status = "disabled";

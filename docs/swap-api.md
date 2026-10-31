@@ -509,7 +509,7 @@ bool ok = api.Pcl.Clipboard.SetText("copied");       // ModBase.ClipboardSet(tex
 
 声明 `"*"` 表示全部允许。Loader/Animation/Base/Download/Ui/I18n/Data/Log 不门控。
 
-**畔名兼容（v26.2-Alpha 1 起）**：第三方模块常见的命名会自动归一化——去掉 `host.` 前缀后，
+**别名兼容（v26.2-Alpha 1 起）**：第三方模块常见的命名会自动归一化——去掉 `host.` 前缀后，
 `hooks.attach`→`hooks`、`ui.pages`→`pages`、`settings.read/write`→`settings`、
 `clipboard.read/write`→`clipboard`、`files.read/write`→`files`、`network.download`→`network`、
 `logs.read`→`logs`、`update`→`secret`。
@@ -529,5 +529,72 @@ settings/instance）。
 ```
 
 该模块若调用 `api.Pcl.Clipboard.GetText()` 将被拒绝；在模块管理页会显示「严格」标记。
+
+## 15. API 1.3（v26.2-Alpha 6 起）：更多后端与前端
+
+`Host.ApiVersion` 现在是 **1.3.0**。本次仍只增加成员，API 1.0/1.1/1.2 的 addon 继续有效。
+
+### 15.1 导航、线程、环境、账户/皮肤后端
+
+```csharp
+// 页面路由走 PCL 自己的 PageChange / PageBack，保留页面栈和动画
+api.Pcl.Navigation.Go("Setup", "SetupUI");
+string root = api.Pcl.Navigation.CurrentRootPage;       // Setup
+string sub  = api.Pcl.Navigation.CurrentSubPage;        // SetupUI
+string page = api.Pcl.Navigation.CurrentPage;           // PageSetupUI
+if (api.Pcl.Navigation.CanGoBack) api.Pcl.Navigation.Back();
+
+// 强制在宿主 UI 线程执行，或从后台线程安全回到 UI 线程
+api.Pcl.Threading.Invoke(() => api.Ui.Hint("updated", SwapHintType.Success));
+var value = api.Pcl.Threading.Invoke(() => api.Pcl.Instance.FolderSelected);
+using (var timer = api.Pcl.Threading.Repeat(TimeSpan.FromSeconds(2), RefreshDashboard)) { }
+
+// 只读环境事实
+string host = api.Pcl.Environment.HostPath;
+string data = api.Pcl.Environment.DataDirectory;
+bool admin = api.Pcl.Environment.IsAdministrator;
+
+// PCL 当前登录/皮肤对象，不把 token 或密码放进 SDK
+string name = api.Pcl.Profiles.LoginName();
+object login = api.Pcl.Profiles.LoginData();
+object skin = api.Pcl.Profiles.SelectedSkin();
+```
+
+权限：`Navigation` 需要 `pages`，`Profiles` 需要 `launch`；`Threading` 和 `Environment` 是低副作用
+只读/调度能力，不额外门控。`Pcl.Net` 仍需要 `network`。
+
+### 15.2 宿主 HTTP 请求
+
+`IPclNetAccess.Request/Get` 把 addon 的 HTTP 需求交给 PCL 自己的 `NetRequestByClientRetry`
+完成重试、编码、Accept、二维 headers 和浏览器头处理；Swap 不另建网络客户端。
+
+```csharp
+string json = api.Pcl.Net.Get("https://example.com/api", requireJson: true);
+string text = api.Pcl.Net.Request(
+    "https://example.com/api", "POST", backupUrl: null, content: "{\"ok\":true}",
+    contentType: "application/json", accept: "application/json",
+    headers: new Dictionary<string, string> { ["X-Addon"] = "demo" });
+```
+
+失败时由宿主 helper 抛出；长期任务请用 `Threading` 回到 UI 线程更新控件。
+
+### 15.3 新前端控件
+
+```csharp
+page.Children.Add(api.Ui.Card("更多控件",
+    api.Ui.RadioGroup("模式", new[] { "简洁", "详细" }, 0, i => api.Log("mode=" + i)),
+    api.Ui.NumberInput("线程数", 4, 1, 16, 1, v => api.Log("threads=" + v)),
+    api.Ui.PasswordInput("Token", "", value => api.Data.Set("token", value)),
+    api.Ui.MultilineTextInput("备注", "", 90, text => api.Data.Set("notes", text)),
+    api.Ui.Image(@"C:\assets\banner.png", 320, 96)));
+
+var progress = api.Ui.Progress("同步", 0, true);
+page.Children.Add(progress.Element);
+progress.Status = "Connecting...";
+progress.Value = 0.42;
+```
+
+`Hint` 新增 `SwapHintType.Info/Success/Warning/Error` 重载，分别映射到 PCL 的 Blue/Green/Red
+通知样式。`Image` 只读取本地文件，不下载远程图片；远程内容请先用 `Pcl.Net` 获取再交给 addon。
 
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->

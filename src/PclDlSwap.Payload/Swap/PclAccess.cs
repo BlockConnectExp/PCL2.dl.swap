@@ -1,9 +1,11 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Threading;
 using PCL2Swap.Api;
 using PclDlSwap.Payload.Host;
 
@@ -33,6 +35,10 @@ namespace PclDlSwap.Payload.Swap
             Logs = new LogAccess(host);
             Shell = new ShellAccess(host);
             Clipboard = new ClipboardAccess(host);
+            Navigation = new NavigationAccess(host);
+            Threading = new ThreadingAccess(host);
+            Environment = new EnvironmentAccess(host);
+            Profiles = new ProfileAccess(host);
         }
 
         public IPclSecretAccess Secret { get; }
@@ -48,6 +54,10 @@ namespace PclDlSwap.Payload.Swap
         public IPclLogAccess Logs { get; }
         public IPclShellAccess Shell { get; }
         public IPclClipboardAccess Clipboard { get; }
+        public IPclNavigationAccess Navigation { get; }
+        public IPclThreadingAccess Threading { get; }
+        public IPclEnvironmentAccess Environment { get; }
+        public IPclProfileAccess Profiles { get; }
 
         /// <summary>Open paths with PCL's own helpers (API 1.2).</summary>
         private sealed class ShellAccess : IPclShellAccess
@@ -147,6 +157,320 @@ namespace PclDlSwap.Payload.Swap
             }
         }
 
+        /// <summary>
+        /// Official page routing. The host's FormMain owns the stack, so addons get the same
+        /// animations and back-stack semantics as a click in PCL.
+        /// </summary>
+        private sealed class NavigationAccess : IPclNavigationAccess
+        {
+            private readonly Assembly _host;
+
+            public NavigationAccess(Assembly host) => _host = host;
+
+            public string CurrentPage
+            {
+                get
+                {
+                    try
+                    {
+                        var main = MainForm();
+                        var page = PclUi.GetMember(main, "PageRight");
+                        return page?.GetType().Name ?? string.Empty;
+                    }
+                    catch
+                    {
+                        return string.Empty;
+                    }
+                }
+            }
+
+            public string CurrentRootPage
+            {
+                get
+                {
+                    try
+                    {
+                        var current = PclUi.GetMember(MainForm(), "PageCurrent");
+                        var page = PclUi.GetMember(current, "Page");
+                        return page?.ToString() ?? string.Empty;
+                    }
+                    catch
+                    {
+                        return string.Empty;
+                    }
+                }
+            }
+
+            public string CurrentSubPage
+            {
+                get
+                {
+                    try
+                    {
+                        var main = MainForm();
+                        var getter = main?.GetType().GetProperty("PageCurrentSub",
+                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        return Convert.ToString(getter?.GetValue(main, null)) ?? string.Empty;
+                    }
+                    catch
+                    {
+                        return string.Empty;
+                    }
+                }
+            }
+
+            public bool CanGoBack
+            {
+                get
+                {
+                    try
+                    {
+                        var stack = PclUi.GetMember(MainForm(), "PageStack") as ICollection;
+                        return stack != null && stack.Count > 1;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            public void Go(string rootPage, string subPage = "Default")
+            {
+                if (string.IsNullOrWhiteSpace(rootPage))
+                    throw new ArgumentException("rootPage cannot be empty.", nameof(rootPage));
+                PclUi.OnUiThread(() => GoCore(rootPage, string.IsNullOrWhiteSpace(subPage)
+                    ? "Default" : subPage));
+            }
+
+            public void Back()
+            {
+                var main = MainForm();
+                if (main == null) throw new InvalidOperationException("PCL main window is not ready.");
+                PclUi.OnUiThread(() =>
+                {
+                    var method = main.GetType().GetMethod("PageBack",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (method == null) throw new MissingMethodException(main.GetType().FullName, "PageBack");
+                    method.Invoke(main, null);
+                });
+            }
+
+            private void GoCore(string rootPage, string subPage)
+            {
+                var main = MainForm();
+                if (main == null) throw new InvalidOperationException("PCL main window is not ready.");
+
+                var pageType = _host?.GetType("PCL.FormMain+PageType", false);
+                var subType = _host?.GetType("PCL.FormMain+PageSubType", false);
+                var stackType = _host?.GetType("PCL.FormMain+PageStackData", false);
+                if (pageType == null || subType == null || stackType == null)
+                    throw new MissingMemberException("PCL.FormMain page enums are unavailable.");
+
+                var root = Enum.Parse(pageType, rootPage, true);
+                var sub = Enum.Parse(subType, subPage, true);
+                var implicitPage = stackType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(method => method.Name == "op_Implicit" &&
+                                              method.ReturnType == stackType &&
+                                              method.GetParameters().Length == 1 &&
+                                              method.GetParameters()[0].ParameterType == pageType);
+                if (implicitPage == null)
+                    throw new MissingMethodException(stackType.FullName, "op_Implicit");
+                var stack = implicitPage.Invoke(null, new[] { root });
+                var change = main.GetType().GetMethod("PageChange",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                    null, new[] { stackType, subType }, null);
+                if (change == null)
+                    throw new MissingMethodException(main.GetType().FullName, "PageChange");
+                change.Invoke(main, new[] { stack, sub });
+            }
+
+            private object MainForm() =>
+                PclUi.GetMember(_host?.GetType("PCL.ModMain", false), "FrmMain");
+        }
+
+        /// <summary>Small, disposable dispatcher/timer bridge for addons.</summary>
+        private sealed class ThreadingAccess : IPclThreadingAccess
+        {
+            private readonly Assembly _host;
+
+            public ThreadingAccess(Assembly host) => _host = host;
+
+            public bool IsUiThread
+            {
+                get
+                {
+                    var dispatcher = Dispatcher();
+                    return dispatcher == null || dispatcher.CheckAccess();
+                }
+            }
+
+            public void Invoke(Action action)
+            {
+                if (action == null) throw new ArgumentNullException(nameof(action));
+                var dispatcher = Dispatcher();
+                if (dispatcher == null || dispatcher.CheckAccess()) action();
+                else dispatcher.Invoke(action);
+            }
+
+            public T Invoke<T>(Func<T> action)
+            {
+                if (action == null) throw new ArgumentNullException(nameof(action));
+                var dispatcher = Dispatcher();
+                return dispatcher == null || dispatcher.CheckAccess()
+                    ? action()
+                    : dispatcher.Invoke(action);
+            }
+
+            public IDisposable Schedule(TimeSpan delay, Action action) =>
+                new TimerHandle(delay, Timeout.InfiniteTimeSpan, action);
+
+            public IDisposable Repeat(TimeSpan interval, Action action) =>
+                new TimerHandle(interval, interval, action);
+
+            private System.Windows.Threading.Dispatcher Dispatcher()
+            {
+                try
+                {
+                    var main = PclUi.GetMember(_host?.GetType("PCL.ModMain", false), "FrmMain")
+                               as System.Windows.Threading.DispatcherObject;
+                    if (main != null) return main.Dispatcher;
+                    return System.Windows.Application.Current?.Dispatcher;
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            private sealed class TimerHandle : IDisposable
+            {
+                private readonly Timer _timer;
+                private readonly Action _action;
+                private readonly bool _repeat;
+                private int _disposed;
+
+                public TimerHandle(TimeSpan dueTime, TimeSpan period, Action action)
+                {
+                    _action = action ?? throw new ArgumentNullException(nameof(action));
+                    var due = dueTime < TimeSpan.Zero ? TimeSpan.Zero : dueTime;
+                    _repeat = period != Timeout.InfiniteTimeSpan;
+                    _timer = new Timer(OnTick, null, due, period);
+                }
+
+                private void OnTick(object state)
+                {
+                    if (Volatile.Read(ref _disposed) != 0) return;
+                    try { _action(); }
+                    catch (Exception ex) { SwapLog.Warn("[threading] scheduled action failed: " + ex.Message); }
+                    if (!_repeat && Volatile.Read(ref _disposed) == 0 &&
+                        _timer.Change(Timeout.Infinite, Timeout.Infinite))
+                    {
+                        // One-shot: a successful disarming is the end of the subscription.
+                        Dispose();
+                    }
+                }
+
+                public void Dispose()
+                {
+                    if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+                    _timer.Dispose();
+                }
+            }
+        }
+
+        /// <summary>Read-only process and storage facts; no mutation and no network.</summary>
+        private sealed class EnvironmentAccess : IPclEnvironmentAccess
+        {
+            private readonly Assembly _host;
+
+            public EnvironmentAccess(Assembly host) => _host = host;
+
+            public string HostPath
+            {
+                get
+                {
+                    try { return _host?.Location ?? string.Empty; }
+                    catch { return string.Empty; }
+                }
+            }
+
+            public string HostDirectory =>
+                string.IsNullOrEmpty(HostPath) ? string.Empty : Path.GetDirectoryName(HostPath) ?? string.Empty;
+
+            public string DataDirectory => SwapPaths.DataRoot;
+
+            public string PclVersion
+            {
+                get
+                {
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(HostPath))
+                        {
+                            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(HostPath);
+                            if (!string.IsNullOrEmpty(info.ProductVersion)) return info.ProductVersion;
+                        }
+                        return _host?.GetName().Version?.ToString() ?? string.Empty;
+                    }
+                    catch { return string.Empty; }
+                }
+            }
+
+            public bool IsDebug
+            {
+                get
+                {
+                    try
+                    {
+                        return Convert.ToBoolean(
+                            PclUi.GetMember(_host?.GetType("PCL.ModBase", false), "ModeDebug") ?? false);
+                    }
+                    catch { return false; }
+                }
+            }
+
+            public bool IsAdministrator
+            {
+                get
+                {
+                    try
+                    {
+                        using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+                        {
+                            var principal = new System.Security.Principal.WindowsPrincipal(identity);
+                            return principal.IsInRole(
+                                System.Security.Principal.WindowsBuiltInRole.Administrator);
+                        }
+                    }
+                    catch { return false; }
+                }
+            }
+        }
+
+        /// <summary>Current login/skin objects, kept opaque so credentials never enter the SDK contract.</summary>
+        private sealed class ProfileAccess : IPclProfileAccess
+        {
+            private readonly Assembly _host;
+
+            public ProfileAccess(Assembly host) => _host = host;
+
+            public string LoginName() => Convert.ToString(Call("McLoginName")) ?? string.Empty;
+            public string LoginStatus() => Convert.ToString(Call("McLoginAble")) ?? string.Empty;
+            public object LoginData() => Call("McLoginInput");
+            public object SelectedSkin() => Call("McSkinSelect");
+
+            private object Call(string name)
+            {
+                var method = FindMethod(_host, "PCL.ModLaunch", name,
+                    candidate => candidate.GetParameters().Length == 0)
+                    ?? FindMethod(_host, "PCL.ModMinecraft", name,
+                        candidate => candidate.GetParameters().Length == 0);
+                if (method == null) throw new MissingMethodException("PCL." + name);
+                return method.Invoke(null, null);
+            }
+        }
+
         /// <summary>Live-UI reads plus the translation pass (API 1.1).</summary>
         private sealed class UiAccess : IPclUiAccess
         {
@@ -161,7 +485,8 @@ namespace PclDlSwap.Payload.Swap
                     try
                     {
                         var main = PclUi.GetMember(_host?.GetType("PCL.ModMain", false), "FrmMain");
-                        var page = PclUi.GetMember(main, "PageCurrent")
+                        var page = PclUi.GetMember(main, "PageRight")
+                                   ?? PclUi.GetMember(main, "PageCurrent")
                                    ?? PclUi.GetMember(main, "PageNow")
                                    ?? PclUi.GetMember(main, "PageCurrentType");
                         return page?.GetType().Name ?? string.Empty;
@@ -230,7 +555,7 @@ namespace PclDlSwap.Payload.Swap
                         }
                     }
 
-                    return string.Join(Environment.NewLine, queue);
+                    return string.Join(System.Environment.NewLine, queue);
                 }
                 catch
                 {
@@ -401,6 +726,51 @@ namespace PclDlSwap.Payload.Swap
                     m => m.GetParameters().Length == 3);
                 if (method == null) throw new MissingMethodException("PCL.ModNet.NetDownloadByClient");
                 method.Invoke(null, new object[] { url, localPath, simulateBrowserHeaders });
+            }
+
+            public string Request(string url, string method = "GET", string backupUrl = null,
+                object content = null, string contentType = null, string accept = null,
+                IReadOnlyDictionary<string, string> headers = null, bool requireJson = false,
+                bool simulateBrowserHeaders = true)
+            {
+                var target = FindMethod(_host, "PCL.ModNet", "NetRequestByClientRetry",
+                    candidate => candidate.GetParameters().Length == 10);
+                if (target == null)
+                    throw new MissingMethodException("PCL.ModNet.NetRequestByClientRetry");
+
+                var httpMethod = string.IsNullOrWhiteSpace(method)
+                    ? new System.Net.Http.HttpMethod("GET")
+                    : new System.Net.Http.HttpMethod(method.Trim().ToUpperInvariant());
+                return Convert.ToString(target.Invoke(null, new object[]
+                {
+                    url,
+                    httpMethod,
+                    backupUrl,
+                    content,
+                    contentType,
+                    accept,
+                    HeaderArray(headers),
+                    requireJson,
+                    System.Text.Encoding.UTF8,
+                    simulateBrowserHeaders
+                })) ?? string.Empty;
+            }
+
+            public string Get(string url, bool requireJson = false) =>
+                Request(url, "GET", null, null, null, null, null, requireJson, true);
+
+            private static string[,] HeaderArray(IReadOnlyDictionary<string, string> headers)
+            {
+                if (headers == null || headers.Count == 0) return null;
+                var result = new string[headers.Count, 2];
+                var index = 0;
+                foreach (var pair in headers)
+                {
+                    result[index, 0] = pair.Key;
+                    result[index, 1] = pair.Value;
+                    index++;
+                }
+                return result;
             }
         }
 

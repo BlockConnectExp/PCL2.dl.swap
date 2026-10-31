@@ -27,11 +27,13 @@ namespace PCL2Swap.SampleAddon
         public static string LastApiVersion;
         public static string LastDialogTitle;
         public static string LastHookTarget;
+        public static string LastHostPath;
 
         private ISwapApi _api;
         private IDisposable _hook;
         private DispatcherTimer _timer;
         private TextBlock _liveLabel;
+        private IProgressView _progress;
         private bool _countHook = true;
 
         public void OnLoad(SwapContext context)
@@ -42,6 +44,7 @@ namespace PCL2Swap.SampleAddon
             _countHook = AddonSettings.GetBool(_api?.Data, "demo.countHook", true);
             _api?.Data?.Set("loaded", "1");
             _api?.Data?.Save();
+            LastHostPath = _api?.Pcl?.Environment?.HostPath;
             _api?.Log($"示例模块已加载（API {LastApiVersion}，宿主 {_api?.Host?.SwapVersion}，" +
                       $"数据目录 {_api?.Host?.AddonDirectory}，记录钩子命中={_countHook}）。");
         }
@@ -180,6 +183,38 @@ namespace PCL2Swap.SampleAddon
                 _api.Ui.Combo("页面刷新频率", new[] { "1 秒", "2 秒", "5 秒" },
                     AddonSettings.GetInt(_api.Data, "demo.refreshIndex", 0), ApplyRefreshInterval)));
 
+            page.Children.Add(_api.Ui.Card("API 1.3 控件与后端",
+                _api.Ui.RadioGroup("演示选项", new[] { "简洁", "详细" },
+                    AddonSettings.GetInt(_api.Data, "demo.radio", 0), value =>
+                    {
+                        AddonSettings.SetInt(_api.Data, "demo.radio", value);
+                        _api.Log("示例模块单选：" + value);
+                    }),
+                _api.Ui.NumberInput("演示数值", AddonSettings.GetDouble(_api.Data, "demo.number", 3),
+                    0, 100, 1, value =>
+                    {
+                        AddonSettings.SetDouble(_api.Data, "demo.number", value);
+                        _api.Log("示例模块数值：" + value);
+                    }),
+                _api.Ui.PasswordInput("演示密码", string.Empty,
+                    value => _api.Log("示例模块密码长度：" + (value ?? string.Empty).Length)),
+                _api.Ui.MultilineTextInput("演示备注", AddonSettings.GetString(_api.Data, "demo.notes"),
+                    70, value => AddonSettings.SetString(_api.Data, "demo.notes", value))));
+
+            _progress = null;
+            try
+            {
+                _progress = _api.Ui.Progress("示例实时进度", 0.25, false);
+                page.Children.Add(_api.Ui.Card("后端与实时进度",
+                    _api.Ui.InfoRow("宿主目录", _api.Pcl.Environment.HostDirectory),
+                    _api.Ui.InfoRow("数据目录", _api.Pcl.Environment.DataDirectory),
+                    _progress.Element));
+            }
+            catch (Exception ex)
+            {
+                _api.LogWarning("创建 API 1.3 后端演示失败：" + ex.Message);
+            }
+
             // Live view: the page is built once and cached, so a timer keeps the counters honest
             // while the user is looking at it.
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -225,6 +260,11 @@ namespace PCL2Swap.SampleAddon
                 $"事件：弹窗 {DialogEvents} · 更新请求 {UpdateEvents} · 下载完成 {DownloadEvents}\n" +
                 $"Prefix 钩子命中：{HookHits} 次（目标 {LastHookTarget ?? "(未挂载)"}）\n" +
                 $"当前时间：{DateTime.Now:HH:mm:ss}";
+            if (_progress != null)
+            {
+                _progress.Value = (DateTime.Now.Second % 60) / 60.0;
+                _progress.Status = DateTime.Now.ToString("HH:mm:ss");
+            }
         }
 
         private void StopTimer()

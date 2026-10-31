@@ -6,6 +6,33 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
+## 2026.10.31-07:56:03 v26.2-Alpha 6: 英文覆盖与 SDK 1.3
+
+GitCommitHash: (unreleased)
+
+ChangedFiles:
+```
+.\src\PCL2Swap.Api\II18n.cs                     Count/Has/LanguageChanged
+.\src\PCL2Swap.Api\IPclAccess.cs                Navigation/Threading/Environment/Profiles + Net.Request
+.\src\PCL2Swap.Api\ISwapApi.cs                  API 1.3 front-end contracts
+.\src\PclDlSwap.Payload\Swap\I18n.Extra.cs      300+ English entries and runtime phrases
+.\src\PclDlSwap.Payload\Swap\HostTranslator.cs  top-level windows, menus and grid headers
+.\src\PclDlSwap.Payload\Swap\PclAccess.cs       new backends and host HTTP request bridge
+.\src\PclDlSwap.Payload\Swap\Views\SwapUi.cs    six new native/front-end builders
+.\src\PclDlSwap.ExLoaderHarness\Program.cs      API 1.3 regression coverage
+.\docs\RELEASE-NOTES-v26.2-Alpha6.md             release notes
+```
+
+ChangLog:
+Num|File Name|Change Description|Change Time|Changer
+----|----|----|----|----
+1|英文覆盖|新增第二层 PCL 词条，覆盖通用状态、版本/下载、设置/Java、登录/皮肤、联机/EasyTier 等界面文案；顶层 WPF 对话框、菜单和 DataGrid Header 也会进入翻译轮询|2026.10.31-07:56:03|PCL2.dl.swap
+2|I18n API|`II18n` 增加 `Count/Has/LanguageChanged`，词典可被 addon 查询并监听语言变化|2026.10.31-07:56:03|PCL2.dl.swap
+3|后端 API|`IPclAccess` 增加 Navigation / Threading / Environment / Profiles；`Net.Request/Get` 复用 PCL 的 `NetRequestByClientRetry`，不新增网络客户端|2026.10.31-07:56:03|PCL2.dl.swap
+4|前端 API|`IUi` 增加 RadioGroup / NumberInput / PasswordInput / MultilineTextInput / Image / Progress；Hint 增加 Info/Success/Warning/Error 类型|2026.10.31-07:56:03|PCL2.dl.swap
+5|验证|harness 七套件（六套核心 + `--uitest`）覆盖 API 1.3、词典扩展和 STA 控件构建；真机 `ok=63 fail=0`，见 Release Note|2026.10.31-07:56:03|PCL2.dl.swap
+
+---
 ## 2026.10.31-07:30:00 v26.2-Alpha 5: PCL 2.12.8.1 REA 基线
 
 GitCommitHash: (unreleased)

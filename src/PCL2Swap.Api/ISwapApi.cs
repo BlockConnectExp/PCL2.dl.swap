@@ -20,6 +20,23 @@ namespace PCL2Swap.Api
         Replace
     }
 
+    public enum SwapHintType
+    {
+        Info,
+        Success,
+        Warning,
+        Error
+    }
+
+    /// <summary>A live progress row returned by IUi.Progress.</summary>
+    public interface IProgressView
+    {
+        FrameworkElement Element { get; }
+        double Value { get; set; }
+        bool IsIndeterminate { get; set; }
+        string Status { get; set; }
+    }
+
     /// <summary>Static facts about the running swap host.</summary>
     public interface IHostInfo
     {
@@ -62,6 +79,7 @@ namespace PCL2Swap.Api
         /// </summary>
         void RegisterMorePage(string id, string title, Func<FrameworkElement> viewFactory);
         void Hint(string text);
+        void Hint(string text, SwapHintType type);
         int MsgBox(string caption, string title, string button1 = "确定", string button2 = "");
 
         // ---- native-look builders -------------------------------------------------------------
@@ -116,6 +134,29 @@ namespace PCL2Swap.Api
 
         /// <summary>A themed 1px separator with the page's vertical rhythm.</summary>
         FrameworkElement Separator();
+
+        // ---- richer front-end builders (API 1.3) ------------------------------------------------
+
+        /// <summary>A mutually exclusive choice row; onChange receives the selected index.</summary>
+        FrameworkElement RadioGroup(string label, IReadOnlyList<string> options, int selectedIndex,
+            Action<int> onChange);
+
+        /// <summary>A numeric field with -/+ controls; the callback fires for valid values.</summary>
+        FrameworkElement NumberInput(string label, double initial, double min, double max,
+            double step, Action<double> onChange);
+
+        /// <summary>A masked text field that never places the value in the visible text tree.</summary>
+        FrameworkElement PasswordInput(string label, string initial, Action<string> onChange);
+
+        /// <summary>A multi-line editor with a stable minimum height.</summary>
+        FrameworkElement MultilineTextInput(string label, string initial, int minHeight,
+            Action<string> onChange);
+
+        /// <summary>Plays a local image through PCL's MyImage control when available.</summary>
+        FrameworkElement Image(string path, double width = 0, double height = 0);
+
+        /// <summary>A live progress row; update the returned handle from any thread.</summary>
+        IProgressView Progress(string label, double initial = 0, bool indeterminate = false);
     }
 
     /// <summary>Per-addon persisted key/value store.</summary>

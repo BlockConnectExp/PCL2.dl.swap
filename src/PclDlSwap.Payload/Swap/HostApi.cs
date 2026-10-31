@@ -18,7 +18,7 @@ namespace PclDlSwap.Payload.Swap
     /// </summary>
     internal sealed class HostApi : ISwapApi
     {
-        public const string ApiVersion = "1.2.0";
+        public const string ApiVersion = "1.3.0";
 
         private readonly Assembly _host;
         private readonly HookBusImpl _hooks;
@@ -264,6 +264,23 @@ namespace PclDlSwap.Payload.Swap
 
             public void Hint(string text) => PclUi.Hint(text);
 
+            public void Hint(string text, SwapHintType type)
+            {
+                switch (type)
+                {
+                    case SwapHintType.Success:
+                        PclUi.Hint(text, "Green");
+                        break;
+                    case SwapHintType.Warning:
+                    case SwapHintType.Error:
+                        PclUi.Hint(text, "Red");
+                        break;
+                    default:
+                        PclUi.Hint(text, "Blue");
+                        break;
+                }
+            }
+
             public int MsgBox(string caption, string title, string button1 = "确定", string button2 = "") =>
                 PclUi.MsgBox(caption, title, button1, button2);
 
@@ -303,6 +320,29 @@ namespace PclDlSwap.Payload.Swap
                 Views.SwapUi.Link(text, url);
 
             public System.Windows.FrameworkElement Separator() => Views.SwapUi.Separator();
+
+            public System.Windows.FrameworkElement RadioGroup(string label,
+                System.Collections.Generic.IReadOnlyList<string> options, int selectedIndex,
+                Action<int> onChange) =>
+                Views.SwapUi.RadioGroup(label, options, selectedIndex, onChange);
+
+            public System.Windows.FrameworkElement NumberInput(string label, double initial,
+                double min, double max, double step, Action<double> onChange) =>
+                Views.SwapUi.NumberInput(label, initial, min, max, step, onChange);
+
+            public System.Windows.FrameworkElement PasswordInput(string label, string initial,
+                Action<string> onChange) =>
+                Views.SwapUi.PasswordInput(label, initial, onChange);
+
+            public System.Windows.FrameworkElement MultilineTextInput(string label, string initial,
+                int minHeight, Action<string> onChange) =>
+                Views.SwapUi.MultilineTextInput(label, initial, minHeight, onChange);
+
+            public System.Windows.FrameworkElement Image(string path, double width = 0,
+                double height = 0) => Views.SwapUi.Image(path, width, height);
+
+            public IProgressView Progress(string label, double initial = 0,
+                bool indeterminate = false) => Views.SwapUi.Progress(label, initial, indeterminate);
         }
 
         private sealed class ReflectionImpl : IReflection

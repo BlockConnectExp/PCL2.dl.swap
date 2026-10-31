@@ -77,6 +77,8 @@ namespace PclDlSwap.Payload.Swap
             Probe("Host.LogDirectory", () => api.Host.LogDirectory);
 
             Probe("I18n.Explicit", () => api.I18n.T("启动", "Launch"));
+            Probe("I18n.Count", () => api.I18n.Count >= 250 ? api.I18n.Count : 0);
+            Probe("I18n.Has(multiplayer)", () => api.I18n.Has("联机模块"));
             Probe("I18n.Roundtrip", () => RunI18nProbe(api));
             if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
             {
@@ -84,9 +86,30 @@ namespace PclDlSwap.Payload.Swap
                 Probe("Ui.API1.1.TextInput", () => api.Ui.TextInput("t", "x", _ => { }) != null);
                 Probe("Ui.API1.1.Link", () => api.Ui.Link("link", "https://example.com") != null);
                 Probe("Ui.API1.1.Separator", () => api.Ui.Separator() != null);
+                Probe("Ui.API1.3.RadioGroup",
+                    () => api.Ui.RadioGroup("choice", new[] { "one", "two" }, 0, _ => { }) != null);
+                Probe("Ui.API1.3.NumberInput",
+                    () => api.Ui.NumberInput("number", 1, 0, 10, 1, _ => { }) != null);
+                Probe("Ui.API1.3.PasswordInput",
+                    () => api.Ui.PasswordInput("secret", string.Empty, _ => { }) != null);
+                Probe("Ui.API1.3.MultilineTextInput",
+                    () => api.Ui.MultilineTextInput("notes", string.Empty, 70, _ => { }) != null);
+                Probe("Ui.API1.3.Progress",
+                    () => api.Ui.Progress("progress", 0.25, false)?.Element != null);
             }
             Probe("Pcl.Logs.LogPath", () => api.Pcl.Logs.LogPath);
             Probe("Pcl.Ui.CurrentPage", () => api.Pcl.Ui.CurrentPage);
+            Probe("Pcl.Navigation", () => api.Pcl.Navigation != null);
+            Probe("Pcl.Threading", () =>
+            {
+                var wasUi = api.Pcl.Threading.IsUiThread;
+                var value = api.Pcl.Threading.Invoke(() => 7);
+                return $"wasUi={wasUi}, value={value}";
+            });
+            Probe("Pcl.Environment", () =>
+                api.Pcl.Environment.HostPath + " | " + api.Pcl.Environment.DataDirectory);
+            Probe("Pcl.Profiles", () => api.Pcl.Profiles != null);
+            Probe("Pcl.Net.Request", () => typeof(IPclNetAccess).GetMethod("Request") != null);
             Probe("Pcl.Shell.Family", () => api.Pcl.Shell != null);
             Probe("Pcl.Clipboard.Family", () => api.Pcl.Clipboard != null);
             Probe("Pcl.Clipboard.GetText", () => api.Pcl.Clipboard.GetText() ?? string.Empty);

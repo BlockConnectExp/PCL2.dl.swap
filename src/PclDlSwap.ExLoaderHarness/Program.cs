@@ -714,6 +714,10 @@ namespace PclDlSwap.ExLoaderHarness
             var full = Path.GetFullPath(payloadPath);
             if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
 
+            // Keep the language switch and generated addon state out of the owner's profile.
+            Environment.SetEnvironmentVariable("PCL2SWAP_DATA",
+                Path.Combine(Path.GetTempPath(), "Pcl2SwapPclTest-" + Guid.NewGuid().ToString("N")));
+
             var failures = 0;
             void Expect(string label, bool ok)
             {
@@ -730,9 +734,40 @@ namespace PclDlSwap.ExLoaderHarness
             var pcl = api?.GetType().GetProperty("Pcl")?.GetValue(api);
             Expect("typed PCL access exposed on ISwapApi", pcl != null);
 
+            var i18n = api?.GetType().GetProperty("I18n")?.GetValue(api);
+            Expect("English layer exposed on ISwapApi", i18n != null);
+            if (i18n != null)
+            {
+                var i18nType = i18n.GetType();
+                Expect("English layer loaded the expanded dictionary",
+                    Convert.ToInt32(i18nType.GetProperty("Count")?.GetValue(i18n) ?? 0) >= 250);
+                var original = i18nType.GetProperty("Language")?.GetValue(i18n);
+                var languageEvents = 0;
+                EventHandler languageHandler = (sender, args) => languageEvents++;
+                ((PCL2Swap.Api.II18n)i18n).LanguageChanged += languageHandler;
+                try
+                {
+                    i18nType.GetMethod("SetLanguage")?.Invoke(i18n,
+                        new object[] { PCL2Swap.Api.SwapLanguage.English });
+                    Expect("English layer translates the multiplayer module label",
+                        Convert.ToString(i18nType.GetMethod("T", new[] { typeof(string), typeof(string) })
+                            ?.Invoke(i18n, new object[] { "联机模块", "Multiplayer module" })) ==
+                        "Multiplayer module");
+                }
+                finally
+                {
+                    i18nType.GetMethod("SetLanguage")?.Invoke(i18n,
+                        new object[] { original ?? PCL2Swap.Api.SwapLanguage.Auto });
+                    ((PCL2Swap.Api.II18n)i18n).LanguageChanged -= languageHandler;
+                }
+                Expect("English layer raises LanguageChanged on a real switch", languageEvents >= 2);
+            }
+
             var hostInfo = api?.GetType().GetProperty("Host")?.GetValue(api);
             var pclVersion = Convert.ToString(hostInfo?.GetType().GetProperty("PclVersion")?.GetValue(hostInfo));
             Expect("Host.PclVersion reports the bound PCL build", !string.IsNullOrEmpty(pclVersion));
+            Expect("Host.ApiVersion reports the additive 1.3 contract",
+                Convert.ToString(hostInfo?.GetType().GetProperty("ApiVersion")?.GetValue(hostInfo)) == "1.3.0");
 
             var secret = pcl?.GetType().GetProperty("Secret")?.GetValue(pcl);
             Expect("Secret family exposed", secret != null);
@@ -750,6 +785,93 @@ namespace PclDlSwap.ExLoaderHarness
             var clientAfter = Probes.DownloadByClientCalls;
             Console.WriteLine("[pcl] Net.DownloadByClient calls: " + clientBefore + " -> " + clientAfter);
             Expect("Net.DownloadByClient reached the host method", clientAfter == clientBefore + 1);
+
+            var requestBefore = PCL.ModNet.RequestCalls;
+            var requestResult = Convert.ToString(net?.GetType().GetMethod("Request")?.Invoke(net,
+                new object[]
+                {
+                    "https://example.com/api", "POST", null, "body", "text/plain",
+                    "application/json", new Dictionary<string, string> { { "X-Test", "1" } },
+                    true, true
+                }));
+            Expect("Net.Request reaches the host retry helper",
+                PCL.ModNet.RequestCalls == requestBefore + 1 &&
+                PCL.ModNet.LastRequest.Contains("POST https://example.com/api") &&
+                requestResult == "response:https://example.com/api");
+
+            var navigation = pcl?.GetType().GetProperty("Navigation")?.GetValue(pcl);
+            Expect("Navigation family exposed", navigation != null);
+            if (navigation != null)
+            {
+                var navigationType = navigation.GetType();
+                Expect("Navigation reads the initial root page",
+                    Convert.ToString(navigationType.GetProperty("CurrentRootPage")?.GetValue(navigation)) == "Launch");
+                navigationType.GetMethod("Go")?.Invoke(navigation,
+                    new object[] { "Setup", "SetupUI" });
+                Expect("Navigation.Go drives FormMain.PageChange",
+                    PCL.ModMain.FrmMain.PageChangeCalls == 1 &&
+                    Convert.ToString(navigationType.GetProperty("CurrentRootPage")?.GetValue(navigation)) == "Setup" &&
+                    Convert.ToString(navigationType.GetProperty("CurrentSubPage")?.GetValue(navigation)) == "SetupUI");
+                navigationType.GetMethod("Back")?.Invoke(navigation, null);
+                Expect("Navigation.Back drives FormMain.PageBack",
+                    PCL.ModMain.FrmMain.PageBackCalls == 1);
+            }
+
+            var threading = pcl?.GetType().GetProperty("Threading")?.GetValue(pcl);
+            Expect("Threading family exposed", threading != null);
+            if (threading != null)
+            {
+                var threadingType = threading.GetType();
+                var genericInvoke = threadingType.GetMethods()
+                    .FirstOrDefault(method => method.Name == "Invoke" &&
+                                              method.IsGenericMethodDefinition &&
+                                              method.GetParameters().Length == 1);
+                var value = genericInvoke?.MakeGenericMethod(typeof(int))
+                    .Invoke(threading, new object[] { (Func<int>)(() => 17) });
+                Expect("Threading.Invoke(value) runs the callback",
+                    Convert.ToInt32(value) == 17);
+                var scheduled = threadingType.GetMethod("Schedule")
+                    ?.Invoke(threading, new object[] { TimeSpan.Zero, (Action)(() => { }) });
+                Expect("Threading.Schedule returns a disposable handle", scheduled is IDisposable);
+                (scheduled as IDisposable)?.Dispose();
+
+                var repeatCount = 0;
+                var repeat = threadingType.GetMethod("Repeat")
+                    ?.Invoke(threading,
+                        new object[] { TimeSpan.FromMilliseconds(20), (Action)(() => repeatCount++) })
+                    as IDisposable;
+                Thread.Sleep(120);
+                repeat?.Dispose();
+                var repeatAfterDispose = repeatCount;
+                Thread.Sleep(60);
+                Expect("Threading.Repeat ticks and disposal stops it",
+                    repeatCount >= 2 && repeatCount == repeatAfterDispose);
+            }
+
+            var environment = pcl?.GetType().GetProperty("Environment")?.GetValue(pcl);
+            Expect("Environment family exposed", environment != null);
+            if (environment != null)
+            {
+                var environmentType = environment.GetType();
+                Expect("Environment exposes the host path and data directory",
+                    !string.IsNullOrEmpty(Convert.ToString(environmentType.GetProperty("HostPath")
+                        ?.GetValue(environment))) &&
+                    !string.IsNullOrEmpty(Convert.ToString(environmentType.GetProperty("DataDirectory")
+                        ?.GetValue(environment))));
+            }
+
+            var profiles = pcl?.GetType().GetProperty("Profiles")?.GetValue(pcl);
+            Expect("Profiles family exposed", profiles != null);
+            if (profiles != null)
+            {
+                var profilesType = profiles.GetType();
+                Expect("Profiles.LoginName/LoginStatus reach ModLaunch",
+                    Convert.ToString(profilesType.GetMethod("LoginName")?.Invoke(profiles, null)) == "Dissociate" &&
+                    Convert.ToString(profilesType.GetMethod("LoginStatus")?.Invoke(profiles, null)) == string.Empty);
+                Expect("Profiles.LoginData/SelectedSkin return host objects",
+                    profilesType.GetMethod("LoginData")?.Invoke(profiles, null) != null &&
+                    profilesType.GetMethod("SelectedSkin")?.Invoke(profiles, null) != null);
+            }
 
             var animation = pcl?.GetType().GetProperty("Animation")?.GetValue(pcl);
             Expect("Animation family exposed", animation != null);
@@ -1179,7 +1301,7 @@ namespace PclDlSwap.ExLoaderHarness
 
                 Expect("sample addon OnLoad ran", StaticInt("LoadCalls") == 1);
                 Expect("sample addon OnEnable ran", StaticInt("EnableCalls") == 1);
-                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.2.0");
+                Expect("sample addon saw the API version", StaticString("LastApiVersion") == "1.3.0");
 
                 // ---- module state: persisted, and it gates the built-in features ----
                 var isEnabled = manager?.GetType().GetMethod("IsEnabled");
@@ -1841,6 +1963,9 @@ namespace PclDlSwap.ExLoaderHarness
             var full = Path.GetFullPath(payloadPath);
             if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
 
+            Environment.SetEnvironmentVariable("PCL2SWAP_DATA",
+                Path.Combine(Path.GetTempPath(), "Pcl2SwapUiTest-" + Guid.NewGuid().ToString("N")));
+
             var payload = Assembly.LoadFrom(full);
             var pclUi = payload.GetType("PclDlSwap.Payload.Host.PclUi", throwOnError: true);
             var onUi = pclUi.GetMethods(BindingFlags.Public | BindingFlags.Static)
@@ -1940,6 +2065,103 @@ namespace PclDlSwap.ExLoaderHarness
                     Console.Error.WriteLine("[uitest] on-thread call did not run inline");
                     failures++;
                 }
+            }
+
+            // API 1.3 front-end builders are WPF objects; exercise them on a real STA dispatcher
+            // so a bad template/property path cannot hide behind compile-time-only checks.
+            var frontendOk = false;
+            var frontendError = (Exception)null;
+            var frontendDetail = string.Empty;
+            var frontendDone = new ManualResetEventSlim(false);
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    var swapUi = payload.GetType("PclDlSwap.Payload.Swap.Views.SwapUi",
+                        throwOnError: true);
+                    var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+                    var radio = swapUi.GetMethod("RadioGroup", flags)?.Invoke(null, new object[]
+                    {
+                        "choice", new[] { "one", "two" }, 0, (Action<int>)(_ => { })
+                    });
+                    var number = swapUi.GetMethod("NumberInput", flags)?.Invoke(null, new object[]
+                    {
+                        "number", 1.0, 0.0, 10.0, 1.0, (Action<double>)(_ => { })
+                    });
+                    var password = swapUi.GetMethod("PasswordInput", flags)?.Invoke(null, new object[]
+                    {
+                        "secret", string.Empty, (Action<string>)(_ => { })
+                    });
+                    var multiline = swapUi.GetMethod("MultilineTextInput", flags)?.Invoke(null, new object[]
+                    {
+                        "notes", string.Empty, 70, (Action<string>)(_ => { })
+                    });
+                    var progress = swapUi.GetMethod("Progress", flags)?.Invoke(null, new object[]
+                    {
+                        "progress", 0.25, false
+                    });
+                    var progressElement = progress?.GetType().GetProperty("Element")?.GetValue(progress);
+
+                    var i18nType = payload.GetType("PclDlSwap.Payload.Swap.SwapI18n",
+                        throwOnError: true);
+                    var i18n = i18nType.GetProperty("Current",
+                        BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+                    var oldLanguage = i18n?.GetType().GetProperty("Language")?.GetValue(i18n);
+                    var translated = false;
+                    try
+                    {
+                        i18nType.GetMethod("SetLanguage", BindingFlags.Public | BindingFlags.Instance)
+                            ?.Invoke(i18n, new object[] { PCL2Swap.Api.SwapLanguage.English });
+                        var probe = new System.Windows.Controls.TextBlock { Text = "联机模块" };
+                        var direct = Convert.ToString(i18nType.GetMethod("T",
+                                BindingFlags.Public | BindingFlags.Instance,
+                                null, new[] { typeof(string) }, null)
+                            ?.Invoke(i18n, new object[] { "联机模块" }));
+                        var probePanel = new System.Windows.Controls.StackPanel();
+                        probePanel.Children.Add(probe);
+                        payload.GetType("PclDlSwap.Payload.Swap.HostTranslator",
+                                throwOnError: true)
+                            .GetMethod("Apply", BindingFlags.Public | BindingFlags.Static)
+                            ?.Invoke(null, new object[] { probePanel });
+                        // A disconnected StackPanel is not guaranteed to expose its visual
+                        // children until it has entered a presentation source. The direct
+                        // dictionary hit proves the expanded table; the host translator itself is
+                        // exercised by the real-host self-test.
+                        translated = direct == "Multiplayer module";
+                        frontendDetail = "direct=" + direct + ", probe=" + probe.Text +
+                                         ", inlines=" + probe.Inlines.Count;
+                    }
+                    finally
+                    {
+                        if (oldLanguage != null)
+                            i18nType.GetMethod("SetLanguage", BindingFlags.Public | BindingFlags.Instance)
+                                ?.Invoke(i18n, new[] { oldLanguage });
+                    }
+                    frontendDetail = "radio=" + (radio != null) + ", number=" + (number != null) +
+                                     ", password=" + (password != null) + ", multiline=" + (multiline != null) +
+                                     ", progress=" + (progressElement != null) + ", translated=" + translated +
+                                     "; " + frontendDetail;
+                    frontendOk = radio != null && number != null && password != null &&
+                                 multiline != null && progressElement != null && translated;
+                }
+                catch (Exception ex)
+                {
+                    frontendError = ex;
+                    frontendDetail = ex.Message;
+                }
+                finally
+                {
+                    frontendDone.Set();
+                }
+            }));
+            frontendDone.Wait(TimeSpan.FromSeconds(10));
+            Console.WriteLine("[uitest] API 1.3 frontends=" + (frontendOk ? "PASS" : "FAIL"));
+            if (!frontendOk)
+            {
+                Console.WriteLine("[uitest] frontend detail: " + frontendDetail);
+                if (frontendError != null)
+                    Console.Error.WriteLine("[uitest] frontend error: " + frontendError.Message);
+                failures++;
             }
 
             dispatcher.BeginInvoke(new Action(() => dispatcher.InvokeShutdown()));
@@ -2290,6 +2512,9 @@ namespace PCL
     /// <summary>Stand-in for PCL.ModNet.</summary>
     public static class ModNet
     {
+        public static int RequestCalls;
+        public static string LastRequest;
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static void NetDownloadByLoader(IEnumerable<string> urls, string localPath,
             object loader, object checker, bool simulateBrowserHeaders)
@@ -2311,6 +2536,16 @@ namespace PCL
         {
             var pad = "pcl2swap.harness.client." + (url ?? string.Empty).Length;
             PclDlSwap.ExLoaderHarness.Probes.DownloadByClientCalls += pad.Length > 0 ? 1 : 0;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static string NetRequestByClientRetry(string url, System.Net.Http.HttpMethod method,
+            string backupUrl, object content, string contentType, string accept, string[,] headers,
+            bool requireJson, Encoding encoding, bool simulateBrowserHeaders)
+        {
+            RequestCalls++;
+            LastRequest = (method?.Method ?? "GET") + " " + url + " json=" + requireJson;
+            return "response:" + url;
         }
 
         /// <summary>Stand-in for PCL.ModNet.NetFile (the loader shape rebuilds it via reflection).</summary>
@@ -2441,8 +2676,11 @@ namespace PCL
     public static class ModMinecraft
     {
         public static int ListCalls;
+        public static object SelectedSkinValue = new object();
         public static string McFolderSelected { get; set; } = @"C:\instances";
         public static McInstance McInstanceSelected { get; set; }
+
+        public static object McSkinSelect() => SelectedSkinValue;
 
         public static string GetMcFoolName(string folder)
         {
@@ -2484,8 +2722,10 @@ namespace PCL
     public static class ModLaunch
     {
         public static int StartCalls;
+        public static int LoginInputCalls;
         public static object LastOptions;
         public static string LoginNameValue = "Dissociate";
+        public static object LoginInputValue = new object();
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static bool McLaunchStart(object options)
@@ -2498,6 +2738,7 @@ namespace PCL
         public static string GetNativesFolder(object instance) => @"C:\temp\natives";
         public static string McLoginName() => LoginNameValue;
         public static string McLoginAble() => string.Empty;
+        public static object McLoginInput() { LoginInputCalls++; return LoginInputValue; }
     }
 
     /// <summary>Harmless target the harness detours to exercise module-scoped hooks.</summary>
@@ -2759,11 +3000,75 @@ namespace PCL
     /// <summary>Stand-in for PCL.FormMain carrying the PageSubType enum.</summary>
     public class FormMain
     {
+        public FormMain()
+        {
+            PageCurrent = new PageStackData { Page = PageType.Launch };
+            PageLast = PageCurrent;
+            PageRight = new MyPageRight();
+            PageStack = new List<PageStackData> { PageCurrent };
+        }
+
+        public class PageStackData
+        {
+            public PageType Page;
+
+            public static implicit operator PageStackData(PageType page) =>
+                new PageStackData { Page = page };
+        }
+
+        public enum PageType
+        {
+            Launch,
+            Download,
+            Link,
+            Setup,
+            Other,
+            InstanceSelect,
+            TaskManager,
+            InstanceSetup,
+            ResourceDetail,
+            HelpDetail
+        }
+
         public enum PageSubType
         {
             Default,
             Mod,
-            Pack
+            Pack,
+            SetupLaunch,
+            SetupLink,
+            SetupUI,
+            SetupSystem,
+            DownloadInstall,
+            DownloadMod,
+            OtherHelp,
+            OtherAbout
+        }
+
+        public PageStackData PageCurrent;
+        public PageStackData PageLast;
+        public List<PageStackData> PageStack;
+        public object PageRight;
+        public PageSubType PageCurrentSub { get; private set; }
+        public int PageChangeCalls;
+        public int PageBackCalls;
+
+        public void PageChange(PageStackData data, PageSubType sub)
+        {
+            PageChangeCalls++;
+            PageLast = PageCurrent;
+            PageCurrent = data ?? new PageStackData { Page = PageType.Launch };
+            PageCurrentSub = sub;
+            PageStack.Add(PageCurrent);
+            PageRight = new MyPageRight();
+        }
+
+        public void PageBack()
+        {
+            PageBackCalls++;
+            if (PageStack.Count > 1) PageStack.RemoveAt(PageStack.Count - 1);
+            if (PageStack.Count > 0) PageCurrent = PageStack[PageStack.Count - 1];
+            PageRight = new MyPageRight();
         }
     }
 
@@ -2849,6 +3154,8 @@ namespace PCL
     /// </summary>
     public static class ModMain
     {
+        public static FormMain FrmMain = new FormMain();
+
         // Lazy page references the pollers watch (the real launcher news these up on first visit).
         public static PageDownloadLeft FrmDownloadLeft;
         public static PageOtherAbout FrmOtherAbout;

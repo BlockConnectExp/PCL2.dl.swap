@@ -1292,6 +1292,10 @@ namespace PclDlSwap.Payload.Swap
             public IPclLogAccess Logs { get { Require("logs"); return _inner.Logs; } }
             public IPclShellAccess Shell { get { Require("files"); return _inner.Shell; } }
             public IPclClipboardAccess Clipboard { get { Require("clipboard"); return _inner.Clipboard; } }
+            public IPclNavigationAccess Navigation { get { Require("pages"); return _inner.Navigation; } }
+            public IPclThreadingAccess Threading => _inner.Threading;
+            public IPclEnvironmentAccess Environment => _inner.Environment;
+            public IPclProfileAccess Profiles { get { Require("launch"); return _inner.Profiles; } }
         }
 
         /// <summary>
@@ -1328,6 +1332,7 @@ namespace PclDlSwap.Payload.Swap
             }
 
             public void Hint(string text) => _inner.Hint(text);
+            public void Hint(string text, SwapHintType type) => _inner.Hint(text, type);
 
             public int MsgBox(string caption, string title, string button1 = "确定", string button2 = "") =>
                 _inner.MsgBox(caption, title, button1, button2);
@@ -1363,6 +1368,27 @@ namespace PclDlSwap.Payload.Swap
             public FrameworkElement Link(string text, string url) => _inner.Link(text, url);
 
             public FrameworkElement Separator() => _inner.Separator();
+
+            public FrameworkElement RadioGroup(string label, IReadOnlyList<string> options,
+                int selectedIndex, Action<int> onChange) =>
+                _inner.RadioGroup(label, options, selectedIndex, onChange);
+
+            public FrameworkElement NumberInput(string label, double initial, double min,
+                double max, double step, Action<double> onChange) =>
+                _inner.NumberInput(label, initial, min, max, step, onChange);
+
+            public FrameworkElement PasswordInput(string label, string initial,
+                Action<string> onChange) => _inner.PasswordInput(label, initial, onChange);
+
+            public FrameworkElement MultilineTextInput(string label, string initial,
+                int minHeight, Action<string> onChange) =>
+                _inner.MultilineTextInput(label, initial, minHeight, onChange);
+
+            public FrameworkElement Image(string path, double width = 0, double height = 0) =>
+                _inner.Image(path, width, height);
+
+            public IProgressView Progress(string label, double initial = 0,
+                bool indeterminate = false) => _inner.Progress(label, initial, indeterminate);
         }
 
         /// <summary>

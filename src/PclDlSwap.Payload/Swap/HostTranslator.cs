@@ -111,7 +111,7 @@ namespace PclDlSwap.Payload.Swap
                 timer.Tick += (sender, args) =>
                 {
                     if (!SwapI18n.Current.IsEnglish) return;
-                    try { Apply(window); } catch { }
+                    try { ApplyAllWindows(); } catch { }
                 };
                 timer.Start();
 
@@ -144,6 +144,45 @@ namespace PclDlSwap.Payload.Swap
                     SwapLog.Warn("[i18n] 重新应用失败：" + ex.Message);
                 }
             }
+
+            // Dialogs are top-level windows, not descendants of the main form. They appear after
+            // the main form and must be translated by the same language switch.
+            try
+            {
+                var app = Application.Current;
+                if (app != null)
+                {
+                    PclUi.OnUiThread(() =>
+                    {
+                        foreach (Window window in app.Windows)
+                        {
+                            if (SwapI18n.Current.IsEnglish) Apply(window);
+                            else Restore(window);
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("[i18n] 对话框重新应用失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>Applies the current dictionary to every top-level WPF window.</summary>
+        public static int ApplyAllWindows()
+        {
+            var hits = 0;
+            try
+            {
+                var app = Application.Current;
+                if (app == null) return hits;
+                foreach (Window window in app.Windows) hits += Apply(window);
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("[i18n] 全窗口翻译失败：" + ex.Message);
+            }
+            return hits;
         }
 
         public static int Apply(object visualRoot)
@@ -248,6 +287,29 @@ namespace PclDlSwap.Payload.Swap
                 }
             }
 
+            if (node is HeaderedItemsControl headeredItems &&
+                headeredItems.Header is string itemsHeader)
+            {
+                var updated = i18n.Translate(itemsHeader);
+                if (!ReferenceEquals(updated, itemsHeader) && updated != itemsHeader)
+                {
+                    headeredItems.Header = updated;
+                    hits++;
+                }
+            }
+
+            if (node is DataGrid dataGrid)
+            {
+                foreach (var column in dataGrid.Columns)
+                {
+                    if (!(column.Header is string header)) continue;
+                    var updated = i18n.Translate(header);
+                    if (ReferenceEquals(updated, header) || updated == header) continue;
+                    column.Header = updated;
+                    hits++;
+                }
+            }
+
             if (node is FrameworkElement element)
             {
                 if (element.ToolTip is string tooltip)
@@ -314,6 +376,29 @@ namespace PclDlSwap.Payload.Swap
                 if (original != null)
                 {
                     headered.Header = original;
+                    hits++;
+                }
+            }
+
+            if (node is HeaderedItemsControl headeredItems &&
+                headeredItems.Header is string itemsHeader)
+            {
+                var original = Original(itemsHeader, i18n);
+                if (original != null)
+                {
+                    headeredItems.Header = original;
+                    hits++;
+                }
+            }
+
+            if (node is DataGrid dataGrid)
+            {
+                foreach (var column in dataGrid.Columns)
+                {
+                    if (!(column.Header is string header)) continue;
+                    var original = Original(header, i18n);
+                    if (original == null) continue;
+                    column.Header = original;
                     hits++;
                 }
             }

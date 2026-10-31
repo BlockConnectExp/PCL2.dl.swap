@@ -193,7 +193,7 @@ public static class Cli
         {
             var context = new InjectionContext
             {
-                InjectorVersion = "v26.2-Alpha 5",
+                InjectorVersion = "v26.2-Alpha 6",
                 Target = targetInfo ?? (string.IsNullOrEmpty(exe) ? null : TargetProbe.DescribeFile(exe!)),
                 Release = release,
                 Result = result,

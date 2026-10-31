@@ -14,7 +14,7 @@ namespace PclDlSwap.Payload.Swap
     /// settings and swap pages; a disk copy at &lt;data&gt;\i18n\en-US.json (same shape) can extend
     /// or override it without rebuilding the payload.
     /// </summary>
-    internal sealed class SwapI18n : II18n
+    internal sealed partial class SwapI18n : II18n
     {
         private static readonly object Gate = new object();
         private static SwapI18n _current;
@@ -29,10 +29,14 @@ namespace PclDlSwap.Payload.Swap
         public SwapI18n()
         {
             foreach (var pair in BuiltInEnglish) _english[pair.Key] = pair.Value;
+            ApplyExtraEnglish(_english);
+            ApplyExtraPhrases(PhraseEnglish);
             LoadDiskOverrides();
             _language = LoadLanguage();
             SwapLog.Info($"[i18n] 词典 {_english.Count} 条，语言 {CurrentLanguage}（{_language}）。");
         }
+
+        public event EventHandler LanguageChanged;
 
         public SwapLanguage Language => _language;
 
@@ -40,6 +44,13 @@ namespace PclDlSwap.Payload.Swap
 
         public bool IsEnglish => _language == SwapLanguage.English ||
                                  (_language == SwapLanguage.Auto && SystemIsNonChinese());
+
+        public int Count
+        {
+            get { lock (Gate) return _english.Count; }
+        }
+
+        public bool Has(string chinese) => Lookup(chinese) != null;
 
         public string T(string chinese)
         {
@@ -59,11 +70,28 @@ namespace PclDlSwap.Payload.Swap
         public void SetLanguage(SwapLanguage language)
         {
             var before = IsEnglish;
+            var beforeSetting = _language;
             _language = language;
             SaveLanguage(language);
             SwapLog.Info($"[i18n] 语言切换为 {language}（生效：{CurrentLanguage}）。");
-            if (before != IsEnglish || language != SwapLanguage.Auto)
+            var changed = beforeSetting != language || before != IsEnglish;
+            if (changed)
                 HostTranslator.ReapplyAll();
+            if (changed) RaiseLanguageChanged();
+        }
+
+        private void RaiseLanguageChanged()
+        {
+            var handlers = LanguageChanged;
+            if (handlers == null) return;
+            foreach (var subscriber in handlers.GetInvocationList())
+            {
+                try { ((EventHandler)subscriber)(this, EventArgs.Empty); }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("[i18n] LanguageChanged subscriber failed: " + ex.Message);
+                }
+            }
         }
 
         /// <summary>Translation by dictionary only - the host translator uses this per string.</summary>

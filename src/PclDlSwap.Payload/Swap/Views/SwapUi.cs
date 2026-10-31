@@ -1,9 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using PCL2Swap.Api;
 using PclDlSwap.Payload.Host;
 
 namespace PclDlSwap.Payload.Swap.Views
@@ -415,6 +420,345 @@ namespace PclDlSwap.Payload.Swap.Views
                 line.Background = new SolidColorBrush(Color.FromArgb(30, 0, 0, 0));
             }
             return line;
+        }
+
+        /// <summary>
+        /// A native-looking mutually exclusive choice row. PCL's MyRadioButton is used when the
+        /// running build exposes it; the fallback uses one WPF RadioButton group per row.
+        /// </summary>
+        internal static FrameworkElement RadioGroup(string label, IReadOnlyList<string> options,
+            int selectedIndex, Action<int> onChange)
+        {
+            options = options ?? new string[0];
+            var panel = new WrapPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var controls = new List<FrameworkElement>();
+            var radioType = HostType("PCL.MyRadioButton");
+            var groupName = "swap-" + Guid.NewGuid().ToString("N");
+
+            for (var index = 0; index < options.Count; index++)
+            {
+                var optionIndex = index;
+                FrameworkElement control = null;
+                if (radioType != null)
+                {
+                    try
+                    {
+                        control = Activator.CreateInstance(radioType) as FrameworkElement;
+                        if (control != null)
+                        {
+                            PclUi.SetMember(control, "Text", options[index]);
+                            PclUi.SetMember(control, "Checked", index == selectedIndex);
+                            PclUi.SetMember(control, "Margin", new Thickness(0, 0, 16, 6));
+                            control.PreviewMouseLeftButtonUp += (sender, args) =>
+                            {
+                                SelectRadio(controls, optionIndex, onChange);
+                            };
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        SwapLog.Warn("SwapUi：MyRadioButton 构建失败，退回标准单选框：" + ex.Message);
+                    }
+                }
+
+                if (control == null)
+                {
+                    var radio = new RadioButton
+                    {
+                        Content = options[index],
+                        GroupName = groupName,
+                        IsChecked = index == selectedIndex,
+                        Margin = new Thickness(0, 0, 16, 6),
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    radio.Checked += (sender, args) => RelayInt(onChange, optionIndex);
+                    control = radio;
+                }
+
+                controls.Add(control);
+                panel.Children.Add(control);
+            }
+
+            return string.IsNullOrEmpty(label) ? panel : Row(label, panel);
+        }
+
+        /// <summary>A compact numeric editor with bounded -/+ controls.</summary>
+        internal static FrameworkElement NumberInput(string label, double initial, double min,
+            double max, double step, Action<double> onChange)
+        {
+            if (max < min)
+            {
+                var swap = min;
+                min = max;
+                max = swap;
+            }
+            if (step <= 0) step = 1;
+
+            TextBox box = null;
+            var boxType = HostType("PCL.MyTextBox");
+            if (boxType != null)
+            {
+                try { box = Activator.CreateInstance(boxType) as TextBox; }
+                catch { /* fall through */ }
+            }
+            if (box == null) box = new TextBox();
+            box.Width = 120;
+            box.Height = 31;
+            box.VerticalContentAlignment = VerticalAlignment.Center;
+
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var minButton = new Button
+            {
+                Content = "-",
+                Width = 34,
+                Height = 31,
+                Padding = new Thickness(0),
+                Margin = new Thickness(0, 0, 6, 0)
+            };
+            var maxButton = new Button
+            {
+                Content = "+",
+                Width = 34,
+                Height = 31,
+                Padding = new Thickness(0),
+                Margin = new Thickness(6, 0, 0, 0)
+            };
+
+            var current = Math.Min(max, Math.Max(min, initial));
+            var updating = false;
+            Action<double> apply = value =>
+            {
+                current = Math.Min(max, Math.Max(min, value));
+                updating = true;
+                box.Text = current.ToString("0.###", CultureInfo.InvariantCulture);
+                updating = false;
+                try { onChange?.Invoke(current); }
+                catch (Exception ex) { SwapLog.Warn("SwapUi：数字输入回调失败：" + ex.Message); }
+            };
+
+            box.Text = current.ToString("0.###", CultureInfo.InvariantCulture);
+            box.TextChanged += (sender, args) =>
+            {
+                if (updating) return;
+                if (!double.TryParse(box.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var parsed) &&
+                    !double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                    return;
+                current = Math.Min(max, Math.Max(min, parsed));
+                try { onChange?.Invoke(current); }
+                catch (Exception ex) { SwapLog.Warn("SwapUi：数字输入回调失败：" + ex.Message); }
+            };
+            box.LostFocus += (sender, args) => apply(current);
+            minButton.Click += (sender, args) => apply(current - step);
+            maxButton.Click += (sender, args) => apply(current + step);
+
+            stack.Children.Add(minButton);
+            stack.Children.Add(box);
+            stack.Children.Add(maxButton);
+            return Row(label, stack);
+        }
+
+        /// <summary>Masked input; the value is read only from PasswordBox events.</summary>
+        internal static FrameworkElement PasswordInput(string label, string initial,
+            Action<string> onChange)
+        {
+            var box = new PasswordBox
+            {
+                Height = 35,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center,
+                Password = initial ?? string.Empty
+            };
+            box.PasswordChanged += (sender, args) =>
+            {
+                try { onChange?.Invoke(box.Password); }
+                catch (Exception ex) { SwapLog.Warn("SwapUi：密码输入回调失败：" + ex.Message); }
+            };
+            return Row(label, box);
+        }
+
+        /// <summary>Multi-line editor with an explicit minimum height and no width clipping.</summary>
+        internal static FrameworkElement MultilineTextInput(string label, string initial,
+            int minHeight, Action<string> onChange)
+        {
+            var root = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+            root.Children.Add(Text(label, 12.5, false, false));
+            var box = new TextBox
+            {
+                Text = initial ?? string.Empty,
+                AcceptsReturn = true,
+                AcceptsTab = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MinHeight = Math.Max(48, minHeight),
+                Margin = new Thickness(0, 5, 0, 0)
+            };
+            box.TextChanged += (sender, args) =>
+            {
+                try { onChange?.Invoke(box.Text); }
+                catch (Exception ex) { SwapLog.Warn("SwapUi：多行输入回调失败：" + ex.Message); }
+            };
+            root.Children.Add(box);
+            return root;
+        }
+
+        /// <summary>Local image preview through PCL.MyImage with a plain WPF fallback.</summary>
+        internal static FrameworkElement Image(string path, double width = 0, double height = 0)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return Note("(no image)", true);
+
+            var imageType = HostType("PCL.MyImage");
+            if (imageType != null)
+            {
+                try
+                {
+                    if (Activator.CreateInstance(imageType) is FrameworkElement image)
+                    {
+                        PclUi.SetMember(image, "Source", path);
+                        if (width > 0) image.Width = width;
+                        if (height > 0) image.Height = height;
+                        return image;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SwapLog.Warn("SwapUi：MyImage 构建失败，退回标准图片：" + ex.Message);
+                }
+            }
+
+            try
+            {
+                var fullPath = Path.GetFullPath(path);
+                if (!File.Exists(fullPath)) return Note("(image not found)", true);
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.UriSource = new Uri(fullPath, UriKind.Absolute);
+                bitmap.EndInit();
+                bitmap.Freeze();
+                var image = new System.Windows.Controls.Image
+                {
+                    Source = bitmap,
+                    Stretch = Stretch.Uniform
+                };
+                if (width > 0) image.Width = width;
+                if (height > 0) image.Height = height;
+                return image;
+            }
+            catch (Exception ex)
+            {
+                SwapLog.Warn("SwapUi：图片加载失败：" + ex.Message);
+                return Note("(image could not be loaded)", true);
+            }
+        }
+
+        /// <summary>Progress bar plus a live status label; setters are safe from worker threads.</summary>
+        internal static IProgressView Progress(string label, double initial = 0,
+            bool indeterminate = false)
+        {
+            var root = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+            var header = new Grid();
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var caption = Text(label, 12.5, false, false);
+            header.Children.Add(caption);
+            var status = Text(string.Empty, 11.5, true, false);
+            status.HorizontalAlignment = HorizontalAlignment.Right;
+            Grid.SetColumn(status, 1);
+            header.Children.Add(status);
+            root.Children.Add(header);
+
+            var bar = new ProgressBar
+            {
+                Minimum = 0,
+                Maximum = 1,
+                Value = Math.Min(1, Math.Max(0, initial)),
+                IsIndeterminate = indeterminate,
+                Height = 6,
+                Margin = new Thickness(0, 5, 0, 0)
+            };
+            UseBrush(bar, Control.ForegroundProperty, "ColorBrush3");
+            root.Children.Add(bar);
+            return new ProgressViewImpl(root, bar, status);
+        }
+
+        private sealed class ProgressViewImpl : IProgressView
+        {
+            private readonly ProgressBar _bar;
+            private readonly TextBlock _status;
+            private readonly object _gate = new object();
+            private double _value;
+            private bool _indeterminate;
+            private string _statusText = string.Empty;
+
+            public ProgressViewImpl(FrameworkElement element, ProgressBar bar, TextBlock status)
+            {
+                Element = element;
+                _bar = bar;
+                _status = status;
+                _value = bar.Value;
+                _indeterminate = bar.IsIndeterminate;
+            }
+
+            public FrameworkElement Element { get; }
+
+            public double Value
+            {
+                get { lock (_gate) return _value; }
+                set
+                {
+                    var clamped = Math.Min(1, Math.Max(0, value));
+                    lock (_gate) _value = clamped;
+                    OnUiThread(() => _bar.Value = clamped);
+                }
+            }
+
+            public bool IsIndeterminate
+            {
+                get { lock (_gate) return _indeterminate; }
+                set
+                {
+                    lock (_gate) _indeterminate = value;
+                    OnUiThread(() => _bar.IsIndeterminate = value);
+                }
+            }
+
+            public string Status
+            {
+                get { lock (_gate) return _statusText; }
+                set
+                {
+                    var text = value ?? string.Empty;
+                    lock (_gate) _statusText = text;
+                    OnUiThread(() => _status.Text = text);
+                }
+            }
+
+            private void OnUiThread(Action action)
+            {
+                var dispatcher = _bar.Dispatcher;
+                if (dispatcher.CheckAccess()) action();
+                else dispatcher.BeginInvoke(DispatcherPriority.Background, action);
+            }
+        }
+
+        private static void SelectRadio(IReadOnlyList<FrameworkElement> controls, int selected,
+            Action<int> onChange)
+        {
+            for (var index = 0; index < controls.Count; index++)
+            {
+                try { PclUi.SetMember(controls[index], "Checked", index == selected); }
+                catch { }
+            }
+            RelayInt(onChange, selected);
         }
 
         private sealed class CheckRelay

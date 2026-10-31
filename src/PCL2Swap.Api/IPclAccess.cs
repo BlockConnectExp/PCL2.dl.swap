@@ -23,6 +23,78 @@ namespace PCL2Swap.Api
         IPclLogAccess Logs { get; }
         IPclShellAccess Shell { get; }
         IPclClipboardAccess Clipboard { get; }
+        IPclNavigationAccess Navigation { get; }
+        IPclThreadingAccess Threading { get; }
+        IPclEnvironmentAccess Environment { get; }
+        IPclProfileAccess Profiles { get; }
+    }
+
+    /// <summary>
+    /// Official PCL page navigation. Use the enum names; the host keeps ownership of the page stack
+    /// and animations.
+    /// </summary>
+    public interface IPclNavigationAccess
+    {
+        /// <summary>The concrete right-hand page type currently mounted, e.g. PageSetupLaunch.</summary>
+        string CurrentPage { get; }
+
+        /// <summary>The root section enum, e.g. Launch / Download / Setup / Other.</summary>
+        string CurrentRootPage { get; }
+
+        /// <summary>The active sub-page enum such as SetupLaunch or DownloadInstall.</summary>
+        string CurrentSubPage { get; }
+
+        bool CanGoBack { get; }
+
+        /// <summary>Switches through FormMain.PageChange; rootPage/subPage accept enum names.</summary>
+        void Go(string rootPage, string subPage = "Default");
+
+        /// <summary>Invokes the host's own PageBack path.</summary>
+        void Back();
+    }
+
+    /// <summary>UI and background scheduling using the launcher's WPF dispatcher.</summary>
+    public interface IPclThreadingAccess
+    {
+        bool IsUiThread { get; }
+
+        void Invoke(Action action);
+        T Invoke<T>(Func<T> action);
+
+        /// <summary>Queues one action after a delay; dispose cancels it when it has not fired.</summary>
+        IDisposable Schedule(TimeSpan delay, Action action);
+
+        /// <summary>Runs an action repeatedly until the returned handle is disposed.</summary>
+        IDisposable Repeat(TimeSpan interval, Action action);
+    }
+
+    /// <summary>Read-only facts about the bound PCL process and its durable storage.</summary>
+    public interface IPclEnvironmentAccess
+    {
+        string HostPath { get; }
+        string HostDirectory { get; }
+
+        /// <summary>PCL2Swap.DataRoot (normally %APPDATA%\PCL2Swap).</summary>
+        string DataDirectory { get; }
+
+        string PclVersion { get; }
+        bool IsDebug { get; }
+        bool IsAdministrator { get; }
+    }
+
+    /// <summary>Current login and skin objects without exposing credentials.</summary>
+    public interface IPclProfileAccess
+    {
+        string LoginName();
+
+        /// <summary>Empty when the current login can launch; otherwise a readable reason.</summary>
+        string LoginStatus();
+
+        /// <summary>PCL's McLoginData instance (shape lives in the host).</summary>
+        object LoginData();
+
+        /// <summary>PCL's McSkinInfo instance for the current selection.</summary>
+        object SelectedSkin();
     }
 
     /// <summary>Host helpers for opening paths with the user's shell (API 1.2).</summary>
@@ -242,6 +314,19 @@ namespace PCL2Swap.Api
 
         /// <summary>Calls NetDownloadByClient (single-url overload).</summary>
         void DownloadByClient(string url, string localPath, bool simulateBrowserHeaders = false);
+
+        /// <summary>
+        /// Calls PCL's NetRequestByClientRetry with the host's headers, retry, encoding and
+        /// browser-header handling. Headers are a name/value map; no request is sent by the Swap
+        /// runtime itself.
+        /// </summary>
+        string Request(string url, string method = "GET", string backupUrl = null,
+            object content = null, string contentType = null, string accept = null,
+            IReadOnlyDictionary<string, string> headers = null, bool requireJson = false,
+            bool simulateBrowserHeaders = true);
+
+        /// <summary>Convenience wrapper for a GET request.</summary>
+        string Get(string url, bool requireJson = false);
     }
 
     /// <summary>PCL.ModAnimation - the launcher's animation gate and player.</summary>

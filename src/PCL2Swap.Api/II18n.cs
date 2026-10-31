@@ -1,3 +1,5 @@
+using System;
+
 namespace PCL2Swap.Api
 {
     public enum SwapLanguage
@@ -16,12 +18,21 @@ namespace PCL2Swap.Api
     /// </summary>
     public interface II18n
     {
+        /// <summary>Raised after the active language changes and the host has been re-applied.</summary>
+        event EventHandler LanguageChanged;
+
         SwapLanguage Language { get; }
 
         /// <summary>"zh-CN" or "en-US" - the language actually applied right now.</summary>
         string CurrentLanguage { get; }
 
         bool IsEnglish { get; }
+
+        /// <summary>Number of exact Chinese -> English entries currently loaded.</summary>
+        int Count { get; }
+
+        /// <summary>True when the dictionary has an exact or relaxed entry for the Chinese text.</summary>
+        bool Has(string chinese);
 
         /// <summary>Translates a Chinese original; unknown strings pass through untouched.</summary>
         string T(string chinese);

@@ -247,7 +247,12 @@ public interface ISwapAddon {
 
 - hook 点：`PageDownloadInstall.LoaderInit`（恢复真实 `DlClientListLoader`）；2.99.0.1 侧栏修复
   作为该 Addon 的页面级补救（现有 `DownloadPageRestore` 逻辑直接搬入）。
-- 状态：已在 Alpha 2 验证（含 2.99.0.1 侧栏崩溃修复）。
+- 整合包 hook 点：`ModModpack.ModpackInstall()`（文件选择器）与
+  `ModModpack.ModpackInstall(string, string, string)`（格式识别后分发）。
+  字符串重载仍保留原生 `InstallPackCurseForge / Modrinth / HMCL / MMC / MCBBS /
+  LauncherPack / Compress`，恢复层只补回被删掉的分发 switch。
+- 状态：已在 Alpha 2 验证原版下载；2026-11-06 针对 issue #1 补齐整合包链路，
+  在 PCL 2.99.0.0 / 2.99.0.1 真机确认原生 CurseForge `LoaderCombo` 成功启动。
 
 ### 5.2 OTA Protector（OTA 显式 / 沙箱 / 测毒）
 

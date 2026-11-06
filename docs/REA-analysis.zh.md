@@ -336,5 +336,54 @@ data\offset-manifest.json             （6 方法 × 4 版本，VerifyOffsets �
 
 对应 Owner 的最终要求：产物为单一 `*.dll`（Patcher），加上负责拉起进程与看门狗的可执行入口。
 
+## 13. 整合包安装的第二套法规门（issue #1）
+
+2.99.0.0 与 2.99.0.1 的 `PCL.ModModpack` 在两个构建中保持一致：
+
+| 方法 | Metadata token | RVA | 2.99 行为 |
+|---|---:|---:|---|
+| `ModpackInstall()` | `0x060001EF` | `0x000120F0` | 19 字节 IL，只调用 `ModMain.Hint` 显示法规提示，不再创建文件选择器 |
+| `ModpackInstall(string, string, string)` | `0x060001F0` | `0x00012110` | 751 字节 IL，完整保留格式探测，但在 `IL_02DA` 无条件抛同一异常 |
+
+字符串重载在抛异常前仍会识别：
+
+1. 根目录或单层子目录中的 `mcbbs.packmeta`；
+2. `mmc-pack.json`；
+3. `modrinth.index.json`；
+4. `manifest.json`（含 `addons` 走 MCBBS，否则 CurseForge）；
+5. `modpack.json`（HMCL）；
+6. 内层 `modpack.zip` / `modpack.mrpack`；
+7. 未识别时回退普通客户端压缩包。
+
+2.14.x 基线在相同探测逻辑之后保留了 `switch`，分别调用
+`InstallPackCurseForge / Modrinth / HMCL / MMC / MCBBS / LauncherPack / Compress`。
+2.99.x 删除的正是这个 `switch`，而七个安装器本身仍在程序中。因此正确修复点是恢复分发，
+不是重写下载/安装实现，也不是把法规异常简单吞掉。
+
+全程序门字符串扫描结果：
+
+- `PageDownloadInstall.LoaderInit` 与两个 closure 属于原版下载 loader 门，已由
+  `DownloadPageRestore` 覆盖；
+- `FormMain` 的拖拽 catch 只识别这条异常并按用户取消处理，不是独立功能门；
+- `ShowUpdateLog` 中的同文案是旧版本更新日志；
+- 真正需要新增恢复的是上述两个 `ModModpack.ModpackInstall` 重载。
+
+`ModpackInstallRestore` 只重建探测与分发：
+
+- 主开关复用 `swap.download-mc`；
+- 文件选择器恢复为系统原生 OpenFileDialog，以 PCL 主窗口为 owner；
+- 字符串重载在探测结束后反射调用宿主原生 `InstallPack*`；
+- loader UI、任务栏注册、取消、清理和格式专有逻辑仍由 PCL 自己执行；
+- 模块关闭时两个 hook 都调用原始副本，恢复宿主原来的法规提示/异常。
+
+回归证据：
+
+- `--modpacktest`：两个 hook、七种格式、instance/logo 参数、嵌套 base folder、
+  文件选择器入口和关闭模块后的双重回退全部 PASS；
+- 2.99.0.0 / 2.99.0.1：文件选择器标题均为「选择整合包压缩文件」，关闭后正常返回；
+- 两版 CurseForge fixture 均返回
+  `PCL.ModLoader+LoaderCombo<string> "CurseForge 整合包安装：SwapIssue1E2E"`，
+  自检同时保持 `ok=84 fail=0`。
+
 <!-- GitHub@BlockConnectExp | BlockConnectLab@StarsailsClover -->
 

@@ -156,7 +156,7 @@ Copy-Item MyAddon.swapaddon "$env:APPDATA\PCL2Swap\addons\"
 
 | Addon | 行为 | 宿主实现位置 |
 |---|---|---|
-| **Download MC** | 恢复原版游戏下载页（LoaderInit 重驱动 + 2.99.0.1 侧栏修复） | `DownloadPageRestore` |
+| **Download MC** | 恢复原版游戏下载页、2.99.0.1 侧栏与整合包导入/分发（LoaderInit、文件选择器、`ModpackInstall` 两个重载） | `DownloadPageRestore` + `ModpackInstallRestore` |
 | **OTA Protector** | 静默 OTA 显式确认；启动器文件下载后查毒（游戏内容不查） | `CoreInstaller` + `AnnouncementGuard` |
 | **Cancel Button** | 给没有取消按钮的弹窗追加取消 | `AnnouncementGuard`（规划迁移） |
 

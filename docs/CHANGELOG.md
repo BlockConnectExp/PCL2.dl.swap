@@ -6,9 +6,9 @@
 > The artifact name carries both versions: `pcl2swap-{PCL2Ver.}-{Ver.}.dll`.
 
 ---
-## 2026.11.06-23:20:00 v26.3 post-Alpha3: 恢复整合包安装（issue #1）
+## 2026.11.07-01:10:00 v26.3-Alpha 4: 恢复整合包安装（issue #1）
 
-GitCommitHash: 7b1351c
+GitCommitHash: 9fd2c54
 
 ChangedFiles:
 ```
@@ -18,15 +18,16 @@ ChangedFiles:
 .\src\PclDlSwap.ExLoaderHarness\Program.cs                  --modpacktest 七格式与禁用回退
 .\.docs\REA-analysis.zh.md                                 2.99 IL 门位与 2.14 分发对照
 .\.docs\issue-pr-verify-close.zh.md                        本机问题闭环方法文档
+.\docs\RELEASE-NOTES-v26.3-Alpha4.md                       Alpha 4 发布说明
 ```
 
 ChangLog:
 Num|File Name|Change Description|Change Time|Changer
 ----|----|----|----|----
-1|根因|2.99.0.0/2.99.0.1 的 `ModpackInstall()` 只剩提示；字符串重载保留格式探测但删除原生 `InstallPack*` switch，并改为无条件抛法规异常|2026.11.06-23:20:00|PCL2.dlswap
-2|修复|新增 `ModpackInstallRestore`：恢复原生文件选择器，按 CurseForge/Modrinth/HMCL/MMC/MCBBS/LauncherPack/Compress 分发，实际安装继续调用宿主私有安装器|2026.11.06-23:20:00|PCL2.dlswap
-3|开关|两个 hook 与 `DownloadPageRestore` 共用 `swap.download-mc`；关闭模块时文件选择器与字符串重载都调回原始副本，保留宿主法规门|2026.11.06-23:20:00|PCL2.dlswap
-4|回归|`--modpacktest` 覆盖 7 种格式、嵌套 base folder、instance/logo、文件选择器入口和禁用回退；2.99.0.0/2.99.0.1 真机文件选择器与 CurseForge LoaderCombo 启动全部 PASS|2026.11.06-23:20:00|PCL2.dlswap
+1|根因|2.99.0.0/2.99.0.1 的 `ModpackInstall()` 只剩提示；字符串重载保留格式探测但删除原生 `InstallPack*` switch，并改为无条件抛法规异常|2026.11.07-01:10:00|PCL2.dlswap
+2|修复|新增 `ModpackInstallRestore`：恢复原生文件选择器，按 CurseForge/Modrinth/HMCL/MMC/MCBBS/LauncherPack/Compress 分发，实际安装继续调用宿主私有安装器|2026.11.07-01:10:00|PCL2.dlswap
+3|开关|两个 hook 与 `DownloadPageRestore` 共用 `swap.download-mc`；关闭模块时文件选择器与字符串重载都调回原始副本，保留宿主法规门|2026.11.07-01:10:00|PCL2.dlswap
+4|回归|`--modpacktest` 覆盖 7 种格式、嵌套 base folder、instance/logo、文件选择器入口和禁用回退；2.99.0.0/2.99.0.1 真机文件选择器与 CurseForge LoaderCombo 启动全部 PASS|2026.11.07-01:10:00|PCL2.dlswap
 
 ---
 ## 2026.10.31-20:00:00 v26.3-Alpha 3: 英文性能、包资产与 API 1.11

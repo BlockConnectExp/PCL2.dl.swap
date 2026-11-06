@@ -26,7 +26,7 @@
 | 整合包导入与安装分发 | ✅ | ✅ | `ModpackInstall()` 文件选择器在双版本实测打开；CurseForge 在双版本进入原生 `LoaderCombo`；七种格式由 `--modpacktest` 覆盖 |
 | 静默更新拦截 | ✅ | ✅ | `ModSecret.UpdateStart` detour 安装成功 |
 | 云下载沙箱查毒 | ✅ | ✅ | `NetDownloadByLoader` 两个重载 detour 安装成功 |
-| 关于页 Swap 品牌卡 | ✅ | ✅ | 「PCL2 Swap By BlockConnect · v26.3-Alpha 3」卡片显示在关于与鸣谢顶部 |
+| 关于页 Swap 品牌卡 | ✅ | ✅ | 「PCL2 Swap By BlockConnect · v26.3-Alpha 4」卡片显示在关于与鸣谢顶部 |
 | 反馈分流（PCL2 / Swap / 取消） | ✅ | ✅ | 三个按钮完整显示，选择后才跳转对应渠道 |
 | 设置子页 Swap Addon / Swap Settings | ✅ | ✅ | 子页可打开，无「未知的设置子页面种类：101」崩溃 |
 | 内置 Addon（Download MC / OTA Protector / Cancel Button） | ✅ | ✅ | 三张卡片均为「已启用」 |

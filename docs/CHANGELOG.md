@@ -8,7 +8,7 @@
 ---
 ## 2026.11.06-23:20:00 v26.3 post-Alpha3: 恢复整合包安装（issue #1）
 
-GitCommitHash: pending
+GitCommitHash: 7b1351c
 
 ChangedFiles:
 ```

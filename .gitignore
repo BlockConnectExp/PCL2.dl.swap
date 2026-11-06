@@ -18,6 +18,7 @@ logs/
 config/swap.config.json
 test/
 .devlogs/
+_devdocs/
 
 # reverse-engineering working material (kept in the research workspace, not shipped)
 samples/

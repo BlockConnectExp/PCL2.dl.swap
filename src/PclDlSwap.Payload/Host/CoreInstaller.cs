@@ -159,7 +159,11 @@ namespace PclDlSwap.Payload.Host
                 return;
             }
 
-            if (_config.RestoreDownloadPage) DownloadPageRestore.Install(host);
+            if (_config.RestoreDownloadPage)
+            {
+                DownloadPageRestore.Install(host);
+                ModpackInstallRestore.Install(host);
+            }
             if (_config.AddAnnouncementCancel) AnnouncementGuard.Install(host);
             if (_config.RouteFeedback) FeedbackRouter.Install(host);
             if (_config.BrandAboutPage) AboutBranding.Install(host);

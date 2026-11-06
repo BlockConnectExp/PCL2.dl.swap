@@ -286,6 +286,7 @@ namespace PclDlSwap.ExLoaderHarness
             if (args.Length >= 2 && args[0] == "--addontest") return RunAddonPlatformTest(args[1]);
             if (args.Length >= 2 && args[0] == "--surfacetest") return RunSurfaceTest(args[1]);
             if (args.Length >= 2 && args[0] == "--pcltest") return RunPclAccessTest(args[1]);
+            if (args.Length >= 2 && args[0] == "--modpacktest") return RunModpackInstallRestoreTest(args[1]);
             if (args.Length >= 2 && args[0] == "--pagetest") return RunPageRegistryTest(args[1]);
             if (args.Length >= 2 && args[0] == "--safemodetest") return RunSafeModeTest(args[1]);
 
@@ -305,6 +306,7 @@ namespace PclDlSwap.ExLoaderHarness
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --addontest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --surfacetest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --pcltest <payload.dll>");
+                Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --modpacktest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --pagetest <payload.dll>");
                 Console.Error.WriteLine("   or: PclDlSwap.ExLoaderHarness --safemodetest <payload.dll>");
                 return 2;
@@ -878,6 +880,145 @@ namespace PclDlSwap.ExLoaderHarness
 
             Console.WriteLine(failures == 0 ? "[safe] RESULT: PASS" : "[safe] RESULT: FAIL (" + failures + ")");
             return failures == 0 ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Issue #1 regression: both gated ModpackInstall overloads must be restorable. The test
+        /// creates every supported pack sentinel, proves native InstallPack* dispatch, covers the
+        /// picker path, and then disables Download MC to prove the original gate returns.
+        /// </summary>
+        private static int RunModpackInstallRestoreTest(string payloadPath)
+        {
+            var full = Path.GetFullPath(payloadPath);
+            if (!File.Exists(full)) { Console.Error.WriteLine("payload not found: " + full); return 2; }
+
+            var root = Path.Combine(Path.GetTempPath(), "Pcl2SwapModpackTest-" +
+                                                        Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            Environment.SetEnvironmentVariable("PCL2SWAP_TEST", "1");
+            Environment.SetEnvironmentVariable("PCL2SWAP_DATA", Path.Combine(root, "data"));
+            Environment.SetEnvironmentVariable("PCL2SWAP_TEST_MODPACK_SYNC", "1");
+
+            var failures = 0;
+            void Expect(string label, bool ok)
+            {
+                Console.WriteLine((ok ? "[modpack] ok   " : "[modpack] FAIL ") + label);
+                if (!ok) failures++;
+            }
+
+            string CreatePack(string name, Action<ZipArchive> write)
+            {
+                var path = Path.Combine(root, name);
+                using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+                    write(zip);
+                return path;
+            }
+
+            void Write(ZipArchive zip, string name, string text)
+            {
+                var entry = zip.CreateEntry(name);
+                using (var stream = entry.Open())
+                using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+                    writer.Write(text);
+            }
+
+            try
+            {
+                var payload = Assembly.LoadFrom(full);
+                var restore = payload.GetType(
+                    "PclDlSwap.Payload.Features.ModpackInstallRestore", throwOnError: true);
+                restore.GetMethod("Install", BindingFlags.Public | BindingFlags.Static)
+                    .Invoke(null, new object[] { typeof(PCL.ModModpack).Assembly });
+                Expect("both ModpackInstall overloads were detected and hooked",
+                    Convert.ToBoolean(restore.GetProperty("PickerInstalled")
+                        ?.GetValue(null) ?? false) &&
+                    Convert.ToBoolean(restore.GetProperty("FileInstalled")
+                        ?.GetValue(null) ?? false));
+
+                var fixtures = new List<Tuple<string, string, string>>();
+                fixtures.Add(Tuple.Create("curseforge",
+                    CreatePack("curseforge.zip", zip => Write(zip, "pack/manifest.json",
+                        "{\"minecraft\":{},\"files\":[]}")), "CurseForge"));
+                fixtures.Add(Tuple.Create("modrinth",
+                    CreatePack("modrinth.mrpack", zip => Write(zip, "modrinth.index.json",
+                        "{\"dependencies\":{}}")), "Modrinth"));
+                fixtures.Add(Tuple.Create("hmcl",
+                    CreatePack("hmcl.zip", zip => Write(zip, "modpack.json", "{}")), "HMCL"));
+                fixtures.Add(Tuple.Create("mmc",
+                    CreatePack("mmc.zip", zip => Write(zip, "mmc-pack.json", "{}")), "MMC"));
+                fixtures.Add(Tuple.Create("mcbbs",
+                    CreatePack("mcbbs.zip", zip => Write(zip, "manifest.json",
+                        "{\"addons\":[],\"version\":\"1.0\"}")), "MCBBS"));
+                fixtures.Add(Tuple.Create("launcher-pack",
+                    CreatePack("launcher-pack.zip", zip => Write(zip, "pack/modpack.zip", "x")),
+                    "LauncherPack"));
+                fixtures.Add(Tuple.Create("plain-archive",
+                    CreatePack("plain.zip", zip => Write(zip, "readme.txt", "x")), "Compress"));
+
+                foreach (var fixture in fixtures)
+                {
+                    PCL.ModModpack.ResetProbe();
+                    var loader = PCL.ModModpack.ModpackInstall(fixture.Item2, "Issue1", "logo.png");
+                    Expect("native dispatch for " + fixture.Item1,
+                        fixture.Item3 == PCL.ModModpack.LastKind &&
+                        PCL.ModModpack.GatedFileCalls == 0 &&
+                        loader != null);
+                    if (fixture.Item1 == "curseforge")
+                        Expect("nested CurseForge base folder is preserved",
+                            PCL.ModModpack.LastBaseFolder == "pack/");
+                    if (fixture.Item3 == "CurseForge" || fixture.Item3 == "Modrinth")
+                        Expect("instance name and logo reach the native " + fixture.Item3 +
+                               " installer",
+                            PCL.ModModpack.LastInstanceName == "Issue1" &&
+                            PCL.ModModpack.LastLogo == "logo.png");
+                }
+
+                PCL.ModModpack.ResetProbe();
+                Environment.SetEnvironmentVariable("PCL2SWAP_TEST_MODPACK_FILE",
+                    fixtures[0].Item2);
+                PCL.ModModpack.ModpackInstall();
+                Expect("zero-argument overload opens the picker path and dispatches",
+                    PCL.ModModpack.PickerGateCalls == 0 &&
+                    PCL.ModModpack.LastKind == "CurseForge");
+
+                PCL.ModModpack.ResetProbe();
+                Environment.SetEnvironmentVariable("PCL2SWAP_TEST_MODPACK_DISABLED", "1");
+                PCL.ModModpack.ModpackInstall();
+                var disabledFileGate = false;
+                try { PCL.ModModpack.ModpackInstall(fixtures[1].Item2); }
+                catch (Exception ex) when (ContainsGate(ex))
+                {
+                    disabledFileGate = true;
+                }
+                Expect("disabling Download MC restores the host picker gate",
+                    PCL.ModModpack.PickerGateCalls == 1);
+                Expect("disabling Download MC restores the host file gate",
+                    PCL.ModModpack.GatedFileCalls == 1 && disabledFileGate);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[modpack] FAIL unexpected exception: " + ex);
+                failures++;
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PCL2SWAP_TEST_MODPACK_FILE", null);
+                Environment.SetEnvironmentVariable("PCL2SWAP_TEST_MODPACK_SYNC", null);
+                Environment.SetEnvironmentVariable("PCL2SWAP_TEST_MODPACK_DISABLED", null);
+                try { Directory.Delete(root, true); } catch { }
+            }
+
+            Console.WriteLine(failures == 0
+                ? "[modpack] RESULT: PASS"
+                : "[modpack] RESULT: FAIL (" + failures + ")");
+            return failures == 0 ? 0 : 1;
+        }
+
+        private static bool ContainsGate(Exception exception)
+        {
+            for (var current = exception; current != null; current = current.InnerException)
+                if ((current.Message ?? string.Empty).Contains("不再提供 MC 下载功能")) return true;
+            return false;
         }
 
         /// <summary>
@@ -3698,6 +3839,88 @@ namespace PCL
         }
     }
 
+    /// <summary>Stand-in for PCL.ModModpack's gated entry points and native installer dispatch.</summary>
+    public static class ModModpack
+    {
+        public static int PickerGateCalls;
+        public static int GatedFileCalls;
+        public static string LastKind;
+        public static string LastFile;
+        public static string LastBaseFolder;
+        public static string LastInstanceName;
+        public static string LastLogo;
+
+        public static void ResetProbe()
+        {
+            PickerGateCalls = 0;
+            GatedFileCalls = 0;
+            LastKind = null;
+            LastFile = null;
+            LastBaseFolder = null;
+            LastInstanceName = null;
+            LastLogo = null;
+            ModMain.HintCalls = 0;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static void ModpackInstall()
+        {
+            PickerGateCalls++;
+            ModMain.Hint("为遵守相关法律法规，PCL 暂时不再提供 MC 下载功能，非常抱歉 qwq……",
+                ModMain.HintType.Red);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static ModLoader.LoaderCombo<string> ModpackInstall(string File,
+            string InstanceName = null, string Logo = null)
+        {
+            GatedFileCalls++;
+            var marker = "为遵守相关法律法规，PCL 暂时不再提供 MC 下载功能，非常抱歉 qwq……";
+            throw new Exception(marker);
+        }
+
+        private static ModLoader.LoaderCombo<string> Capture(string kind, string file,
+            ZipArchive archive, string baseFolder, string instanceName = null, string logo = null)
+        {
+            var entry = archive?.Entries.Count ?? 0;
+            LastKind = kind;
+            LastFile = file;
+            LastBaseFolder = baseFolder;
+            LastInstanceName = instanceName;
+            LastLogo = logo;
+            return new ModLoader.LoaderCombo<string>(kind + ":" + entry);
+        }
+
+        private static ModLoader.LoaderCombo<string> InstallPackCurseForge(string File,
+            ZipArchive Archive, string ArchiveBaseFolder, string InstanceName = null,
+            string Logo = null) => Capture("CurseForge", File, Archive, ArchiveBaseFolder,
+                InstanceName, Logo);
+
+        private static ModLoader.LoaderCombo<string> InstallPackModrinth(string File,
+            ZipArchive Archive, string ArchiveBaseFolder, string InstanceName = null,
+            string Logo = null) => Capture("Modrinth", File, Archive, ArchiveBaseFolder,
+                InstanceName, Logo);
+
+        private static ModLoader.LoaderCombo<string> InstallPackHMCL(string File,
+            ZipArchive Archive, string ArchiveBaseFolder) =>
+            Capture("HMCL", File, Archive, ArchiveBaseFolder);
+
+        private static ModLoader.LoaderCombo<string> InstallPackMMC(string File,
+            ZipArchive Archive, string ArchiveBaseFolder) =>
+            Capture("MMC", File, Archive, ArchiveBaseFolder);
+
+        private static ModLoader.LoaderCombo<string> InstallPackMCBBS(string File,
+            ZipArchive Archive, string ArchiveBaseFolder, string InstanceName = null) =>
+            Capture("MCBBS", File, Archive, ArchiveBaseFolder, InstanceName);
+
+        private static ModLoader.LoaderCombo<string> InstallPackLauncherPack(string File,
+            ZipArchive Archive, string ArchiveBaseFolder) =>
+            Capture("LauncherPack", File, Archive, ArchiveBaseFolder);
+
+        private static ModLoader.LoaderCombo<string> InstallPackCompress(string File,
+            ZipArchive Archive) => Capture("Compress", File, Archive, string.Empty);
+    }
+
     /// <summary>Stand-in for PCL.ModLaunch (launch pipeline + login facts).</summary>
     public static class ModLaunch
     {
@@ -4153,6 +4376,13 @@ namespace PCL
     /// </summary>
     public static class ModMain
     {
+        public enum HintType
+        {
+            Blue = 0,
+            Green = 1,
+            Red = 2
+        }
+
         public static FormMain FrmMain = new FormMain();
 
         // Lazy page references the pollers watch (the real launcher news these up on first visit).
@@ -4165,6 +4395,15 @@ namespace PCL
         public static string LastCaption;
         public static string LastButton2;
         public static bool LastForceWait;
+        public static int HintCalls;
+        public static string LastHint;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static void Hint(string text, HintType type = HintType.Blue, bool log = true)
+        {
+            LastHint = text;
+            HintCalls++;
+        }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static int MyMsgBox(string caption, string title = "提示", string button1 = "确定",

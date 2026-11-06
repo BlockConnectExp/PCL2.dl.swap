@@ -64,6 +64,7 @@ PCL2 DLL-Swap loader (v26.3-Alpha 3)
 | Area | Behaviour before | Behaviour after |
 |---|---|---|
 | Download page | loader stub throws, page unusable | real `ModDownload.DlClientListLoader` restored |
+| Modpack import | menu picker is stubbed and drag/drop reaches a regulation exception | picker opens again; native CurseForge / Modrinth / HMCL / MMC / MCBBS / launcher-pack / archive installers dispatch normally |
 | Change game version | broken (same page, same loader) | works again |
 | Launcher OTA | silent background replacement | explicit prompt; cancel keeps the current build |
 | Auto-update permission | allowed | hard-denied |
@@ -103,6 +104,7 @@ The end-to-end check re-reads the patched file and asserts the three rewrites; s
 | `docs/architecture.md` | how loader / patcher / payload cooperate and why |
 | `docs/versioning.md` | version scheme, artifact naming, release checklist |
 | `docs/CHANGELOG.md` | per-release change log |
+| `docs/issue-pr-verify-close.zh.md` | issue triage, PR, real-host verification and auto-close loop |
 
 ## 8 Safety
 

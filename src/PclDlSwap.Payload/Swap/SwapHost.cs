@@ -149,6 +149,86 @@ namespace PclDlSwap.Payload.Swap
                     };
                     worker.Start();
                 }
+
+                var modpack = Environment.GetEnvironmentVariable("PCL2SWAP_E2E_MODPACK");
+                if (!string.IsNullOrWhiteSpace(modpack))
+                {
+                    var worker = new Thread(() =>
+                    {
+                        try { Thread.Sleep(9000); } catch { }
+                        try
+                        {
+                            SwapLog.Info("[e2e] 触发整合包安装（PCL2SWAP_E2E_MODPACK）：" + modpack);
+                            var type = HostAssembly?.GetType("PCL.ModModpack", throwOnError: false);
+                            var method = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                                          BindingFlags.Static)
+                                .FirstOrDefault(candidate =>
+                                {
+                                    var parameters = candidate.GetParameters();
+                                    return candidate.Name == "ModpackInstall" &&
+                                           parameters.Length == 3 &&
+                                           parameters.All(parameter =>
+                                               parameter.ParameterType == typeof(string));
+                                });
+                            if (method == null)
+                                throw new MissingMethodException("PCL.ModModpack", "ModpackInstall");
+                            var instanceName = Environment.GetEnvironmentVariable(
+                                "PCL2SWAP_E2E_MODPACK_NAME") ?? "Swap E2E Modpack";
+                            var result = method.Invoke(null, new object[] { modpack, instanceName, null });
+                            SwapLog.Info("[e2e] 整合包安装分发结果：" +
+                                         (result == null ? "null" :
+                                             result.GetType().FullName + " " +
+                                             PclUi.GetMember(result, "Name")));
+                        }
+                        catch (TargetInvocationException ex)
+                        {
+                            SwapLog.Error("[e2e] 整合包安装触发失败：" + (ex.InnerException ?? ex));
+                        }
+                        catch (Exception ex)
+                        {
+                            SwapLog.Error("[e2e] 整合包安装触发异常：" + ex);
+                        }
+                    })
+                    {
+                        IsBackground = true,
+                        Name = "PCL2Swap.E2eModpack"
+                    };
+                    worker.Start();
+                }
+
+                if (Environment.GetEnvironmentVariable("PCL2SWAP_E2E_MODPACK_PICKER") == "1")
+                {
+                    var worker = new Thread(() =>
+                    {
+                        try { Thread.Sleep(9000); } catch { }
+                        try
+                        {
+                            SwapLog.Info("[e2e] 打开整合包文件选择器（PCL2SWAP_E2E_MODPACK_PICKER）。");
+                            var type = HostAssembly?.GetType("PCL.ModModpack", throwOnError: false);
+                            var method = type?.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                                          BindingFlags.Static)
+                                .FirstOrDefault(candidate => candidate.Name == "ModpackInstall" &&
+                                                             candidate.GetParameters().Length == 0);
+                            if (method == null)
+                                throw new MissingMethodException("PCL.ModModpack", "ModpackInstall");
+                            PclUi.OnUiThread(() => method.Invoke(null, null));
+                            SwapLog.Info("[e2e] 整合包文件选择器已关闭。");
+                        }
+                        catch (TargetInvocationException ex)
+                        {
+                            SwapLog.Error("[e2e] 整合包文件选择器失败：" + (ex.InnerException ?? ex));
+                        }
+                        catch (Exception ex)
+                        {
+                            SwapLog.Error("[e2e] 整合包文件选择器异常：" + ex);
+                        }
+                    })
+                    {
+                        IsBackground = true,
+                        Name = "PCL2Swap.E2eModpackPicker"
+                    };
+                    worker.Start();
+                }
             }
             catch (Exception ex)
             {

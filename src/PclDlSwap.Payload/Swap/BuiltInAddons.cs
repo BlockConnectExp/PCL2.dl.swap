@@ -29,7 +29,10 @@ namespace PclDlSwap.Payload.Swap
             Context?.Api.Log($"内置 Addon 卸载：{GetType().Name}");
     }
 
-    /// <summary>Download MC — restores the vanilla download page (LoaderInit re-drive + sidebar fix).</summary>
+    /// <summary>
+    /// Download MC — restores the vanilla download page, its sidebar, and all modpack import paths
+    /// (loader re-drive, sidebar fix, file picker and ModpackInstall format dispatch).
+    /// </summary>
     internal sealed class BuiltInDownloadMcAddon : BuiltInAddonBase
     {
     }

@@ -23,6 +23,7 @@
 |---|---|---|---|
 | 下载页「原版游戏」侧栏恢复 | ✅ | ✅ | 侧栏项出现且可切换，`PageDownloadInstall.LoaderInit` 重驱成功 |
 | 下载页可用（非「关闭下载」桩） | ✅ | ✅ | 最新版本卡片/正式版/预览版等分区正常 |
+| 整合包导入与安装分发 | ✅ | ✅ | `ModpackInstall()` 文件选择器在双版本实测打开；CurseForge 在双版本进入原生 `LoaderCombo`；七种格式由 `--modpacktest` 覆盖 |
 | 静默更新拦截 | ✅ | ✅ | `ModSecret.UpdateStart` detour 安装成功 |
 | 云下载沙箱查毒 | ✅ | ✅ | `NetDownloadByLoader` 两个重载 detour 安装成功 |
 | 关于页 Swap 品牌卡 | ✅ | ✅ | 「PCL2 Swap By BlockConnect · v26.3-Alpha 3」卡片显示在关于与鸣谢顶部 |
